@@ -364,6 +364,28 @@ apt-get install -y -qq proftpd-basic proftpd-mod-mysql >> "$LOG" 2>&1
 systemctl enable proftpd >> "$LOG" 2>&1
 log "ProFTPD installed"
 
+# ── OpenDKIM ─────────────────────────────────────────────────────────────────
+step "Installing OpenDKIM"
+apt-get install -y -qq opendkim opendkim-tools >> "$LOG" 2>&1
+mkdir -p /etc/opendkim/keys
+cat >> /etc/opendkim/opendkim.conf <<DKIM
+Mode                    sv
+Canonicalization        relaxed/simple
+KeyTable                /etc/opendkim/key.table
+SigningTable            refile:/etc/opendkim/signing.table
+ExternalIgnoreList      refile:/etc/opendkim/trusted.hosts
+InternalHosts           refile:/etc/opendkim/trusted.hosts
+DKIM
+touch /etc/opendkim/key.table /etc/opendkim/signing.table
+echo "127.0.0.1\nlocalhost" > /etc/opendkim/trusted.hosts
+chown -R opendkim:opendkim /etc/opendkim
+# Wire opendkim into Postfix
+postconf -e "milter_default_action = accept" >> "$LOG" 2>&1
+postconf -e "smtpd_milters = local:/run/opendkim/opendkim.sock" >> "$LOG" 2>&1
+postconf -e "non_smtpd_milters = local:/run/opendkim/opendkim.sock" >> "$LOG" 2>&1
+systemctl enable opendkim >> "$LOG" 2>&1
+log "OpenDKIM installed"
+
 # ── SSL Certificate ───────────────────────────────────────────────────────────
 step "Generating Self-Signed SSL (Panel)"
 mkdir -p /etc/novacpx/ssl
@@ -452,10 +474,11 @@ mkdir -p "$WEB_ROOT" "$PANEL_DIR"
 
 # Install panel files from GitHub
 if [[ -d /opt/novacpx-src ]]; then
-  cp -r /opt/novacpx-src/panel/public/* "$WEB_ROOT/"
+  cp -r /opt/novacpx-src/panel/public/. "$WEB_ROOT/"
   cp -r /opt/novacpx-src/panel/api "$WEB_ROOT/api"
   cp -r /opt/novacpx-src/panel/lib "$WEB_ROOT/lib"
   cp -r /opt/novacpx-src/panel/lib /opt/novacpx/lib
+  cp /opt/novacpx-src/VERSION "$WEB_ROOT/VERSION" 2>/dev/null || true
 fi
 
 # Write config
@@ -480,7 +503,8 @@ version       = ${NOVACPX_VERSION}
 server      = ${WEB_SERVER}
 php_default = ${PHP_DEFAULT}
 CONFIG
-chmod 600 /etc/novacpx/config.ini
+chown root:www-data /etc/novacpx/config.ini
+chmod 640 /etc/novacpx/config.ini
 
 # Import database schema
 if [[ -f /opt/novacpx-src/db/schema.sql ]]; then
@@ -580,7 +604,7 @@ else
   systemctl restart apache2 >> "$LOG" 2>&1
 fi
 $INSTALL_MYSQL && systemctl restart mysql >> "$LOG" 2>&1
-systemctl restart postfix dovecot proftpd named >> "$LOG" 2>&1
+systemctl restart postfix dovecot proftpd named opendkim >> "$LOG" 2>&1
 log "All services started"
 
 # ── Done ─────────────────────────────────────────────────────────────────────

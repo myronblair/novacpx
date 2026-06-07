@@ -4,16 +4,19 @@
  * All requests: /api/{endpoint}/{action}
  */
 
-define('NOVACPX_ROOT', dirname(__DIR__, 2));
+define('NOVACPX_ROOT', dirname(__DIR__));
 define('NOVACPX_API',  __DIR__);
-define('NOVACPX_LIB',  NOVACPX_ROOT . '/panel/lib');
+define('NOVACPX_LIB',  NOVACPX_ROOT . '/lib');
 
 header('Content-Type: application/json');
-header('X-NovaCPX-Version: ' . (file_get_contents(NOVACPX_ROOT . '/VERSION') ?: '1.0.0'));
+$_ver = file_get_contents(NOVACPX_ROOT . '/VERSION')
+     ?: file_get_contents('/opt/novacpx-src/VERSION')
+     ?: '1.0.0';
+header('X-NovaCPX-Version: ' . trim($_ver));
 
-// CORS for same-origin panel requests
+// CORS for same-origin panel requests (ports 8880/8881/8882/8883)
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (preg_match('#^https?://[^/]+:2083$#', $origin)) {
+if (preg_match('#^https?://[^/]+:(888[0-3])$#', $origin)) {
     header("Access-Control-Allow-Origin: $origin");
     header('Access-Control-Allow-Credentials: true');
     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');

@@ -88,6 +88,201 @@ match ($action) {
         ]);
     })(),
 
+    // ── Check OS updates ─────────────────────────────────────────────────────
+    'check-os-update' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        shell_exec('apt-get update -qq 2>/dev/null');
+        $out = shell_exec('apt-get -s upgrade 2>/dev/null | grep "^Inst " | head -50') ?: '';
+        $packages = array_values(array_filter(array_map(function($line) {
+            if (preg_match('/^Inst (\S+).*\[(\S+)\].*\((\S+)/', $line, $m)) {
+                return ['name' => $m[1], 'from' => $m[2], 'to' => $m[3]];
+            } elseif (preg_match('/^Inst (\S+)\s+\((\S+)/', $line, $m)) {
+                return ['name' => $m[1], 'from' => '', 'to' => $m[2]];
+            }
+            return null;
+        }, explode("\n", trim($out)))));
+        $security = array_filter($packages, fn($p) => str_contains($p['name'] ?? '', 'security') ||
+            (bool)shell_exec("apt-get -s upgrade 2>/dev/null | grep -c \"^Inst {$p['name']}.*security\" 2>/dev/null"));
+        Response::success([
+            'upgradable'       => count($packages),
+            'security_updates' => count($security),
+            'packages'         => $packages,
+            'last_checked'     => date('Y-m-d H:i:s'),
+        ]);
+    })(),
+
+    // ── Apply OS update ───────────────────────────────────────────────────────
+    'apply-os-update' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+
+        $panelPorts = [PORT_USER, PORT_RESELLER, PORT_ADMIN];
+        $webSvc = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
+
+        // Snapshot service states before upgrade
+        $beforeServices = [];
+        foreach ([$webSvc, 'mysql', 'postfix', 'dovecot', 'proftpd', 'named'] as $svc) {
+            $beforeServices[$svc] = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: 'unknown');
+        }
+
+        // Backup panel web root
+        $backupDir  = '/var/novacpx/backups/pre-os-update-' . date('YmdHis');
+        $webRoot    = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
+        shell_exec("mkdir -p " . escapeshellarg($backupDir));
+        shell_exec("cp -a " . escapeshellarg($webRoot) . " " . escapeshellarg("$backupDir/public") . " 2>&1");
+
+        // Run upgrade (non-interactive, hold back kernel packages to avoid reboot surprise)
+        $env  = 'DEBIAN_FRONTEND=noninteractive';
+        $opts = '-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"';
+        $out  = shell_exec("$env apt-get upgrade -y -q $opts 2>&1");
+
+        // Self-healing: restart any service that went down
+        $healed = [];
+        sleep(3);
+        foreach ($beforeServices as $svc => $wasBefore) {
+            if ($wasBefore !== 'active') continue;
+            $nowState = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
+            if ($nowState !== 'active') {
+                shell_exec("systemctl restart $svc 2>/dev/null");
+                sleep(2);
+                $afterHeal = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
+                $healed[$svc] = $afterHeal === 'active' ? 'restarted' : 'FAILED';
+                if ($afterHeal !== 'active') {
+                    novacpx_log('error', "Self-heal FAILED for $svc after OS upgrade");
+                }
+            }
+        }
+
+        // Verify panel ports respond
+        $panelOk = [];
+        foreach ($panelPorts as $port) {
+            $resp = @fsockopen('127.0.0.1', $port, $errno, $errstr, 3);
+            $panelOk[$port] = (bool)$resp;
+            if ($resp) fclose($resp);
+        }
+        $panelDown = array_keys(array_filter($panelOk, fn($ok) => !$ok));
+
+        // If panel ports down, restore from backup and restart web server
+        if ($panelDown) {
+            shell_exec("cp -a " . escapeshellarg("$backupDir/public") . " " . escapeshellarg($webRoot) . " 2>&1");
+            shell_exec("systemctl restart $webSvc 2>/dev/null");
+            novacpx_log('error', 'Panel ports down after OS upgrade — restored from backup');
+        }
+
+        audit('system.os-update', "upgraded; healed:" . implode(',', array_keys($healed)));
+        Response::success([
+            'upgraded'         => true,
+            'panel_ports_ok'   => empty($panelDown),
+            'panel_ports_down' => $panelDown,
+            'services_healed'  => $healed,
+            'backup_path'      => $backupDir,
+            'upgrade_output'   => substr($out ?: '', -2000),
+        ]);
+    })(),
+
+    // ── Check NovaCPX update ─────────────────────────────────────────────────
+    'check-novacpx-update' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $srcDir = '/opt/novacpx-src';
+        if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
+        $out = shell_exec("git -C " . escapeshellarg($srcDir) . " fetch origin 2>&1 && git -C " . escapeshellarg($srcDir) . " log HEAD..origin/main --oneline 2>/dev/null");
+        $updates = array_values(array_filter(explode("\n", trim($out ?: ''))));
+        $branch  = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " branch --show-current 2>/dev/null") ?: 'main');
+        $commit  = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse --short HEAD 2>/dev/null") ?: '');
+        Response::success([
+            'updates_available' => count($updates),
+            'current_commit'    => $commit,
+            'branch'            => $branch,
+            'commits'           => $updates,
+        ]);
+    })(),
+
+    // ── Apply NovaCPX update ─────────────────────────────────────────────────
+    'apply-novacpx-update' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $srcDir  = '/opt/novacpx-src';
+        $webRoot = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
+        $webSvc  = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
+
+        if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
+
+        $before = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
+
+        // Backup current web root
+        $backupDir = '/var/novacpx/backups/pre-novacpx-update-' . date('YmdHis');
+        shell_exec("mkdir -p " . escapeshellarg($backupDir));
+        shell_exec("cp -a " . escapeshellarg($webRoot) . " " . escapeshellarg("$backupDir/public") . " 2>&1");
+
+        // Pull new code
+        $pull = shell_exec("git -C " . escapeshellarg($srcDir) . " pull origin main 2>&1");
+        $after = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
+        $changed = $before !== $after;
+
+        if ($changed) {
+            // Validate PHP syntax before deploying
+            $phpFiles = glob($srcDir . '/panel/**/*.php', GLOB_BRACE) ?: [];
+            $syntaxErr = [];
+            foreach ($phpFiles as $f) {
+                $check = shell_exec("php -l " . escapeshellarg($f) . " 2>&1");
+                if (!str_contains($check, 'No syntax errors')) {
+                    $syntaxErr[] = basename($f) . ': ' . trim($check);
+                }
+            }
+
+            if ($syntaxErr) {
+                // Syntax errors — abort, restore
+                shell_exec("git -C " . escapeshellarg($srcDir) . " reset --hard " . escapeshellarg($before) . " 2>&1");
+                Response::error('Update aborted — PHP syntax errors: ' . implode('; ', $syntaxErr));
+            }
+
+            // Deploy files to web root
+            shell_exec("rsync -a --delete " . escapeshellarg("$srcDir/panel/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
+            shell_exec("rsync -a " . escapeshellarg("$srcDir/panel/lib/") . " " . escapeshellarg("$webRoot/lib/") . " 2>&1");
+            shell_exec("rsync -a " . escapeshellarg("$srcDir/panel/api/") . " " . escapeshellarg("$webRoot/api/") . " 2>&1");
+            shell_exec("cp " . escapeshellarg("$srcDir/VERSION") . " " . escapeshellarg("$webRoot/VERSION") . " 2>/dev/null");
+            shell_exec("chown -R www-data:www-data " . escapeshellarg($webRoot));
+
+            // Run pending DB migrations
+            $migrDir = "$srcDir/db/migrations";
+            if (is_dir($migrDir)) {
+                foreach (glob("$migrDir/*.sql") as $sql) {
+                    $migName = basename($sql, '.sql');
+                    $already = $db->fetchOne("SELECT 1 FROM settings WHERE `key` = ?", ["migration_$migName"]);
+                    if (!$already) {
+                        $db->pdo()->exec(file_get_contents($sql));
+                        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,NOW()) ON DUPLICATE KEY UPDATE `value`=NOW()", ["migration_$migName"]);
+                    }
+                }
+            }
+
+            // Reload PHP-FPM to pick up new code
+            shell_exec("systemctl reload php8.3-fpm 2>/dev/null || true");
+
+            // Verify panel is still up
+            sleep(2);
+            $panelOk = @fsockopen('127.0.0.1', PORT_ADMIN, $e, $es, 3);
+            if (!$panelOk) {
+                // Restore backup and reload
+                shell_exec("rsync -a --delete " . escapeshellarg("$backupDir/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
+                shell_exec("systemctl reload $webSvc 2>/dev/null");
+                novacpx_log('error', "NovaCPX update failed — panel down after deploy; restored from backup");
+                Response::error('Update deployed but panel went down — auto-restored from backup. Check logs.');
+            } else {
+                fclose($panelOk);
+            }
+
+            audit('system.novacpx-update', "novacpx:$before→$after");
+            novacpx_log('info', "NovaCPX updated $before → $after");
+        }
+
+        Response::success([
+            'updated'     => $changed,
+            'from_commit' => $before,
+            'to_commit'   => $after,
+            'pull_output' => $pull,
+            'backup_path' => $backupDir,
+        ]);
+    })(),
+
     // ── Server Stats ──────────────────────────────────────────────────────────
     'stats' => (function() use ($db) {
         // CPU/load

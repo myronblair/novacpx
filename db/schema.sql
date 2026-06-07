@@ -369,4 +369,16 @@ INSERT INTO settings (`key`, `value`) VALUES
   ('git_remote',       'https://github.com/myronblair/novacpx.git')
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`);
 
+CREATE TABLE IF NOT EXISTS dkim_keys (
+  `id`               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `account_id`       INT UNSIGNED NOT NULL,
+  `domain`           VARCHAR(253) NOT NULL,
+  `selector`         VARCHAR(63)  NOT NULL DEFAULT 'mail',
+  `public_key`       TEXT         NOT NULL,
+  `private_key_path` VARCHAR(500) NOT NULL,
+  `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_domain (domain),
+  CONSTRAINT fk_dkim_acct FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET foreign_key_checks = 1;

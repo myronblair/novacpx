@@ -172,37 +172,89 @@
 
   // ── Updates ────────────────────────────────────────────────────────────────
   async function updates() {
-    const [ver, check] = await Promise.all([
+    const [ver, ncpxCheck, osCheck] = await Promise.all([
       Nova.api('system', 'version'),
-      Nova.api('system', 'check-update'),
+      Nova.api('system', 'check-novacpx-update'),
+      Nova.api('system', 'check-os-update'),
     ]);
-    const v = ver?.data || {};
-    const upd = check?.data || {};
-    const count = upd.updates_available || 0;
+    const v     = ver?.data || {};
+    const ncpx  = ncpxCheck?.data || {};
+    const os    = osCheck?.data || {};
+    const ncpxCount = ncpx.updates_available || 0;
+    const osCount   = os.upgradable || 0;
 
     return `
-<div class="card">
+<div class="page-header mb-3">
+  <h2 class="page-title">Updates</h2>
+  <p class="text-muted text-sm">Manage NovaCPX panel updates and OS package upgrades.</p>
+</div>
+
+<!-- NovaCPX Panel Updates -->
+<div class="card mb-3">
   <div class="card-header">
-    <span class="card-title">NovaCPX Updates</span>
-    ${count > 0 ? Nova.badge(count + ' update' + (count > 1 ? 's' : '') + ' available', 'yellow') : Nova.badge('Up to date', 'green')}
+    <span class="card-title">
+      <svg class="icon-sm mr-1"><use href="/assets/img/nova-icons.svg#ni-updates"/></svg>
+      NovaCPX Panel
+    </span>
+    ${ncpxCount > 0 ? Nova.badge(ncpxCount + ' commit' + (ncpxCount > 1 ? 's' : '') + ' available', 'yellow') : Nova.badge('Up to date', 'green')}
+    <button class="btn btn-ghost btn-sm ml-auto" onclick="adminPage('updates')">
+      <svg class="icon-xs"><use href="/assets/img/nova-icons.svg#ni-search"/></svg> Refresh
+    </button>
   </div>
   <div class="card-body">
-    <div class="grid-2 mb-3">
-      <div><p class="text-muted text-sm">Installed Version</p><p class="font-bold">${v.installed_version}</p></div>
-      <div><p class="text-muted text-sm">Git Commit</p><code>${v.git_commit || '—'}</code></div>
-      <div><p class="text-muted text-sm">Branch</p><code>${v.git_branch || 'main'}</code></div>
-      <div><p class="text-muted text-sm">Dirty Working Tree</p><p>${v.git_dirty ? Nova.badge('Yes','yellow') : Nova.badge('No','green')}</p></div>
+    <div class="grid-4 mb-3">
+      <div><p class="text-muted text-sm">Installed</p><p class="font-bold">${v.installed_version || '—'}</p></div>
+      <div><p class="text-muted text-sm">Commit</p><code>${ncpx.current_commit || v.git_commit || '—'}</code></div>
+      <div><p class="text-muted text-sm">Branch</p><code>${ncpx.branch || 'main'}</code></div>
+      <div><p class="text-muted text-sm">PHP</p><code>${v.php_version || '—'}</code></div>
     </div>
 
-    ${count > 0 ? `
+    ${ncpxCount > 0 ? `
     <div class="card mb-2" style="background:var(--bg3)">
       <div class="card-header"><span class="card-title">Pending Commits</span></div>
-      <div class="card-body terminal">
-        ${upd.commits?.map(c => `<div>${c}</div>`).join('') || 'None'}
+      <div class="card-body terminal" style="max-height:140px;overflow-y:auto">
+        ${ncpx.commits?.map(c => `<div>${Nova.escHtml(c)}</div>`).join('') || 'None'}
       </div>
     </div>
-    <button class="btn btn-primary" onclick="applyUpdate()">Apply Update</button>
+    <p class="text-muted text-sm mb-2">PHP syntax is validated before deploy. If the panel goes down after update, it will automatically restore from backup.</p>
+    <button class="btn btn-primary" id="ncpx-update-btn" onclick="applyNovaCPXUpdate()">
+      <svg class="icon-xs mr-1"><use href="/assets/img/nova-icons.svg#ni-updates"/></svg>
+      Update NovaCPX
+    </button>
     ` : `<p class="text-muted">NovaCPX is up to date.</p>`}
+  </div>
+</div>
+
+<!-- OS Updates -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">
+      <svg class="icon-sm mr-1"><use href="/assets/img/nova-icons.svg#ni-server"/></svg>
+      Operating System Packages
+    </span>
+    ${os.security_updates > 0 ? Nova.badge(os.security_updates + ' security', 'red') : ''}
+    ${osCount > 0 ? Nova.badge(osCount + ' upgradable', 'yellow') : Nova.badge('All current', 'green')}
+  </div>
+  <div class="card-body">
+    ${osCount > 0 ? `
+    <div class="table-wrap mb-2" style="max-height:200px;overflow-y:auto">
+      <table>
+        <thead><tr><th>Package</th><th>From</th><th>To</th></tr></thead>
+        <tbody>
+          ${os.packages?.map(p => `<tr>
+            <td><code>${Nova.escHtml(p.name)}</code></td>
+            <td class="text-muted text-sm">${Nova.escHtml(p.from || '(new)')}</td>
+            <td class="text-sm">${Nova.escHtml(p.to)}</td>
+          </tr>`).join('') || ''}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-muted text-sm mb-2">Services are automatically restarted if an upgrade stops them. The NovaCPX web root is backed up before upgrade and restored if panel ports go down.</p>
+    <button class="btn btn-warning" id="os-update-btn" onclick="applyOSUpdate()">
+      <svg class="icon-xs mr-1"><use href="/assets/img/nova-icons.svg#ni-server"/></svg>
+      Apply OS Upgrade
+    </button>
+    ` : `<p class="text-muted">All OS packages are current.</p>`}
   </div>
 </div>`;
   }
@@ -868,18 +920,49 @@
 
   // ── Global action helpers ──────────────────────────────────────────────────
   window.adminPage = (page) => Nova.loadPage(page, pages);
-  window.applyUpdate = async () => {
-    Nova.confirm('Apply all pending updates? The panel may restart.', async () => {
-      Nova.toast('Applying update…', 'info', 8000);
-      const res = await Nova.api('system', 'apply-update', { method: 'POST' });
+
+  window.applyNovaCPXUpdate = async () => {
+    Nova.confirm('Apply NovaCPX update? PHP syntax is checked first, and a backup is taken automatically. The panel will self-restore if anything breaks.', async () => {
+      const btn = document.getElementById('ncpx-update-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Updating…'; }
+      Nova.toast('Pulling update from GitHub…', 'info', 12000);
+      const res = await Nova.api('system', 'apply-novacpx-update', { method: 'POST' });
       if (res?.data?.updated) {
-        Nova.toast(`Updated to ${res.data.to_commit}`, 'success');
-        Nova.loadPage('updates', pages);
+        Nova.toast(`Updated to ${res.data.to_commit}`, 'success', 6000);
+        setTimeout(() => Nova.loadPage('updates', pages), 2000);
+      } else if (res?.error) {
+        Nova.toast(res.error, 'error', 8000);
+        if (btn) { btn.disabled = false; btn.textContent = 'Update NovaCPX'; }
       } else {
-        Nova.toast(res?.data?.pull_output || 'Already up to date', 'info');
+        Nova.toast('Already up to date.', 'info');
+        if (btn) { btn.disabled = false; btn.textContent = 'Update NovaCPX'; }
       }
     });
   };
+
+  window.applyOSUpdate = async () => {
+    Nova.confirm('Apply OS package upgrades? Services will be automatically restarted if needed. The NovaCPX panel will self-restore from backup if any ports go down.', async () => {
+      const btn = document.getElementById('os-update-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Upgrading…'; }
+      Nova.toast('Running apt-get upgrade — this may take a few minutes…', 'info', 20000);
+      const res = await Nova.api('system', 'apply-os-update', { method: 'POST', timeout: 120000 });
+      if (res?.data) {
+        const d = res.data;
+        const healed = Object.entries(d.services_healed || {}).map(([s,r]) => `${s}: ${r}`).join(', ');
+        let msg = 'OS upgrade complete.';
+        if (healed) msg += ` Auto-healed: ${healed}.`;
+        if (!d.panel_ports_ok) msg += ' ⚠ Panel ports were down — auto-restored from backup.';
+        Nova.toast(msg, d.panel_ports_ok ? 'success' : 'warning', 10000);
+        Nova.loadPage('updates', pages);
+      } else {
+        Nova.toast(res?.error || 'Upgrade failed', 'error', 8000);
+        if (btn) { btn.disabled = false; btn.textContent = 'Apply OS Upgrade'; }
+      }
+    });
+  };
+
+  // keep old alias for any lingering references
+  window.applyUpdate = window.applyNovaCPXUpdate;
   window.adminServiceAction = async (svc, cmd) => {
     const res = await Nova.api('system', 'service', { method: 'POST', body: { service: svc, command: cmd } });
     Nova.toast(`${svc}: ${cmd} → ${res?.success ? 'OK' : res?.message}`, res?.success ? 'success' : 'error');
@@ -891,9 +974,14 @@
 
   // ── Check for updates badge ────────────────────────────────────────────────
   async function checkUpdates() {
-    const res = await Nova.api('system', 'check-update');
-    const n = res?.data?.updates_available || 0;
+    const [ncpx, os] = await Promise.all([
+      Nova.api('system', 'check-novacpx-update'),
+      Nova.api('system', 'check-os-update'),
+    ]);
+    const ncpxN = ncpx?.data?.updates_available || 0;
+    const osN   = os?.data?.upgradable || 0;
+    const total = ncpxN + osN;
     const badge = document.getElementById('update-badge');
-    if (badge && n > 0) { badge.textContent = n; badge.style.display = ''; }
+    if (badge && total > 0) { badge.textContent = total; badge.style.display = ''; }
   }
 })();

@@ -55,6 +55,9 @@ class AccountManager {
         // Create DNS zone
         DNSManager::createZone($acctId, $domain);
 
+        // Auto-provision SPF, DKIM, DMARC records
+        self::provisionEmailDNS($acctId, $domain);
+
         // Create PHP-FPM pool
         PHPManager::createPool($username, $phpVer);
 
@@ -108,6 +111,72 @@ class AccountManager {
         $db->execute("DELETE FROM users WHERE id = ?", [$acct['user_id']]);
         $db->execute("DELETE FROM accounts WHERE id = ?", [$acctId]);
         novacpx_log('info', "Account terminated: {$acct['username']}");
+    }
+
+    public static function provisionEmailDNS(int $acctId, string $domain): void {
+        // Generate DKIM keypair
+        $keyDir = "/etc/opendkim/keys/{$domain}";
+        self::shell("mkdir -p " . escapeshellarg($keyDir));
+        self::shell("opendkim-genkey -b 2048 -s mail -d " . escapeshellarg($domain) . " -D " . escapeshellarg($keyDir));
+        self::shell("chown -R opendkim:opendkim " . escapeshellarg($keyDir));
+
+        // Parse public key from .txt file
+        $keyTxt = @file_get_contents("{$keyDir}/mail.txt") ?: '';
+        preg_match('/p=([A-Za-z0-9+\/=]+)/', $keyTxt, $m);
+        $pubKey = $m[1] ?? '';
+
+        if ($pubKey) {
+            // Register domain/key in opendkim tables
+            self::shell("grep -q " . escapeshellarg($domain) . " /etc/opendkim/signing.table 2>/dev/null || echo " . escapeshellarg("*@{$domain} {$domain}") . " >> /etc/opendkim/signing.table");
+            self::shell("grep -q " . escapeshellarg($domain) . " /etc/opendkim/key.table 2>/dev/null || echo " . escapeshellarg("{$domain} {$domain}:mail:{$keyDir}/mail.private") . " >> /etc/opendkim/key.table");
+            self::shell("systemctl reload opendkim 2>/dev/null || true");
+
+            // Store in DB
+            $db = DB::getInstance();
+            $db->execute(
+                "INSERT INTO dkim_keys (account_id, domain, selector, public_key, private_key_path, created_at) VALUES (?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE public_key=VALUES(public_key)",
+                [$acctId, $domain, 'mail', $pubKey, "{$keyDir}/mail.private"]
+            );
+
+            // DKIM TXT record
+            DNSManager::addRecord($acctId, $domain, 'TXT', "mail._domainkey", "v=DKIM1; k=rsa; p={$pubKey}", 300);
+        }
+
+        // SPF
+        DNSManager::addRecord($acctId, $domain, 'TXT', '@', "v=spf1 mx a ~all", 300);
+        // DMARC
+        DNSManager::addRecord($acctId, $domain, 'TXT', '_dmarc', "v=DMARC1; p=quarantine; rua=mailto:dmarc@{$domain}", 300);
+
+        novacpx_log('info', "Email DNS provisioned for $domain");
+    }
+
+    public static function rotateDKIM(int $acctId, string $domain): string {
+        $db       = DB::getInstance();
+        $selector = 'mail' . date('Ym');
+        $keyDir   = "/etc/opendkim/keys/{$domain}";
+        self::shell("mkdir -p " . escapeshellarg($keyDir));
+        self::shell("opendkim-genkey -b 2048 -s {$selector} -d " . escapeshellarg($domain) . " -D " . escapeshellarg($keyDir));
+        self::shell("chown -R opendkim:opendkim " . escapeshellarg($keyDir));
+
+        $keyTxt = @file_get_contents("{$keyDir}/{$selector}.txt") ?: '';
+        preg_match('/p=([A-Za-z0-9+\/=]+)/', $keyTxt, $m);
+        $pubKey = $m[1] ?? '';
+        if (!$pubKey) throw new RuntimeException("DKIM key generation failed");
+
+        // Update key.table
+        $keyTableLine = "{$domain} {$domain}:{$selector}:{$keyDir}/{$selector}.private";
+        self::shell("sed -i " . escapeshellarg("/^{$domain} /d") . " /etc/opendkim/key.table 2>/dev/null; echo " . escapeshellarg($keyTableLine) . " >> /etc/opendkim/key.table");
+        self::shell("systemctl reload opendkim 2>/dev/null || true");
+
+        $db->execute(
+            "INSERT INTO dkim_keys (account_id, domain, selector, public_key, private_key_path, created_at) VALUES (?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE selector=VALUES(selector), public_key=VALUES(public_key), private_key_path=VALUES(private_key_path)",
+            [$acctId, $domain, $selector, $pubKey, "{$keyDir}/{$selector}.private"]
+        );
+
+        // Add new TXT record, remove old mail._domainkey
+        DNSManager::addRecord($acctId, $domain, 'TXT', "{$selector}._domainkey", "v=DKIM1; k=rsa; p={$pubKey}", 300);
+        novacpx_log('info', "DKIM rotated for $domain, new selector: $selector");
+        return $selector;
     }
 
     public static function getDiskUsage(string $homeDir): int {
