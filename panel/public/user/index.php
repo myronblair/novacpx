@@ -72,7 +72,7 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
 </head>
 <body>
 
-<div class="panel-layout" id="app" style="display:none">
+<div class="panel-layout" id="main-layout" style="display:none">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <svg class="logo-icon" viewBox="0 0 40 40" fill="none">
@@ -86,7 +86,7 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
       </svg>
       <span class="logo-text">Nova<strong>CPX</strong></span>
     </div>
-    <nav>
+    <nav id="sidebar-nav">
       <div class="sidebar-section">
         <div class="sidebar-section-label">My Account</div>
         <a href="#" class="sidebar-link active" data-page="home">
@@ -196,9 +196,10 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
 </div>
 
 <script src="/assets/js/nova.js"></script>
+<script src="/assets/js/user.js"></script>
 <script>
 (async () => {
-  // Inline login on port 8880
+  // Legacy inline login form fallback (user.js handles auth-check div)
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
     loginForm.addEventListener('submit', async e => {
