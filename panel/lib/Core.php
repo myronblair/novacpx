@@ -22,6 +22,7 @@ define('PANEL_VER',      $_cfg['panel']['version']        ?? NOVACPX_VERSION);
 define('PORT_USER',      (int)($_cfg['panel']['port_user']     ?? 8880));
 define('PORT_RESELLER',  (int)($_cfg['panel']['port_reseller'] ?? 8881));
 define('PORT_ADMIN',     (int)($_cfg['panel']['port_admin']    ?? 8882));
+define('PORT_WEBMAIL',   (int)($_cfg['panel']['port_webmail']  ?? 8883));
 define('WEB_SERVER',     $_cfg['web']['server']           ?? 'apache');
 define('PHP_DEFAULT',    $_cfg['web']['php_default']      ?? '8.3');
 
@@ -29,7 +30,8 @@ define('PHP_DEFAULT',    $_cfg['web']['php_default']      ?? '8.3');
 $requestPort = (int)($_SERVER['SERVER_PORT'] ?? 0);
 define('CURRENT_PORTAL',
     $requestPort === PORT_ADMIN    ? 'admin'    :
-    ($requestPort === PORT_RESELLER ? 'reseller' : 'user')
+    ($requestPort === PORT_RESELLER ? 'reseller' :
+    ($requestPort === PORT_WEBMAIL  ? 'webmail'  : 'user'))
 );
 
 function novacpx_log(string $level, string $msg, array $ctx = []): void {

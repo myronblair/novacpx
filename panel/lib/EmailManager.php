@@ -1,0 +1,99 @@
+<?php
+/**
+ * EmailManager — Postfix virtual mailbox + Dovecot user management
+ * Uses MySQL backend for both Postfix and Dovecot
+ */
+class EmailManager {
+
+    public static function createAccount(int $accountId, string $email, string $password, int $quotaMb = 500): int {
+        $db    = DB::getInstance();
+        $hashed = self::hashPassword($password);
+        $id = (int)$db->insert(
+            "INSERT INTO email_accounts (account_id, email, password, quota_mb) VALUES (?,?,?,?)",
+            [$accountId, $email, $hashed, $quotaMb]
+        );
+        self::syncPostfix();
+        novacpx_log('info', "Email account created: $email");
+        return $id;
+    }
+
+    public static function deleteAccount(int $id): void {
+        $db  = DB::getInstance();
+        $acc = $db->fetchOne("SELECT email FROM email_accounts WHERE id = ?", [$id]);
+        if (!$acc) throw new RuntimeException("Email account not found");
+        $db->execute("DELETE FROM email_accounts WHERE id = ?", [$id]);
+        self::syncPostfix();
+    }
+
+    public static function changePassword(int $id, string $newPassword): void {
+        $db = DB::getInstance();
+        $db->execute("UPDATE email_accounts SET password = ? WHERE id = ?", [self::hashPassword($newPassword), $id]);
+    }
+
+    public static function suspend(int $id): void {
+        DB::getInstance()->execute("UPDATE email_accounts SET status = 'suspended' WHERE id = ?", [$id]);
+        self::syncPostfix();
+    }
+
+    public static function addForwarder(int $accountId, string $source, string $destination): int {
+        $db = DB::getInstance();
+        return (int)$db->insert(
+            "INSERT INTO email_forwarders (account_id, source, destination) VALUES (?,?,?)",
+            [$accountId, $source, $destination]
+        );
+    }
+
+    public static function removeForwarder(int $id): void {
+        DB::getInstance()->execute("DELETE FROM email_forwarders WHERE id = ?", [$id]);
+        self::syncPostfix();
+    }
+
+    public static function addAutoresponder(int $accountId, string $email, string $subject, string $body): int {
+        $db = DB::getInstance();
+        return (int)$db->insert(
+            "INSERT INTO email_autoresponders (account_id, email, subject, body, is_active) VALUES (?,?,?,?,1)",
+            [$accountId, $email, $subject, $body]
+        );
+    }
+
+    /**
+     * Sync Postfix virtual_mailbox_maps + virtual_alias_maps files from DB
+     * Postfix reads these files (postmap creates .db hash)
+     */
+    private static function syncPostfix(): void {
+        $db = DB::getInstance();
+
+        // Virtual mailbox map
+        $accounts = $db->fetchAll("SELECT ea.email, a.username FROM email_accounts ea JOIN accounts a ON a.id = ea.account_id WHERE ea.status = 'active'");
+        $mailboxes = '';
+        foreach ($accounts as $a) {
+            $domain = substr(strrchr($a['email'], '@'), 1);
+            $user   = strstr($a['email'], '@', true);
+            $mailboxes .= "{$a['email']}   {$a['username']}/{$domain}/{$user}/\n";
+        }
+        file_put_contents('/etc/postfix/novacpx_mailboxes', $mailboxes);
+        shell_exec('postmap /etc/postfix/novacpx_mailboxes 2>/dev/null');
+
+        // Virtual alias map (forwarders)
+        $forwarders = $db->fetchAll("SELECT source, destination FROM email_forwarders");
+        $aliases = '';
+        foreach ($forwarders as $f) {
+            $aliases .= "{$f['source']}   {$f['destination']}\n";
+        }
+        file_put_contents('/etc/postfix/novacpx_aliases', $aliases);
+        shell_exec('postmap /etc/postfix/novacpx_aliases 2>/dev/null');
+
+        // Virtual domains map
+        $domains = $db->fetchAll("SELECT DISTINCT SUBSTRING_INDEX(email,'@',-1) as domain FROM email_accounts WHERE status='active'");
+        $vdomains = '';
+        foreach ($domains as $d) { $vdomains .= "{$d['domain']}   novacpx\n"; }
+        file_put_contents('/etc/postfix/novacpx_domains', $vdomains);
+        shell_exec('postmap /etc/postfix/novacpx_domains 2>/dev/null');
+        shell_exec('systemctl reload postfix 2>/dev/null || true');
+    }
+
+    private static function hashPassword(string $password): string {
+        // Dovecot SHA512-CRYPT compatible
+        return '{SHA512-CRYPT}' . crypt($password, '$6$' . bin2hex(random_bytes(8)) . '$');
+    }
+}

@@ -18,6 +18,7 @@ PHP_DEFAULT="8.3"
 PORT_USER=8880       # End-user panel
 PORT_RESELLER=8881   # Reseller panel
 PORT_ADMIN=8882      # Admin / datacenter panel
+PORT_WEBMAIL=8883    # Roundcube webmail
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -114,6 +115,7 @@ NovaCPX Installation Credentials — $(date)
 User Panel:     https://$(hostname -I | awk '{print $1}'):${PORT_USER}
 Reseller Panel: https://$(hostname -I | awk '{print $1}'):${PORT_RESELLER}
 Admin Panel:    https://$(hostname -I | awk '{print $1}'):${PORT_ADMIN}
+Webmail:        https://$(hostname -I | awk '{print $1}'):${PORT_WEBMAIL}
 Admin User:     admin
 Admin Pass:     $ADMIN_PASS
 DB Name:        $DB_NAME
@@ -376,6 +378,74 @@ log "SSL certificate generated"
 apt-get install -y -qq certbot >> "$LOG" 2>&1
 log "Certbot installed for Let's Encrypt SSL"
 
+# ── Roundcube Webmail ─────────────────────────────────────────────────────────
+step "Installing Roundcube Webmail (port ${PORT_WEBMAIL})"
+apt-get install -y -qq roundcube roundcube-mysql php8.3-intl php8.3-ldap >> "$LOG" 2>&1
+RC_ROOT="/usr/share/roundcube"
+mkdir -p /etc/novacpx/roundcube
+
+# Roundcube config
+RC_DB_PASS=$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)
+mysql -e "CREATE DATABASE IF NOT EXISTS roundcube CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >> "$LOG" 2>&1
+mysql -e "CREATE USER IF NOT EXISTS 'roundcube'@'localhost' IDENTIFIED BY '${RC_DB_PASS}';" >> "$LOG" 2>&1
+mysql -e "GRANT ALL PRIVILEGES ON roundcube.* TO 'roundcube'@'localhost';" >> "$LOG" 2>&1
+mysql roundcube < /usr/share/dbconfig-common/data/roundcube/install/mysql 2>/dev/null || true
+
+cat > /etc/roundcube/config.inc.php <<RCCONF
+<?php
+\$config['db_dsnw'] = 'mysql://roundcube:${RC_DB_PASS}@localhost/roundcube';
+\$config['default_host'] = 'localhost';
+\$config['default_port'] = 143;
+\$config['smtp_server'] = 'localhost';
+\$config['smtp_port'] = 587;
+\$config['des_key'] = '$(openssl rand -base64 24 | head -c 24)';
+\$config['plugins'] = ['archive','attachment_reminder','emoticons','markasjunk','newmail_notifier','zipdownload'];
+\$config['skin'] = 'elastic';
+\$config['session_lifetime'] = 60;
+\$config['product_name'] = 'NovaCPX Webmail';
+RCCONF
+
+# Webmail vhost on port 8883
+if [[ "$WEB_SERVER" == "nginx" ]]; then
+  cat >> "$PANEL_WEB_CONF" <<WMNGX
+
+# ── Webmail (8883) ────────────────────────────────────────────────────────────
+server {
+    listen ${PORT_WEBMAIL} ssl http2;
+    server_name _;
+    root ${RC_ROOT};
+    index index.php;
+    ssl_certificate     /etc/novacpx/ssl/novacpx.crt;
+    ssl_certificate_key /etc/novacpx/ssl/novacpx.key;
+    location / { try_files \$uri \$uri/ /index.php; }
+    location ~ \.php$ { fastcgi_pass unix:/run/php/php8.3-fpm.sock; include fastcgi_params; fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name; }
+    location ~ /\.(ht|git) { deny all; }
+}
+WMNGX
+else
+  cat >> "$PANEL_WEB_CONF" <<WMAP
+
+# ── Webmail (8883) ────────────────────────────────────────────────────────────
+<VirtualHost *:${PORT_WEBMAIL}>
+    DocumentRoot ${RC_ROOT}
+    SSLEngine on
+    SSLCertificateFile    /etc/novacpx/ssl/novacpx.crt
+    SSLCertificateKeyFile /etc/novacpx/ssl/novacpx.key
+    <Directory ${RC_ROOT}>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    <FilesMatch "\.php$">
+        SetHandler "proxy:unix:/run/php/php8.3-fpm.sock|fcgi://localhost/"
+    </FilesMatch>
+    Header always set X-NovaCPX-Portal "webmail"
+</VirtualHost>
+WMAP
+fi
+
+log "Roundcube webmail installed on port ${PORT_WEBMAIL}"
+
 # ── Panel installation ────────────────────────────────────────────────────────
 step "Installing NovaCPX Panel"
 mkdir -p "$WEB_ROOT" "$PANEL_DIR"
@@ -402,6 +472,7 @@ secret        = ${SECRET_KEY}
 port_user     = ${PORT_USER}
 port_reseller = ${PORT_RESELLER}
 port_admin    = ${PORT_ADMIN}
+port_webmail  = ${PORT_WEBMAIL}
 webroot       = ${WEB_ROOT}
 version       = ${NOVACPX_VERSION}
 
@@ -435,6 +506,7 @@ ufw allow 443/tcp >> "$LOG" 2>&1   # HTTPS
 ufw allow ${PORT_USER}/tcp     >> "$LOG" 2>&1  # NovaCPX user panel
 ufw allow ${PORT_RESELLER}/tcp >> "$LOG" 2>&1  # NovaCPX reseller panel
 ufw allow ${PORT_ADMIN}/tcp    >> "$LOG" 2>&1  # NovaCPX admin panel
+ufw allow ${PORT_WEBMAIL}/tcp  >> "$LOG" 2>&1  # Roundcube webmail
 ufw allow 21/tcp >> "$LOG" 2>&1    # FTP
 ufw allow 20/tcp >> "$LOG" 2>&1    # FTP data
 ufw allow 25/tcp >> "$LOG" 2>&1    # SMTP
@@ -477,6 +549,12 @@ enabled  = true
 port     = ${PORT_ADMIN}
 logpath  = /var/log/novacpx/access.log
 maxretry = 5
+
+[novacpx-webmail]
+enabled  = true
+port     = ${PORT_WEBMAIL}
+logpath  = /var/log/novacpx/access.log
+maxretry = 10
 F2B
 systemctl enable fail2ban >> "$LOG" 2>&1
 systemctl restart fail2ban >> "$LOG" 2>&1
@@ -515,6 +593,7 @@ cat <<DONE
   ║  User Panel:     https://${SERVER_IP}:${PORT_USER}
   ║  Reseller Panel: https://${SERVER_IP}:${PORT_RESELLER}
   ║  Admin Panel:    https://${SERVER_IP}:${PORT_ADMIN}
+  ║  Webmail:        https://${SERVER_IP}:${PORT_WEBMAIL}
   ║  Username:       admin
   ║  Password:       ${ADMIN_PASS}
   ╠══════════════════════════════════════════════════════════════╣
