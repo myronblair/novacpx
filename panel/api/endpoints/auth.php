@@ -4,11 +4,15 @@ $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 
 match ($action) {
     'login' => (function() use ($body) {
-        $username = trim($body['username'] ?? '');
-        $password = $body['password'] ?? '';
+        $username  = trim($body['username'] ?? '');
+        $password  = $body['password']   ?? '';
+        $totpCode  = isset($body['totp_code']) ? trim($body['totp_code']) : null;
         if (!$username || !$password) Response::error('Username and password required');
         $auth  = Auth::getInstance();
-        $token = $auth->attempt($username, $password);
+        $token = $auth->attempt($username, $password, $totpCode);
+        if ($token === Auth::TOTP_REQUIRED) {
+            Response::json(['success' => false, 'totp_required' => true, 'message' => 'Enter your 2FA code'], 200);
+        }
         if (!$token) {
             // Log failure for Fail2Ban to detect
             $ip     = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
