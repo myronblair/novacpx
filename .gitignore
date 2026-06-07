@@ -1,0 +1,9 @@
+# NovaCPX .gitignore
+/etc/novacpx/config.ini
+panel/api/config.php
+*.log
+*.tmp
+/var/
+node_modules/
+.DS_Store
+Thumbs.db

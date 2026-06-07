@@ -1,0 +1,17 @@
+Options -Indexes
+RewriteEngine On
+
+# Route API calls
+RewriteRule ^api/(.*)$ api/index.php [QSA,L]
+
+# Panel routes — serve index.php for SPA navigation within each panel tier
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(admin|reseller|user)/.*$ $1/index.php [QSA,L]
+
+# Security headers
+Header always set X-Frame-Options "SAMEORIGIN"
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-XSS-Protection "1; mode=block"
+Header always set Referrer-Policy "strict-origin-when-cross-origin"
+Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"

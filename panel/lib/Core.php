@@ -1,0 +1,54 @@
+<?php
+/**
+ * NovaCPX Core — constants, config loader, helpers
+ */
+
+define('NOVACPX_VERSION', trim(file_get_contents(NOVACPX_ROOT . '/VERSION') ?: '1.0.0'));
+define('NOVACPX_CONFIG',  '/etc/novacpx/config.ini');
+
+// Load config
+$_cfg = parse_ini_file(NOVACPX_CONFIG, true);
+if (!$_cfg) {
+    http_response_code(503);
+    die(json_encode(['error' => 'NovaCPX not configured. Run the installer.']));
+}
+
+define('DB_HOST',    $_cfg['database']['host']   ?? 'localhost');
+define('DB_NAME',    $_cfg['database']['name']   ?? 'novacpx');
+define('DB_USER',    $_cfg['database']['user']   ?? '');
+define('DB_PASS',    $_cfg['database']['pass']   ?? '');
+define('SECRET_KEY', $_cfg['panel']['secret']    ?? '');
+define('PANEL_VER',  $_cfg['panel']['version']   ?? NOVACPX_VERSION);
+define('WEB_SERVER', $_cfg['web']['server']      ?? 'apache');
+define('PHP_DEFAULT',$_cfg['web']['php_default'] ?? '8.3');
+
+function novacpx_log(string $level, string $msg, array $ctx = []): void {
+    $line = sprintf("[%s] [%s] %s %s\n",
+        date('Y-m-d H:i:s'), strtoupper($level), $msg,
+        $ctx ? json_encode($ctx) : ''
+    );
+    file_put_contents('/var/log/novacpx/panel.log', $line, FILE_APPEND | LOCK_EX);
+}
+
+function audit(string $action, string $resource = '', array $detail = []): void {
+    try {
+        $db   = DB::getInstance();
+        $auth = Auth::getInstance();
+        $user = $auth->user();
+        $db->execute(
+            "INSERT INTO audit_log (user_id, username, action, resource, detail, ip_address, user_agent)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                $user['id'] ?? null,
+                $user['username'] ?? 'system',
+                $action,
+                $resource,
+                json_encode($detail),
+                $_SERVER['REMOTE_ADDR'] ?? '',
+                $_SERVER['HTTP_USER_AGENT'] ?? '',
+            ]
+        );
+    } catch (Throwable $e) {
+        novacpx_log('error', 'audit failed: ' . $e->getMessage());
+    }
+}
