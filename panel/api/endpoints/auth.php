@@ -31,13 +31,16 @@ match ($action) {
         Response::success(null, 'Logged out');
     })(),
 
-    'me' => (function() use ($currentUser) {
+    'me' => (function() {
+        $auth = Auth::getInstance();
+        if (!$auth->check()) Response::error('Unauthorized', 401);
+        $u = $auth->user();
         Response::success([
-            'id'       => $currentUser['uid'],
-            'username' => $currentUser['username'],
-            'email'    => $currentUser['email'],
-            'role'     => $currentUser['role'],
-            'theme'    => $currentUser['theme'],
+            'id'       => $u['uid'] ?? $u['id'],
+            'username' => $u['username'],
+            'email'    => $u['email'],
+            'role'     => $u['role'],
+            'theme'    => $u['theme'],
         ]);
     })(),
 
