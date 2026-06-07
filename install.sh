@@ -584,6 +584,19 @@ systemctl enable fail2ban >> "$LOG" 2>&1
 systemctl restart fail2ban >> "$LOG" 2>&1
 log "Fail2Ban configured"
 
+# ── Sudoers for NovaCPX panel (www-data needs root for firewall/opendkim) ────
+cat > /etc/sudoers.d/novacpx-firewall <<SUDOERS
+Defaults:www-data !requiretty
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw *
+www-data ALL=(root) NOPASSWD: /usr/bin/fail2ban-client *
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart fail2ban
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload fail2ban
+www-data ALL=(root) NOPASSWD: /bin/systemctl start fail2ban
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop fail2ban
+SUDOERS
+chmod 440 /etc/sudoers.d/novacpx-firewall
+log "Sudoers rules installed"
+
 # ── Cron jobs ─────────────────────────────────────────────────────────────────
 step "Setting Up Cron Jobs"
 cat > /etc/cron.d/novacpx <<CRON

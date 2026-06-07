@@ -11,6 +11,8 @@ $db = DB::getInstance();
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fw_exec(string $cmd): string {
+    // Prefix ufw and fail2ban-client with sudo (www-data has NOPASSWD via sudoers.d/novacpx-firewall)
+    $cmd = preg_replace('/^(ufw|fail2ban-client|systemctl (restart|reload|start|stop) fail2ban)\b/', 'sudo $1', $cmd);
     $out = shell_exec($cmd . ' 2>&1');
     return trim($out ?: '');
 }
@@ -310,7 +312,7 @@ switch ($action) {
 
     // ── Fail2Ban: restart ─────────────────────────────────────────────────
     case 'f2b-restart':
-        $out = fw_exec('systemctl restart fail2ban 2>&1');
+        $out = fw_exec('sudo systemctl restart fail2ban 2>&1');
         audit('firewall.f2b-restart', 'fail2ban');
         Response::success(['output' => $out], 'Fail2Ban restarted');
         break;
