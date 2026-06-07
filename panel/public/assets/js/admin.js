@@ -725,15 +725,17 @@
   // ── Firewall ───────────────────────────────────────────────────────────────
   // ── Firewall ───────────────────────────────────────────────────────────────
   async function firewall() {
-    const [fwRes, f2bRes, ipRes] = await Promise.all([
+    const [fwRes, f2bRes, ipRes, ignoreipRes] = await Promise.all([
       Nova.api('firewall','status'),
       Nova.api('firewall','f2b-status'),
       Nova.api('firewall','ip-lists'),
+      Nova.api('firewall','f2b-ignoreip-list'),
     ]);
-    const fw      = fwRes?.data  || {};
-    const jails   = f2bRes?.data?.jails || [];
-    const trusted = ipRes?.data?.trusted || [];
-    const blocked = ipRes?.data?.blocked || [];
+    const fw           = fwRes?.data  || {};
+    const jails        = f2bRes?.data?.jails || [];
+    const trusted      = ipRes?.data?.trusted || [];
+    const blocked      = ipRes?.data?.blocked || [];
+    const fwIgnoreips  = ignoreipRes?.data?.ignoreip || ignoreipRes?.data?.detected || [];
     const rules   = fw.rules || [];
     const active  = fw.active;
 
@@ -932,6 +934,29 @@
       </tbody>
     </table>
   </div>` : `<div class="card-body"><p class="text-muted">Fail2Ban not running or no jails configured.</p></div>`}
+</div>
+
+<!-- Fail2Ban Whitelist (ignoreip) -->
+<div class="card mb-3">
+  <div class="card-header">
+    <span class="card-title">Fail2Ban Whitelist</span>
+    <span class="text-muted text-sm ml-2">IPs that will <strong>never</strong> be banned</span>
+    <button class="btn btn-xs btn-ghost ml-auto" onclick="fwIgnoreipReset()" title="Reset to server defaults">Reset to Defaults</button>
+  </div>
+  <div class="card-body" id="ignoreip-body">
+    <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+      <input id="fw-ignoreip-input" class="form-control form-control-sm"
+        placeholder="IP or CIDR — e.g. 192.168.1.50 or 10.0.0.0/8" style="flex:1">
+      <button class="btn btn-sm btn-primary" onclick="fwIgnoreipAdd()">Add to Whitelist</button>
+    </div>
+    <div id="ignoreip-chips" style="display:flex;flex-wrap:wrap;gap:.35rem">
+      ${(fwIgnoreips||[]).map(ip => fwIgnoreipChip(ip)).join('')}
+    </div>
+    <p class="text-muted text-sm mt-2" style="font-size:.75rem">
+      Loopback (127.0.0.0/8, ::1) and the server's own LAN IPs are added automatically.
+      Add your home/office IP or subnet here so you never lock yourself out.
+    </p>
+  </div>
 </div>
 
 <!-- UFW Logging -->
@@ -1147,6 +1172,46 @@ ${ips.length ? `
     const level = document.getElementById('fw-log-level')?.value;
     const r = await Nova.api('firewall','set-logging',{method:'POST',body:{level}});
     Nova.toast(r?.message || 'Logging updated', r?.success ? 'success' : 'error');
+  };
+
+  function fwIgnoreipChip(ip) {
+    const isLoopback = ip === '127.0.0.0/8' || ip === '127.0.0.1' || ip === '::1';
+    return `<span class="badge ${isLoopback ? 'badge-blue' : 'badge-green'}" style="cursor:${isLoopback?'default':'pointer'}"
+      ${isLoopback ? '' : `onclick="fwIgnoreipRemove('${Nova.escHtml(ip)}')" title="Click to remove"`}>
+      ${Nova.escHtml(ip)}${isLoopback ? ' 🔒' : ' ×'}
+    </span>`;
+  }
+
+  window.fwIgnoreipAdd = async () => {
+    const ip = document.getElementById('fw-ignoreip-input')?.value?.trim();
+    if (!ip) { Nova.toast('Enter an IP address or CIDR range', 'error'); return; }
+    const r = await Nova.api('firewall','f2b-ignoreip-add',{method:'POST',body:{ip}});
+    Nova.toast(r?.message || (r?.success ? 'Added' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) {
+      const chips = document.getElementById('ignoreip-chips');
+      if (chips) chips.innerHTML = (r.data?.ignoreip || []).map(fwIgnoreipChip).join('');
+      const inp = document.getElementById('fw-ignoreip-input');
+      if (inp) inp.value = '';
+    }
+  };
+
+  window.fwIgnoreipRemove = async (ip) => {
+    Nova.confirm(`Remove ${ip} from Fail2Ban whitelist? They could get banned if they fail too many login attempts.`, async () => {
+      const r = await Nova.api('firewall','f2b-ignoreip-remove',{method:'POST',body:{ip}});
+      Nova.toast(r?.message || (r?.success ? 'Removed' : 'Failed'), r?.success ? 'success' : 'error');
+      if (r?.success) {
+        const chips = document.getElementById('ignoreip-chips');
+        if (chips) chips.innerHTML = (r.data?.ignoreip || []).map(fwIgnoreipChip).join('');
+      }
+    }, true);
+  };
+
+  window.fwIgnoreipReset = () => {
+    Nova.confirm('Reset Fail2Ban whitelist to server defaults (loopback + local IPs)?', async () => {
+      const r = await Nova.api('firewall','f2b-ignoreip-reset',{method:'POST'});
+      Nova.toast(r?.message || 'Reset', r?.success ? 'success' : 'error');
+      if (r?.success) adminPage('firewall');
+    });
   };
 
   // ── MySQL/DB Manager ───────────────────────────────────────────────────────

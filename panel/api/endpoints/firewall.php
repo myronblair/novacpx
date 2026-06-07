@@ -17,6 +17,61 @@ function fw_exec(string $cmd): string {
     return trim($out ?: '');
 }
 
+define('JAIL_LOCAL', '/etc/fail2ban/jail.local');
+
+/** Detect all local IPs for this server (loopback + all interface IPs + private subnets) */
+function local_ips(): array {
+    $ips = ['127.0.0.0/8', '::1'];
+    $raw = shell_exec("ip -4 addr show 2>/dev/null | grep 'inet ' | awk '{print $2}'") ?: '';
+    foreach (array_filter(explode("\n", trim($raw))) as $cidr) {
+        $cidr = trim($cidr);
+        if (!$cidr) continue;
+        // Add the specific IP
+        $ip = explode('/', $cidr)[0];
+        if (!in_array($ip, $ips)) $ips[] = $ip;
+        // If it's a private range, add the /24 subnet too
+        if (preg_match('/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/', $ip)) {
+            $parts = explode('.', $ip);
+            $subnet = $parts[0] . '.' . $parts[1] . '.' . $parts[2] . '.0/24';
+            if (!in_array($subnet, $ips)) $ips[] = $subnet;
+        }
+    }
+    return $ips;
+}
+
+/** Read ignoreip list from jail.local [DEFAULT] */
+function f2b_get_ignoreip(): array {
+    if (!file_exists(JAIL_LOCAL)) return local_ips();
+    $content = file_get_contents(JAIL_LOCAL);
+    if (preg_match('/^\s*ignoreip\s*=\s*(.+)$/m', $content, $m)) {
+        $raw = preg_replace('/\s+/', ' ', trim($m[1]));
+        return array_values(array_filter(explode(' ', $raw)));
+    }
+    return local_ips();
+}
+
+/** Write ignoreip list to jail.local and reload fail2ban */
+function f2b_set_ignoreip(array $ips): void {
+    $ips  = array_values(array_unique(array_filter($ips)));
+    $line = 'ignoreip = ' . implode(' ', $ips);
+
+    if (!file_exists(JAIL_LOCAL)) {
+        // Create jail.local with [DEFAULT] section
+        file_put_contents(JAIL_LOCAL, "[DEFAULT]\n{$line}\n\n[sshd]\nenabled = true\n");
+    } else {
+        $content = file_get_contents(JAIL_LOCAL);
+        if (preg_match('/^\s*ignoreip\s*=/m', $content)) {
+            $content = preg_replace('/^\s*ignoreip\s*=.+$/m', $line, $content);
+        } elseif (preg_match('/^\[DEFAULT\]/m', $content)) {
+            $content = preg_replace('/(\[DEFAULT\][^\[]*)/s', "$1{$line}\n", $content, 1);
+        } else {
+            $content = "[DEFAULT]\n{$line}\n\n" . $content;
+        }
+        file_put_contents(JAIL_LOCAL, $content);
+    }
+    shell_exec('sudo fail2ban-client reload 2>/dev/null');
+}
+
 /** Parse `ufw status verbose` into structured data */
 function ufw_status(): array {
     $raw    = fw_exec('ufw status verbose');
@@ -315,6 +370,54 @@ switch ($action) {
         $out = fw_exec('sudo systemctl restart fail2ban 2>&1');
         audit('firewall.f2b-restart', 'fail2ban');
         Response::success(['output' => $out], 'Fail2Ban restarted');
+        break;
+
+    // ── Fail2Ban ignoreip: list ───────────────────────────────────────────
+    case 'f2b-ignoreip-list':
+        Response::success([
+            'ignoreip'  => f2b_get_ignoreip(),
+            'detected'  => local_ips(),
+        ]);
+        break;
+
+    // ── Fail2Ban ignoreip: add ────────────────────────────────────────────
+    case 'f2b-ignoreip-add':
+        $ip = trim($body['ip'] ?? '');
+        if (!$ip) Response::error('ip required');
+        // Validate IP or CIDR
+        $base = explode('/', $ip)[0];
+        if (!filter_var($base, FILTER_VALIDATE_IP)) Response::error('Invalid IP or CIDR');
+        $list = f2b_get_ignoreip();
+        if (!in_array($ip, $list)) {
+            $list[] = $ip;
+            f2b_set_ignoreip($list);
+        }
+        audit('firewall.f2b-ignoreip-add', $ip);
+        novacpx_log('info', "Fail2Ban ignoreip added: $ip");
+        Response::success(['ignoreip' => f2b_get_ignoreip()], "$ip added to Fail2Ban whitelist");
+        break;
+
+    // ── Fail2Ban ignoreip: remove ─────────────────────────────────────────
+    case 'f2b-ignoreip-remove':
+        $ip = trim($body['ip'] ?? '');
+        if (!$ip) Response::error('ip required');
+        // Never remove loopback
+        if ($ip === '127.0.0.0/8' || $ip === '127.0.0.1' || $ip === '::1') {
+            Response::error('Cannot remove loopback address from whitelist');
+        }
+        $list = array_values(array_filter(f2b_get_ignoreip(), fn($i) => $i !== $ip));
+        f2b_set_ignoreip($list);
+        audit('firewall.f2b-ignoreip-remove', $ip);
+        novacpx_log('info', "Fail2Ban ignoreip removed: $ip");
+        Response::success(['ignoreip' => f2b_get_ignoreip()], "$ip removed from Fail2Ban whitelist");
+        break;
+
+    // ── Fail2Ban ignoreip: reset to server defaults ────────────────────────
+    case 'f2b-ignoreip-reset':
+        $defaults = local_ips();
+        f2b_set_ignoreip($defaults);
+        audit('firewall.f2b-ignoreip-reset', implode(' ', $defaults));
+        Response::success(['ignoreip' => $defaults], 'Whitelist reset to server defaults');
         break;
 
     // ── UFW: raw command (admin escape hatch) ─────────────────────────────

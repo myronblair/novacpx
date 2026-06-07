@@ -9,7 +9,16 @@ match ($action) {
         if (!$username || !$password) Response::error('Username and password required');
         $auth  = Auth::getInstance();
         $token = $auth->attempt($username, $password);
-        if (!$token) Response::error('Invalid credentials', 401);
+        if (!$token) {
+            // Log failure for Fail2Ban to detect
+            $ip     = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $port   = (int)($_SERVER['SERVER_PORT'] ?? 0);
+            $portal = $port === PORT_ADMIN ? 'admin' : ($port === PORT_RESELLER ? 'reseller' : ($port === PORT_WEBMAIL ? 'webmail' : 'user'));
+            $logLine = date('Y-m-d H:i:s') . " FAILED LOGIN from {$ip} [{$portal}] user:{$username}\n";
+            @file_put_contents('/var/log/novacpx/access.log', $logLine, FILE_APPEND | LOCK_EX);
+            novacpx_log('warn', "Failed login for '$username' from $ip");
+            Response::error('Invalid credentials', 401);
+        }
         $user = $auth->user();
         audit('login', 'auth');
         Response::success([

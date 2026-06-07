@@ -547,11 +547,30 @@ log "Firewall configured"
 
 # ── Fail2Ban ─────────────────────────────────────────────────────────────────
 step "Configuring Fail2Ban"
+
+# Auto-detect local IPs to whitelist (loopback + all private interface IPs + their /24 subnets)
+LOCAL_IPS="127.0.0.0/8 ::1"
+while read -r cidr; do
+  ip="${cidr%%/*}"
+  LOCAL_IPS="$LOCAL_IPS $ip"
+  # Add /24 subnet for private ranges
+  case "$ip" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+      subnet=$(echo "$ip" | awk -F. '{print $1"."$2"."$3".0/24"}')
+      LOCAL_IPS="$LOCAL_IPS $subnet"
+      ;;
+  esac
+done < <(ip -4 addr show 2>/dev/null | grep 'inet ' | awk '{print $2}')
+# Deduplicate
+LOCAL_IPS=$(echo "$LOCAL_IPS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+log "Fail2Ban whitelist: $LOCAL_IPS"
+
 cat > /etc/fail2ban/jail.local <<F2B
 [DEFAULT]
-bantime  = 3600
-findtime = 600
-maxretry = 5
+bantime   = 3600
+findtime  = 600
+maxretry  = 5
+ignoreip  = ${LOCAL_IPS}
 
 [sshd]
 enabled = true
@@ -580,6 +599,25 @@ port     = ${PORT_WEBMAIL}
 logpath  = /var/log/novacpx/access.log
 maxretry = 10
 F2B
+chown root:www-data /etc/fail2ban/jail.local
+chmod 664 /etc/fail2ban/jail.local
+
+# Install NovaCPX filter definitions
+for jail in novacpx-user novacpx-reseller novacpx-admin novacpx-webmail; do
+  cp /opt/novacpx-src/deploy/fail2ban/${jail}.conf /etc/fail2ban/filter.d/ 2>/dev/null || \
+  cat > /etc/fail2ban/filter.d/${jail}.conf << 'FILTER'
+[Definition]
+failregex = ^.+ FAILED LOGIN from <HOST>
+ignoreregex =
+FILTER
+done
+
+# Create NovaCPX access log writable by www-data
+mkdir -p /var/log/novacpx
+touch /var/log/novacpx/access.log
+chown www-data:www-data /var/log/novacpx/access.log
+chmod 664 /var/log/novacpx/access.log
+
 systemctl enable fail2ban >> "$LOG" 2>&1
 systemctl restart fail2ban >> "$LOG" 2>&1
 log "Fail2Ban configured"
