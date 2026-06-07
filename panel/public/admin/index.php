@@ -165,9 +165,33 @@
   </div>
 </div>
 
-<!-- Auth guard -->
-<div id="auth-check" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
-  <div style="text-align:center;color:var(--text-muted)">Verifying session…</div>
+<!-- Auth guard / Login overlay (shown when not authenticated) -->
+<div id="auth-check" style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)">
+  <div style="width:100%;max-width:400px;padding:1.5rem">
+    <div style="text-align:center;margin-bottom:1.5rem">
+      <svg viewBox="0 0 40 40" fill="none" style="width:40px;height:40px;margin:0 auto 1rem">
+        <circle cx="20" cy="20" r="18" stroke="url(#alg1)" stroke-width="2"/>
+        <path d="M12 28 L20 8 L28 28" stroke="url(#alg2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 22 H26" stroke="url(#alg2)" stroke-width="2" stroke-linecap="round"/>
+        <defs>
+          <linearGradient id="alg1" x1="2" y1="2" x2="38" y2="38"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient>
+          <linearGradient id="alg2" x1="12" y1="8" x2="28" y2="28"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient>
+        </defs>
+      </svg>
+      <div style="font-size:1.4rem;font-weight:300">Nova<strong style="font-weight:700;background:linear-gradient(135deg,#6366f1,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent">CPX</strong></div>
+      <div style="font-size:.78rem;color:var(--text-muted);margin-top:.25rem;text-transform:uppercase;letter-spacing:.1em">Admin Panel · Port 8882</div>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div id="login-err" class="alert alert-error" style="display:none"></div>
+        <form id="login-form">
+          <div class="form-group"><label>Username or Email</label><input type="text" id="l-user" autofocus required></div>
+          <div class="form-group"><label>Password</label><input type="password" id="l-pass" required></div>
+          <button type="submit" class="btn btn-primary btn-full" id="l-btn">Sign In to Admin</button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="/assets/js/nova.js"></script>

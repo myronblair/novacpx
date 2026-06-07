@@ -96,8 +96,8 @@ document.getElementById('login-form').addEventListener('submit', async e => {
     const data = await res.json();
     if (!data.success) throw new Error(data.message || 'Login failed');
 
-    const role = data.data.user.role;
-    const dest = REDIRECT || (role === 'admin' ? '/admin/' : role === 'reseller' ? '/reseller/' : '/user/');
+    // Each role redirects to its dedicated port
+    const dest = REDIRECT || data.data.portal_url || '/';
     location.href = dest;
   } catch (ex) {
     err.textContent = ex.message;

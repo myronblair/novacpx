@@ -3,9 +3,31 @@
  */
 (async () => {
   // ── Auth guard ─────────────────────────────────────────────────────────────
+  // Inline login handler on port 8882
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = document.getElementById('l-btn');
+      const err = document.getElementById('login-err');
+      btn.disabled = true; btn.textContent = 'Signing in…'; err.style.display = 'none';
+      const res = await Nova.api('auth', 'login', {
+        method: 'POST',
+        body: { username: document.getElementById('l-user').value, password: document.getElementById('l-pass').value }
+      });
+      if (res?.success && res.data?.user?.role === 'admin') {
+        location.reload();
+      } else {
+        err.textContent = res?.message || 'Invalid credentials or insufficient role';
+        err.style.display = '';
+        btn.disabled = false; btn.textContent = 'Sign In to Admin';
+      }
+    });
+  }
+
   const me = await Nova.api('auth', 'me');
   if (!me?.success || me.data.role !== 'admin') {
-    location.href = '/?redirect=/admin/';
+    // Already showing the login form in #auth-check
     return;
   }
   document.getElementById('auth-check').style.display = 'none';

@@ -13,8 +13,9 @@ match ($action) {
         $user = $auth->user();
         audit('login', 'auth');
         Response::success([
-            'token' => $token,
-            'user'  => [
+            'token'       => $token,
+            'portal_url'  => Auth::portalUrl($user['role']),
+            'user'        => [
                 'id'       => $user['id'],
                 'username' => $user['username'],
                 'email'    => $user['email'],

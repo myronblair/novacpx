@@ -13,14 +13,24 @@ if (!$_cfg) {
     die(json_encode(['error' => 'NovaCPX not configured. Run the installer.']));
 }
 
-define('DB_HOST',    $_cfg['database']['host']   ?? 'localhost');
-define('DB_NAME',    $_cfg['database']['name']   ?? 'novacpx');
-define('DB_USER',    $_cfg['database']['user']   ?? '');
-define('DB_PASS',    $_cfg['database']['pass']   ?? '');
-define('SECRET_KEY', $_cfg['panel']['secret']    ?? '');
-define('PANEL_VER',  $_cfg['panel']['version']   ?? NOVACPX_VERSION);
-define('WEB_SERVER', $_cfg['web']['server']      ?? 'apache');
-define('PHP_DEFAULT',$_cfg['web']['php_default'] ?? '8.3');
+define('DB_HOST',        $_cfg['database']['host']        ?? 'localhost');
+define('DB_NAME',        $_cfg['database']['name']        ?? 'novacpx');
+define('DB_USER',        $_cfg['database']['user']        ?? '');
+define('DB_PASS',        $_cfg['database']['pass']        ?? '');
+define('SECRET_KEY',     $_cfg['panel']['secret']         ?? '');
+define('PANEL_VER',      $_cfg['panel']['version']        ?? NOVACPX_VERSION);
+define('PORT_USER',      (int)($_cfg['panel']['port_user']     ?? 8880));
+define('PORT_RESELLER',  (int)($_cfg['panel']['port_reseller'] ?? 8881));
+define('PORT_ADMIN',     (int)($_cfg['panel']['port_admin']    ?? 8882));
+define('WEB_SERVER',     $_cfg['web']['server']           ?? 'apache');
+define('PHP_DEFAULT',    $_cfg['web']['php_default']      ?? '8.3');
+
+// Detect which portal is being accessed by the request port
+$requestPort = (int)($_SERVER['SERVER_PORT'] ?? 0);
+define('CURRENT_PORTAL',
+    $requestPort === PORT_ADMIN    ? 'admin'    :
+    ($requestPort === PORT_RESELLER ? 'reseller' : 'user')
+);
 
 function novacpx_log(string $level, string $msg, array $ctx = []): void {
     $line = sprintf("[%s] [%s] %s %s\n",

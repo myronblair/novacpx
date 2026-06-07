@@ -97,4 +97,19 @@ class Auth {
             Response::error('Forbidden', 403);
         }
     }
+
+    /**
+     * Returns the correct panel URL for a given role
+     * Used by login redirect so each role lands on the right port
+     */
+    public static function portalUrl(string $role, string $path = '/'): string {
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $hostname = preg_replace('/:\d+$/', '', $host);
+        $port = match($role) {
+            'admin'    => PORT_ADMIN,
+            'reseller' => PORT_RESELLER,
+            default    => PORT_USER,
+        };
+        return "https://{$hostname}:{$port}{$path}";
+    }
 }

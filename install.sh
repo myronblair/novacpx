@@ -14,6 +14,11 @@ DB_NAME="novacpx"
 DB_USER="novacpx_user"
 PHP_DEFAULT="8.3"
 
+# ── Panel ports (each tier has its own port) ──────────────────────────────────
+PORT_USER=8880       # End-user panel
+PORT_RESELLER=8881   # Reseller panel
+PORT_ADMIN=8882      # Admin / datacenter panel
+
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
@@ -106,12 +111,14 @@ mkdir -p /root/.novacpx
 cat > /root/.novacpx/credentials.txt <<CREDS
 NovaCPX Installation Credentials — $(date)
 ==========================================
-Panel URL:    https://$(hostname -I | awk '{print $1}'):2083
-Admin User:   admin
-Admin Pass:   $ADMIN_PASS
-DB Name:      $DB_NAME
-DB User:      $DB_USER
-DB Pass:      $DB_PASS
+User Panel:     https://$(hostname -I | awk '{print $1}'):${PORT_USER}
+Reseller Panel: https://$(hostname -I | awk '{print $1}'):${PORT_RESELLER}
+Admin Panel:    https://$(hostname -I | awk '{print $1}'):${PORT_ADMIN}
+Admin User:     admin
+Admin Pass:     $ADMIN_PASS
+DB Name:        $DB_NAME
+DB User:        $DB_USER
+DB Pass:        $DB_PASS
 ==========================================
 SAVE THIS FILE. It will not be shown again.
 CREDS
@@ -165,53 +172,131 @@ if [[ "$WEB_SERVER" == "nginx" ]]; then
   apt-get install -y -qq nginx >> "$LOG" 2>&1
   systemctl enable nginx >> "$LOG" 2>&1
   log "nginx installed"
+
   PANEL_WEB_CONF="/etc/nginx/sites-available/novacpx"
   cat > "$PANEL_WEB_CONF" <<NGXCONF
-server {
-    listen 2083 ssl http2;
-    server_name _;
-    root $WEB_ROOT;
-    index index.php;
+# NovaCPX — three panels on three dedicated ports
 
+# ── User Panel (8880) ─────────────────────────────────────────────────────────
+server {
+    listen ${PORT_USER} ssl http2;
+    server_name _;
+    root ${WEB_ROOT}/user;
+    index index.php;
     ssl_certificate     /etc/novacpx/ssl/novacpx.crt;
     ssl_certificate_key /etc/novacpx/ssl/novacpx.key;
-
     location / { try_files \$uri \$uri/ /index.php?\$query_string; }
-    location ~ \.php$ {
-        fastcgi_pass unix:/run/php/php${PHP_DEFAULT}-fpm.sock;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-    }
+    location /api/ { fastcgi_pass unix:/run/php/php${PHP_DEFAULT}-fpm.sock; include fastcgi_params; fastcgi_param SCRIPT_FILENAME ${WEB_ROOT}/api/index.php; }
+    location ~ \.php$ { fastcgi_pass unix:/run/php/php${PHP_DEFAULT}-fpm.sock; include fastcgi_params; fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name; }
+    location /assets/ { root ${WEB_ROOT}; }
+    location ~ /\.ht { deny all; }
+}
+
+# ── Reseller Panel (8881) ─────────────────────────────────────────────────────
+server {
+    listen ${PORT_RESELLER} ssl http2;
+    server_name _;
+    root ${WEB_ROOT}/reseller;
+    index index.php;
+    ssl_certificate     /etc/novacpx/ssl/novacpx.crt;
+    ssl_certificate_key /etc/novacpx/ssl/novacpx.key;
+    location / { try_files \$uri \$uri/ /index.php?\$query_string; }
+    location /api/ { fastcgi_pass unix:/run/php/php${PHP_DEFAULT}-fpm.sock; include fastcgi_params; fastcgi_param SCRIPT_FILENAME ${WEB_ROOT}/api/index.php; }
+    location ~ \.php$ { fastcgi_pass unix:/run/php/php${PHP_DEFAULT}-fpm.sock; include fastcgi_params; fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name; }
+    location /assets/ { root ${WEB_ROOT}; }
+    location ~ /\.ht { deny all; }
+}
+
+# ── Admin Panel (8882) ────────────────────────────────────────────────────────
+server {
+    listen ${PORT_ADMIN} ssl http2;
+    server_name _;
+    root ${WEB_ROOT}/admin;
+    index index.php;
+    ssl_certificate     /etc/novacpx/ssl/novacpx.crt;
+    ssl_certificate_key /etc/novacpx/ssl/novacpx.key;
+    location / { try_files \$uri \$uri/ /index.php?\$query_string; }
+    location /api/ { fastcgi_pass unix:/run/php/php${PHP_DEFAULT}-fpm.sock; include fastcgi_params; fastcgi_param SCRIPT_FILENAME ${WEB_ROOT}/api/index.php; }
+    location ~ \.php$ { fastcgi_pass unix:/run/php/php${PHP_DEFAULT}-fpm.sock; include fastcgi_params; fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name; }
+    location /assets/ { root ${WEB_ROOT}; }
     location ~ /\.ht { deny all; }
 }
 NGXCONF
   ln -sf "$PANEL_WEB_CONF" /etc/nginx/sites-enabled/novacpx
+
 else
   apt-get install -y -qq apache2 libapache2-mod-fcgid >> "$LOG" 2>&1
   a2enmod ssl rewrite proxy_fcgi setenvif headers >> "$LOG" 2>&1
   systemctl enable apache2 >> "$LOG" 2>&1
   log "Apache2 installed"
+
+  # Tell Apache to listen on all three panel ports
+  for PORT in $PORT_USER $PORT_RESELLER $PORT_ADMIN; do
+    grep -q "Listen $PORT" /etc/apache2/ports.conf 2>/dev/null || echo "Listen $PORT" >> /etc/apache2/ports.conf
+  done
+
   PANEL_WEB_CONF="/etc/apache2/sites-available/novacpx.conf"
   cat > "$PANEL_WEB_CONF" <<APCONF
-<VirtualHost *:2083>
-    DocumentRoot $WEB_ROOT
+# NovaCPX — three panels on three dedicated ports
+
+# ── User Panel (8880) ─────────────────────────────────────────────────────────
+<VirtualHost *:${PORT_USER}>
+    DocumentRoot ${WEB_ROOT}/user
     SSLEngine on
     SSLCertificateFile    /etc/novacpx/ssl/novacpx.crt
     SSLCertificateKeyFile /etc/novacpx/ssl/novacpx.key
-
-    <Directory $WEB_ROOT>
+    Alias /assets ${WEB_ROOT}/assets
+    Alias /api    ${WEB_ROOT}/api
+    <Directory ${WEB_ROOT}>
         Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
-
-    <FilesMatch "\.php$">
+    <FilesMatch "\.php\$">
         SetHandler "proxy:unix:/run/php/php${PHP_DEFAULT}-fpm.sock|fcgi://localhost/"
     </FilesMatch>
+    Header always set X-NovaCPX-Portal "user"
+</VirtualHost>
+
+# ── Reseller Panel (8881) ─────────────────────────────────────────────────────
+<VirtualHost *:${PORT_RESELLER}>
+    DocumentRoot ${WEB_ROOT}/reseller
+    SSLEngine on
+    SSLCertificateFile    /etc/novacpx/ssl/novacpx.crt
+    SSLCertificateKeyFile /etc/novacpx/ssl/novacpx.key
+    Alias /assets ${WEB_ROOT}/assets
+    Alias /api    ${WEB_ROOT}/api
+    <Directory ${WEB_ROOT}>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    <FilesMatch "\.php\$">
+        SetHandler "proxy:unix:/run/php/php${PHP_DEFAULT}-fpm.sock|fcgi://localhost/"
+    </FilesMatch>
+    Header always set X-NovaCPX-Portal "reseller"
+</VirtualHost>
+
+# ── Admin Panel (8882) ────────────────────────────────────────────────────────
+<VirtualHost *:${PORT_ADMIN}>
+    DocumentRoot ${WEB_ROOT}/admin
+    SSLEngine on
+    SSLCertificateFile    /etc/novacpx/ssl/novacpx.crt
+    SSLCertificateKeyFile /etc/novacpx/ssl/novacpx.key
+    Alias /assets ${WEB_ROOT}/assets
+    Alias /api    ${WEB_ROOT}/api
+    <Directory ${WEB_ROOT}>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    <FilesMatch "\.php\$">
+        SetHandler "proxy:unix:/run/php/php${PHP_DEFAULT}-fpm.sock|fcgi://localhost/"
+    </FilesMatch>
+    Header always set X-NovaCPX-Portal "admin"
 </VirtualHost>
 APCONF
   a2ensite novacpx >> "$LOG" 2>&1
-  # Enable PHP-FPM for default version
   a2enconf php${PHP_DEFAULT}-fpm >> "$LOG" 2>&1 || true
 fi
 
@@ -313,13 +398,15 @@ user     = ${DB_USER}
 pass     = ${DB_PASS}
 
 [panel]
-secret   = ${SECRET_KEY}
-port     = 2083
-webroot  = ${WEB_ROOT}
-version  = ${NOVACPX_VERSION}
+secret        = ${SECRET_KEY}
+port_user     = ${PORT_USER}
+port_reseller = ${PORT_RESELLER}
+port_admin    = ${PORT_ADMIN}
+webroot       = ${WEB_ROOT}
+version       = ${NOVACPX_VERSION}
 
 [web]
-server   = ${WEB_SERVER}
+server      = ${WEB_SERVER}
 php_default = ${PHP_DEFAULT}
 CONFIG
 chmod 600 /etc/novacpx/config.ini
@@ -345,7 +432,9 @@ ufw default allow outgoing >> "$LOG" 2>&1
 ufw allow ssh >> "$LOG" 2>&1
 ufw allow 80/tcp >> "$LOG" 2>&1    # HTTP
 ufw allow 443/tcp >> "$LOG" 2>&1   # HTTPS
-ufw allow 2083/tcp >> "$LOG" 2>&1  # NovaCPX panel
+ufw allow ${PORT_USER}/tcp     >> "$LOG" 2>&1  # NovaCPX user panel
+ufw allow ${PORT_RESELLER}/tcp >> "$LOG" 2>&1  # NovaCPX reseller panel
+ufw allow ${PORT_ADMIN}/tcp    >> "$LOG" 2>&1  # NovaCPX admin panel
 ufw allow 21/tcp >> "$LOG" 2>&1    # FTP
 ufw allow 20/tcp >> "$LOG" 2>&1    # FTP data
 ufw allow 25/tcp >> "$LOG" 2>&1    # SMTP
@@ -371,11 +460,23 @@ maxretry = 5
 [sshd]
 enabled = true
 
-[novacpx-panel]
+[novacpx-user]
 enabled  = true
-port     = 2083
+port     = ${PORT_USER}
 logpath  = /var/log/novacpx/access.log
 maxretry = 10
+
+[novacpx-reseller]
+enabled  = true
+port     = ${PORT_RESELLER}
+logpath  = /var/log/novacpx/access.log
+maxretry = 10
+
+[novacpx-admin]
+enabled  = true
+port     = ${PORT_ADMIN}
+logpath  = /var/log/novacpx/access.log
+maxretry = 5
 F2B
 systemctl enable fail2ban >> "$LOG" 2>&1
 systemctl restart fail2ban >> "$LOG" 2>&1
@@ -411,11 +512,13 @@ cat <<DONE
   ╔══════════════════════════════════════════════════════════════╗
   ║             NovaCPX Installation Complete!                  ║
   ╠══════════════════════════════════════════════════════════════╣
-  ║  Panel URL:   https://${SERVER_IP}:2083
-  ║  Username:    admin
-  ║  Password:    ${ADMIN_PASS}
+  ║  User Panel:     https://${SERVER_IP}:${PORT_USER}
+  ║  Reseller Panel: https://${SERVER_IP}:${PORT_RESELLER}
+  ║  Admin Panel:    https://${SERVER_IP}:${PORT_ADMIN}
+  ║  Username:       admin
+  ║  Password:       ${ADMIN_PASS}
   ╠══════════════════════════════════════════════════════════════╣
-  ║  Credentials saved to: /root/.novacpx/credentials.txt       ║
+  ║  Credentials: /root/.novacpx/credentials.txt                ║
   ║  Install log: ${LOG}
   ╚══════════════════════════════════════════════════════════════╝
 

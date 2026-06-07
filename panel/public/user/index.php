@@ -167,15 +167,61 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
   </div>
 </div>
 
-<div id="auth-check" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
-  <div style="text-align:center;color:var(--text-muted)">Loading…</div>
+<div id="auth-check" style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)">
+  <div style="width:100%;max-width:400px;padding:1.5rem">
+    <div style="text-align:center;margin-bottom:1.5rem">
+      <svg viewBox="0 0 40 40" fill="none" style="width:40px;height:40px;margin:0 auto 1rem">
+        <circle cx="20" cy="20" r="18" stroke="url(#ulg3)" stroke-width="2"/>
+        <path d="M12 28 L20 8 L28 28" stroke="url(#ulg4)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 22 H26" stroke="url(#ulg4)" stroke-width="2" stroke-linecap="round"/>
+        <defs>
+          <linearGradient id="ulg3" x1="2" y1="2" x2="38" y2="38"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient>
+          <linearGradient id="ulg4" x1="12" y1="8" x2="28" y2="28"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient>
+        </defs>
+      </svg>
+      <div style="font-size:1.4rem;font-weight:300">Nova<strong style="font-weight:700;background:linear-gradient(135deg,#6366f1,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent">CPX</strong></div>
+      <div style="font-size:.78rem;color:var(--text-muted);margin-top:.25rem;text-transform:uppercase;letter-spacing:.1em">My Hosting · Port 8880</div>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div id="login-err" class="alert alert-error" style="display:none"></div>
+        <form id="login-form">
+          <div class="form-group"><label>Username or Email</label><input type="text" id="l-user" autofocus required></div>
+          <div class="form-group"><label>Password</label><input type="password" id="l-pass" required></div>
+          <button type="submit" class="btn btn-primary btn-full" id="l-btn">Sign In</button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="/assets/js/nova.js"></script>
 <script>
 (async () => {
+  // Inline login on port 8880
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = document.getElementById('l-btn');
+      const err = document.getElementById('login-err');
+      btn.disabled = true; btn.textContent = 'Signing in…'; err.style.display = 'none';
+      const res = await Nova.api('auth', 'login', {
+        method: 'POST',
+        body: { username: document.getElementById('l-user').value, password: document.getElementById('l-pass').value }
+      });
+      if (res?.success) {
+        location.reload();
+      } else {
+        err.textContent = res?.message || 'Invalid credentials';
+        err.style.display = '';
+        btn.disabled = false; btn.textContent = 'Sign In';
+      }
+    });
+  }
+
   const me = await Nova.api('auth', 'me');
-  if (!me?.success) { location.href = '/?redirect=/user/'; return; }
+  if (!me?.success) { return; } // Login form already visible
 
   document.getElementById('auth-check').style.display = 'none';
   document.getElementById('app').style.display = '';
