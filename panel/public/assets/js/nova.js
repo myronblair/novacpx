@@ -116,10 +116,14 @@ window.Nova = (() => {
     return `<span class="service-dot ${cls}"></span>`;
   }
 
+  function escHtml(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
   // Inject global CSS animation
   const style = document.createElement('style');
   style.textContent = '@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}';
   document.head.appendChild(style);
 
-  return { api, toast, modal, confirm, initNav, loadPage, progressBar, bytes, relTime, badge, serviceDot };
+  return { api, toast, modal, confirm, initNav, loadPage, progressBar, bytes, relTime, badge, serviceDot, escHtml };
 })();

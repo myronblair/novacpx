@@ -328,7 +328,6 @@
         <div class="form-group"><label>Update Channel</label>
           <select name="update_channel"><option value="stable">Stable</option><option value="beta">Beta</option></select>
         </div>
-        <div class="form-group"><label>Git Remote</label><input type="url" name="git_remote" value="https://github.com/myronblair/novacpx.git"></div>
       </div>
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </form>
@@ -724,73 +723,430 @@
   };
 
   // ── Firewall ───────────────────────────────────────────────────────────────
+  // ── Firewall ───────────────────────────────────────────────────────────────
   async function firewall() {
-    const ufwRes = await Nova.api('system','service',{method:'POST',body:{service:'ufw',command:'status'}}).catch(()=>null);
+    const [fwRes, f2bRes, ipRes] = await Promise.all([
+      Nova.api('firewall','status'),
+      Nova.api('firewall','f2b-status'),
+      Nova.api('firewall','ip-lists'),
+    ]);
+    const fw      = fwRes?.data  || {};
+    const jails   = f2bRes?.data?.jails || [];
+    const trusted = ipRes?.data?.trusted || [];
+    const blocked = ipRes?.data?.blocked || [];
+    const rules   = fw.rules || [];
+    const active  = fw.active;
+
+    const totalBanned = jails.reduce((s,j) => s + (j.currently_banned||0), 0);
+
     return `
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
+<div class="page-header mb-3">
+  <h2 class="page-title">Firewall</h2>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    ${active ? Nova.badge('UFW Active','green') : Nova.badge('UFW Disabled','red')}
+    ${active
+      ? `<button class="btn btn-sm btn-ghost" onclick="fwToggle(false)">Disable UFW</button>`
+      : `<button class="btn btn-sm btn-primary" onclick="fwToggle(true)">Enable UFW</button>`}
+    <button class="btn btn-sm btn-ghost" onclick="adminPage('firewall')">
+      <svg class="icon-xs"><use href="/assets/img/nova-icons.svg#ni-search"/></svg> Refresh
+    </button>
+  </div>
+</div>
+
+<div class="grid-2 mb-3" style="gap:1.5rem">
+  <!-- Default Policies -->
   <div class="card">
-    <div class="card-header"><span class="card-title">UFW Firewall</span></div>
-    <div style="padding:1.25rem">
-      <div style="display:flex;gap:.5rem;margin-bottom:1rem">
-        <button class="btn btn-sm btn-primary" onclick="adminServiceAction('ufw','start')">Enable UFW</button>
-        <button class="btn btn-sm btn-danger" onclick="adminServiceAction('ufw','stop')">Disable UFW</button>
-      </div>
-      <div class="form-group"><label class="form-label">Allow Port</label>
-        <div style="display:flex;gap:.5rem">
-          <input id="fw-port" class="form-control" placeholder="e.g. 3306/tcp">
-          <button class="btn btn-sm btn-primary" onclick="adminAllowPort()">Allow</button>
+    <div class="card-header">
+      <span class="card-title">Default Policies</span>
+    </div>
+    <div class="card-body">
+      <div class="grid-2 mb-3">
+        <div>
+          <p class="text-muted text-sm">Incoming</p>
+          <select id="pol-incoming" class="form-control form-control-sm" style="width:auto">
+            ${['deny','allow','reject'].map(p=>`<option value="${p}" ${fw.default_incoming===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <p class="text-muted text-sm">Outgoing</p>
+          <select id="pol-outgoing" class="form-control form-control-sm" style="width:auto">
+            ${['allow','deny','reject'].map(p=>`<option value="${p}" ${fw.default_outgoing===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+          </select>
         </div>
       </div>
-      <div class="form-group"><label class="form-label">Block Port</label>
-        <div style="display:flex;gap:.5rem">
-          <input id="fw-block" class="form-control" placeholder="e.g. 3306/tcp">
-          <button class="btn btn-sm btn-danger" onclick="adminBlockPort()">Block</button>
-        </div>
+      <button class="btn btn-sm btn-primary" onclick="fwSavePolicies()">Save Policies</button>
+    </div>
+  </div>
+
+  <!-- Fail2Ban summary -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Fail2Ban</span>
+      ${totalBanned > 0 ? Nova.badge(totalBanned + ' banned', 'red') : Nova.badge('0 banned','green')}
+    </div>
+    <div class="card-body">
+      <div class="grid-2 mb-2">
+        <div><p class="text-muted text-sm">Active Jails</p><p class="font-bold">${jails.length}</p></div>
+        <div><p class="text-muted text-sm">Currently Banned</p><p class="font-bold">${totalBanned}</p></div>
+      </div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="btn btn-sm btn-ghost" onclick="fwF2bReload()">Reload Config</button>
+        <button class="btn btn-sm btn-ghost" onclick="fwF2bRestart()">Restart</button>
       </div>
     </div>
   </div>
+</div>
+
+<!-- UFW Rules -->
+<div class="card mb-3">
+  <div class="card-header">
+    <span class="card-title">
+      <svg class="icon-sm mr-1"><use href="/assets/img/nova-icons.svg#ni-firewall"/></svg>
+      UFW Rules
+    </span>
+    <span class="text-muted text-sm ml-2">${rules.length} rule${rules.length!==1?'s':''}</span>
+    <button class="btn btn-sm btn-primary ml-auto" onclick="fwAddRuleModal()">+ Add Rule</button>
+    <button class="btn btn-sm btn-ghost" onclick="fwResetModal()">Reset to Defaults</button>
+  </div>
+  ${rules.length ? `
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>To / Port</th><th>Action</th><th>From</th><th></th></tr></thead>
+      <tbody>
+        ${rules.map(r => `<tr>
+          <td class="text-muted text-sm">${r.num}</td>
+          <td><code>${Nova.escHtml(r.to)}</code></td>
+          <td>${fwActionBadge(r.action)}</td>
+          <td class="text-sm">${Nova.escHtml(r.from)}</td>
+          <td>
+            <button class="btn btn-xs btn-ghost" style="color:var(--red)" onclick="fwDeleteRule(${r.num})">Delete</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : `<div class="card-body"><p class="text-muted">No rules defined.</p></div>`}
+</div>
+
+<!-- Add Quick Rule (inline) -->
+<div class="card mb-3">
+  <div class="card-header"><span class="card-title">Quick Rule</span></div>
+  <div class="card-body">
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group mb-0">
+        <label class="form-label text-sm">Action</label>
+        <select id="qr-action" class="form-control form-control-sm">
+          <option value="allow">Allow</option>
+          <option value="deny">Deny</option>
+          <option value="reject">Reject</option>
+          <option value="limit">Limit</option>
+        </select>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label text-sm">Direction</label>
+        <select id="qr-dir" class="form-control form-control-sm">
+          <option value="in">In</option>
+          <option value="out">Out</option>
+        </select>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label text-sm">Port / Service</label>
+        <input id="qr-port" class="form-control form-control-sm" placeholder="80, 8000:9000, ssh…" style="width:160px">
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label text-sm">Protocol</label>
+        <select id="qr-proto" class="form-control form-control-sm">
+          <option value="tcp">TCP</option>
+          <option value="udp">UDP</option>
+          <option value="any">Any</option>
+        </select>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label text-sm">From IP (optional)</label>
+        <input id="qr-from" class="form-control form-control-sm" placeholder="any" style="width:150px">
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label text-sm">Comment</label>
+        <input id="qr-comment" class="form-control form-control-sm" placeholder="optional" style="width:140px">
+      </div>
+      <button class="btn btn-primary btn-sm mb-0" onclick="fwQuickRule()">Add Rule</button>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2 mb-3" style="gap:1.5rem">
+  <!-- Trusted IPs -->
   <div class="card">
-    <div class="card-header"><span class="card-title">Fail2Ban</span></div>
-    <div style="padding:1.25rem">
-      <div style="display:flex;gap:.5rem;margin-bottom:1rem">
-        <button class="btn btn-sm" onclick="adminServiceAction('fail2ban','restart')">Restart Fail2Ban</button>
-        <button class="btn btn-sm" onclick="adminF2bStatus()">View Jails</button>
+    <div class="card-header">
+      <span class="card-title">Trusted IPs</span>
+      <span class="text-muted text-sm ml-2">${trusted.length} IPs</span>
+    </div>
+    <div class="card-body">
+      <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+        <input id="fw-trust-ip" class="form-control form-control-sm" placeholder="IP or CIDR e.g. 192.168.1.0/24" style="flex:1">
+        <button class="btn btn-sm btn-primary" onclick="fwAllowIp()">Allow</button>
       </div>
-      <div class="form-group"><label class="form-label">Unban IP</label>
-        <div style="display:flex;gap:.5rem">
-          <input id="fw-unban" class="form-control" placeholder="192.168.1.100">
-          <button class="btn btn-sm" onclick="adminUnban()">Unban</button>
-        </div>
+      ${trusted.length ? `<div style="display:flex;flex-wrap:wrap;gap:.35rem">
+        ${trusted.map(ip => `<span class="badge badge-green" style="cursor:pointer" onclick="fwRemoveIp('${ip}','allow')" title="Click to remove">${Nova.escHtml(ip)} ×</span>`).join('')}
+      </div>` : `<p class="text-muted text-sm">No trusted IPs.</p>`}
+    </div>
+  </div>
+
+  <!-- Blocked IPs -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Blocked IPs</span>
+      <span class="text-muted text-sm ml-2">${blocked.length} IPs</span>
+    </div>
+    <div class="card-body">
+      <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+        <input id="fw-block-ip" class="form-control form-control-sm" placeholder="IP or CIDR e.g. 1.2.3.4" style="flex:1">
+        <button class="btn btn-sm" style="background:var(--red);color:#fff" onclick="fwBlockIp()">Block</button>
       </div>
+      ${blocked.length ? `<div style="display:flex;flex-wrap:wrap;gap:.35rem">
+        ${blocked.map(ip => `<span class="badge badge-red" style="cursor:pointer" onclick="fwRemoveIp('${ip}','deny')" title="Click to remove">${Nova.escHtml(ip)} ×</span>`).join('')}
+      </div>` : `<p class="text-muted text-sm">No blocked IPs.</p>`}
+    </div>
+  </div>
+</div>
+
+<!-- Fail2Ban Jails -->
+<div class="card mb-3">
+  <div class="card-header">
+    <span class="card-title">Fail2Ban Jails</span>
+  </div>
+  ${jails.length ? `
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Jail</th><th>Currently Banned</th><th>Total Banned</th><th>Failed</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${jails.map(j => `<tr>
+          <td><strong>${Nova.escHtml(j.jail)}</strong></td>
+          <td>${j.currently_banned > 0 ? `<span style="color:var(--red);font-weight:600">${j.currently_banned}</span>` : '0'}</td>
+          <td class="text-muted">${j.total_banned}</td>
+          <td class="text-muted">${j.currently_failed}</td>
+          <td style="display:flex;gap:.35rem;flex-wrap:wrap">
+            ${j.currently_banned > 0 ? `<button class="btn btn-xs btn-ghost" onclick="fwJailDetail('${j.jail}')">View Banned</button>` : ''}
+            <button class="btn btn-xs btn-ghost" onclick="fwManualBanModal('${j.jail}')">Ban IP</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : `<div class="card-body"><p class="text-muted">Fail2Ban not running or no jails configured.</p></div>`}
+</div>
+
+<!-- UFW Logging -->
+<div class="card">
+  <div class="card-header"><span class="card-title">UFW Logging</span></div>
+  <div class="card-body">
+    <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+      <div class="form-group mb-0">
+        <label class="form-label text-sm">Log Level</label>
+        <select id="fw-log-level" class="form-control form-control-sm">
+          ${['off','on','low','medium','high','full'].map(l=>`<option value="${l}">${l.charAt(0).toUpperCase()+l.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="fwSetLogging()">Apply</button>
+      <span class="text-muted text-sm">Logs at <code>/var/log/ufw.log</code></span>
     </div>
   </div>
 </div>`;
   }
-  window.adminAllowPort = async () => {
-    const port = document.getElementById('fw-port')?.value;
-    if (!port) return;
-    const r = await Nova.api('system','service',{method:'POST',body:{service:'ufw',command:`allow ${port}`}});
-    Nova.toast(r?.success ? `Allowed ${port}` : r?.message,'success');
+
+  function fwActionBadge(action) {
+    const a = (action||'').toLowerCase();
+    if (a.includes('allow')) return Nova.badge('ALLOW','green');
+    if (a.includes('deny'))  return Nova.badge('DENY','red');
+    if (a.includes('reject'))return Nova.badge('REJECT','red');
+    if (a.includes('limit')) return Nova.badge('LIMIT','yellow');
+    return `<span class="text-sm">${Nova.escHtml(action)}</span>`;
+  }
+
+  window.fwToggle = async (enable) => {
+    const label = enable ? 'Enable' : 'Disable';
+    Nova.confirm(`${label} UFW firewall?`, async () => {
+      const r = await Nova.api('firewall', enable ? 'enable' : 'disable', {method:'POST'});
+      Nova.toast(r?.message || label + 'd', r?.success ? 'success' : 'error');
+      adminPage('firewall');
+    }, !enable);
   };
-  window.adminBlockPort = async () => {
-    const port = document.getElementById('fw-block')?.value;
-    if (!port) return;
-    const r = await Nova.api('system','service',{method:'POST',body:{service:'ufw',command:`deny ${port}`}});
-    Nova.toast(r?.success ? `Blocked ${port}` : r?.message,'success');
+
+  window.fwSavePolicies = async () => {
+    const inc = document.getElementById('pol-incoming')?.value;
+    const out = document.getElementById('pol-outgoing')?.value;
+    await Nova.api('firewall','default-policy',{method:'POST',body:{direction:'incoming',policy:inc}});
+    const r2 = await Nova.api('firewall','default-policy',{method:'POST',body:{direction:'outgoing',policy:out}});
+    Nova.toast(r2?.success ? 'Policies saved' : r2?.message, r2?.success ? 'success' : 'error');
+    adminPage('firewall');
   };
-  window.adminF2bStatus = async () => {
-    const r = await Nova.api('system','service',{method:'POST',body:{service:'fail2ban-client',command:'status'}});
-    Nova.modal('Fail2Ban Jails', `<pre style="background:var(--bg);padding:1rem;border-radius:6px;font-size:.8rem;overflow:auto">${r?.data?.output || 'No output'}</pre>`);
+
+  window.fwDeleteRule = (num) => {
+    Nova.confirm(`Delete rule #${num}? This cannot be undone.`, async () => {
+      const r = await Nova.api('firewall','delete-rule',{method:'POST',body:{num}});
+      Nova.toast(r?.message || 'Deleted', r?.success ? 'success' : 'error');
+      adminPage('firewall');
+    }, true);
   };
-  window.adminUnban = async () => {
-    const ip = document.getElementById('fw-unban')?.value;
-    if (!ip) return;
-    Nova.toast(`Unbanning ${ip}…`,'info');
-    // Unban from all jails
-    for (const jail of ['sshd','novacpx-user','novacpx-admin','novacpx-reseller','novacpx-webmail']) {
-      await Nova.api('system','service',{method:'POST',body:{service:`fail2ban-client set ${jail} unbanip`,command:ip}}).catch(()=>{});
-    }
-    Nova.toast('Unban commands sent','success');
+
+  window.fwResetModal = () => {
+    Nova.confirm('Reset ALL firewall rules to NovaCPX defaults? SSH, HTTP, HTTPS, and panel ports will be re-allowed automatically.', async () => {
+      Nova.toast('Resetting firewall…','info',5000);
+      const r = await Nova.api('firewall','reset',{method:'POST'});
+      Nova.toast(r?.message || 'Reset complete','success');
+      adminPage('firewall');
+    }, true);
+  };
+
+  window.fwQuickRule = async () => {
+    const body = {
+      action:    document.getElementById('qr-action')?.value,
+      direction: document.getElementById('qr-dir')?.value,
+      port:      document.getElementById('qr-port')?.value,
+      proto:     document.getElementById('qr-proto')?.value,
+      from_ip:   document.getElementById('qr-from')?.value || 'any',
+      comment:   document.getElementById('qr-comment')?.value,
+    };
+    if (!body.port) { Nova.toast('Port/service is required','error'); return; }
+    const r = await Nova.api('firewall','add-rule',{method:'POST',body});
+    Nova.toast(r?.message || (r?.success ? 'Rule added' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('firewall');
+  };
+
+  window.fwAddRuleModal = () => {
+    Nova.modal('Add Firewall Rule',`
+<div class="form-group"><label>Action</label>
+  <select id="m-action" class="form-control">
+    <option value="allow">Allow</option><option value="deny">Deny</option>
+    <option value="reject">Reject</option><option value="limit">Limit (rate-limit)</option>
+  </select></div>
+<div class="form-group"><label>Direction</label>
+  <select id="m-dir" class="form-control">
+    <option value="in">Incoming</option><option value="out">Outgoing</option>
+  </select></div>
+<div class="form-group"><label>Port / Service</label>
+  <input id="m-port" class="form-control" placeholder="e.g. 443, 8000:9000, ssh, smtp"></div>
+<div class="form-group"><label>Protocol</label>
+  <select id="m-proto" class="form-control">
+    <option value="tcp">TCP</option><option value="udp">UDP</option><option value="any">Any</option>
+  </select></div>
+<div class="form-group"><label>From IP / CIDR (leave blank for any)</label>
+  <input id="m-from" class="form-control" placeholder="any  or  192.168.1.0/24"></div>
+<div class="form-group"><label>To IP / CIDR (leave blank for any)</label>
+  <input id="m-to" class="form-control" placeholder="any"></div>
+<div class="form-group"><label>Comment</label>
+  <input id="m-comment" class="form-control" placeholder="optional description"></div>
+`,`<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+   <button class="btn btn-primary" onclick="fwSubmitAddRule()">Add Rule</button>`);
+  };
+
+  window.fwSubmitAddRule = async () => {
+    const body = {
+      action:    document.getElementById('m-action')?.value,
+      direction: document.getElementById('m-dir')?.value,
+      port:      document.getElementById('m-port')?.value,
+      proto:     document.getElementById('m-proto')?.value,
+      from_ip:   document.getElementById('m-from')?.value || 'any',
+      to_ip:     document.getElementById('m-to')?.value   || 'any',
+      comment:   document.getElementById('m-comment')?.value,
+    };
+    if (!body.port) { Nova.toast('Port is required','error'); return; }
+    document.querySelector('.modal-overlay')?.remove();
+    const r = await Nova.api('firewall','add-rule',{method:'POST',body});
+    Nova.toast(r?.message || (r?.success ? 'Rule added' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('firewall');
+  };
+
+  window.fwAllowIp = async () => {
+    const ip = document.getElementById('fw-trust-ip')?.value?.trim();
+    if (!ip) { Nova.toast('Enter an IP or CIDR','error'); return; }
+    const r = await Nova.api('firewall','allow-ip',{method:'POST',body:{ip}});
+    Nova.toast(r?.message || (r?.success ? 'IP allowed' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('firewall');
+  };
+
+  window.fwBlockIp = async () => {
+    const ip = document.getElementById('fw-block-ip')?.value?.trim();
+    if (!ip) { Nova.toast('Enter an IP or CIDR','error'); return; }
+    Nova.confirm(`Block ${ip}? This will deny all incoming traffic from this address.`, async () => {
+      const r = await Nova.api('firewall','block-ip',{method:'POST',body:{ip}});
+      Nova.toast(r?.message || (r?.success ? 'IP blocked' : 'Failed'), r?.success ? 'success' : 'error');
+      if (r?.success) adminPage('firewall');
+    }, true);
+  };
+
+  window.fwRemoveIp = (ip, action) => {
+    Nova.confirm(`Remove ${action} rule for ${ip}?`, async () => {
+      const r = await Nova.api('firewall','remove-ip',{method:'POST',body:{ip,action}});
+      Nova.toast(r?.message || 'Removed', r?.success ? 'success' : 'error');
+      if (r?.success) adminPage('firewall');
+    }, true);
+  };
+
+  window.fwJailDetail = async (jail) => {
+    const r = await Nova.api('firewall','f2b-jail',{method:'POST',body:{jail}});
+    const d = r?.data || {};
+    const ips = d.banned_ips || [];
+    Nova.modal(`Fail2Ban: ${jail}`,`
+<div class="grid-2 mb-2" style="gap:.75rem">
+  <div><p class="text-muted text-sm">Currently Banned</p><p class="font-bold">${d.currently_banned}</p></div>
+  <div><p class="text-muted text-sm">Total Banned</p><p class="font-bold">${d.total_banned}</p></div>
+</div>
+${ips.length ? `
+<table style="width:100%;font-size:.85rem">
+  <thead><tr><th style="text-align:left;padding:.35rem .5rem">Banned IP</th><th></th></tr></thead>
+  <tbody>
+    ${ips.map(ip=>`<tr>
+      <td style="padding:.3rem .5rem"><code>${Nova.escHtml(ip)}</code></td>
+      <td style="padding:.3rem .5rem;text-align:right">
+        <button class="btn btn-xs btn-primary" onclick="fwUnbanIp('${Nova.escHtml(ip)}','${jail}',this)">Unban</button>
+      </td>
+    </tr>`).join('')}
+  </tbody>
+</table>` : '<p class="text-muted">No IPs currently banned in this jail.</p>'}`);
+  };
+
+  window.fwUnbanIp = async (ip, jail, btn) => {
+    if (btn) btn.disabled = true;
+    const r = await Nova.api('firewall','f2b-unban',{method:'POST',body:{ip,jail}});
+    Nova.toast(r?.message || 'Unbanned', r?.success ? 'success' : 'error');
+    if (r?.success && btn) btn.closest('tr')?.remove();
+  };
+
+  window.fwManualBanModal = (jail) => {
+    Nova.modal(`Manual Ban — ${jail}`,`
+<div class="form-group">
+  <label>IP Address to Ban</label>
+  <input id="mb-ip" class="form-control" placeholder="1.2.3.4" autofocus>
+</div>`,`
+<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+<button class="btn" style="background:var(--red);color:#fff" onclick="fwSubmitManualBan('${jail}')">Ban IP</button>`);
+  };
+
+  window.fwSubmitManualBan = async (jail) => {
+    const ip = document.getElementById('mb-ip')?.value?.trim();
+    if (!ip) { Nova.toast('Enter an IP','error'); return; }
+    document.querySelector('.modal-overlay')?.remove();
+    const r = await Nova.api('firewall','f2b-ban',{method:'POST',body:{ip,jail}});
+    Nova.toast(r?.message || (r?.success ? 'Banned' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('firewall');
+  };
+
+  window.fwF2bReload = async () => {
+    const r = await Nova.api('firewall','f2b-reload',{method:'POST'});
+    Nova.toast(r?.message || 'Reloaded', r?.success ? 'success' : 'error');
+  };
+
+  window.fwF2bRestart = async () => {
+    Nova.confirm('Restart Fail2Ban? Active bans will be preserved.', async () => {
+      const r = await Nova.api('firewall','f2b-restart',{method:'POST'});
+      Nova.toast(r?.message || 'Restarted', r?.success ? 'success' : 'error');
+      adminPage('firewall');
+    });
+  };
+
+  window.fwSetLogging = async () => {
+    const level = document.getElementById('fw-log-level')?.value;
+    const r = await Nova.api('firewall','set-logging',{method:'POST',body:{level}});
+    Nova.toast(r?.message || 'Logging updated', r?.success ? 'success' : 'error');
   };
 
   // ── MySQL/DB Manager ───────────────────────────────────────────────────────
