@@ -26,7 +26,6 @@ class DNSManager {
             ['www',  'A',   $ip,          3600, null],
             ['mail', 'A',   $ip,          3600, null],
             ['@',    'MX',  "mail.{$domain}.", 3600, 10],
-            ['@',    'TXT', "v=spf1 a mx ~all", 3600, null],
         ];
         foreach ($defaults as [$name, $type, $content, $ttl, $prio]) {
             $db->execute(
@@ -127,13 +126,14 @@ class DNSManager {
 
         // Include in main named.conf if not already there
         $mainConf = '/etc/bind/named.conf';
-        if (file_exists($mainConf) && !str_contains(file_get_contents($mainConf), 'named.conf.novacpx')) {
-            file_put_contents($mainConf, "\ninclude \"" . self::$namedConf . "\";\n", FILE_APPEND);
+        if (file_exists($mainConf) && !str_contains(file_get_contents($mainConf) ?: '', 'named.conf.novacpx')) {
+            $line = "\ninclude \"" . self::$namedConf . "\";\n";
+            shell_exec("echo " . escapeshellarg($line) . " | sudo tee -a {$mainConf} > /dev/null 2>&1");
         }
     }
 
     private static function reloadBind(): void {
-        shell_exec("rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || true");
+        shell_exec("sudo rndc reload 2>/dev/null || sudo systemctl reload named 2>/dev/null || sudo systemctl reload bind9 2>/dev/null || true");
     }
 
     private static function serverIp(): string {

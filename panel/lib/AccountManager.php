@@ -28,9 +28,9 @@ class AccountManager {
         // Create Linux user
         self::shell("useradd -m -d {$homeDir} -s /sbin/nologin -G www-data " . escapeshellarg($username));
         self::shell("echo " . escapeshellarg("{$username}:{$password}") . " | chpasswd");
-        self::shell("mkdir -p {$docRoot} {$homeDir}/logs {$homeDir}/tmp");
-        self::shell("chown -R {$username}:www-data {$homeDir}");
-        self::shell("chmod 750 {$homeDir}; chmod 755 {$docRoot}");
+        self::shell("sudo mkdir -p {$docRoot} {$homeDir}/logs {$homeDir}/tmp");
+        self::shell("sudo chown -R {$username}:www-data {$homeDir}");
+        self::shell("sudo chmod 750 {$homeDir}"); self::shell("sudo chmod 775 {$docRoot}");
 
         // Default index page
         file_put_contents("{$docRoot}/index.html",
@@ -116,9 +116,9 @@ class AccountManager {
     public static function provisionEmailDNS(int $acctId, string $domain): void {
         // Generate DKIM keypair
         $keyDir = "/etc/opendkim/keys/{$domain}";
-        self::shell("mkdir -p " . escapeshellarg($keyDir));
+        self::shell("sudo mkdir -p " . escapeshellarg($keyDir));
         self::shell("opendkim-genkey -b 2048 -s mail -d " . escapeshellarg($domain) . " -D " . escapeshellarg($keyDir));
-        self::shell("chown -R opendkim:opendkim " . escapeshellarg($keyDir));
+        self::shell("sudo chown -R opendkim:opendkim " . escapeshellarg($keyDir));
 
         // Parse public key from .txt file
         $keyTxt = @file_get_contents("{$keyDir}/mail.txt") ?: '';
@@ -139,13 +139,17 @@ class AccountManager {
             );
 
             // DKIM TXT record
-            DNSManager::addRecord($acctId, $domain, 'TXT', "mail._domainkey", "v=DKIM1; k=rsa; p={$pubKey}", 300);
+            $zoneRow = DB::getInstance()->fetchOne("SELECT id FROM dns_zones WHERE account_id=? AND domain=?", [$acctId, $domain]);
+            if ($zoneRow) DNSManager::addRecord((int)$zoneRow['id'], 'mail._domainkey', 'TXT', "v=DKIM1; k=rsa; p={$pubKey}", 300);
         }
 
-        // SPF
-        DNSManager::addRecord($acctId, $domain, 'TXT', '@', "v=spf1 mx a ~all", 300);
-        // DMARC
-        DNSManager::addRecord($acctId, $domain, 'TXT', '_dmarc', "v=DMARC1; p=quarantine; rua=mailto:dmarc@{$domain}", 300);
+        // SPF + DMARC — look up zone once
+        $db2     = DB::getInstance();
+        $zoneRow = $zoneRow ?? $db2->fetchOne("SELECT id FROM dns_zones WHERE account_id=? AND domain=?", [$acctId, $domain]);
+        if ($zoneRow) {
+            DNSManager::addRecord((int)$zoneRow['id'], '@',      'TXT', "v=spf1 mx a ~all", 3600);
+            DNSManager::addRecord((int)$zoneRow['id'], '_dmarc', 'TXT', "v=DMARC1; p=quarantine; rua=mailto:dmarc@{$domain}", 3600);
+        }
 
         novacpx_log('info', "Email DNS provisioned for $domain");
     }
@@ -154,9 +158,9 @@ class AccountManager {
         $db       = DB::getInstance();
         $selector = 'mail' . date('Ym');
         $keyDir   = "/etc/opendkim/keys/{$domain}";
-        self::shell("mkdir -p " . escapeshellarg($keyDir));
+        self::shell("sudo mkdir -p " . escapeshellarg($keyDir));
         self::shell("opendkim-genkey -b 2048 -s {$selector} -d " . escapeshellarg($domain) . " -D " . escapeshellarg($keyDir));
-        self::shell("chown -R opendkim:opendkim " . escapeshellarg($keyDir));
+        self::shell("sudo chown -R opendkim:opendkim " . escapeshellarg($keyDir));
 
         $keyTxt = @file_get_contents("{$keyDir}/{$selector}.txt") ?: '';
         preg_match('/p=([A-Za-z0-9+\/=]+)/', $keyTxt, $m);
@@ -174,7 +178,8 @@ class AccountManager {
         );
 
         // Add new TXT record, remove old mail._domainkey
-        DNSManager::addRecord($acctId, $domain, 'TXT', "{$selector}._domainkey", "v=DKIM1; k=rsa; p={$pubKey}", 300);
+        $zoneRow = $db->fetchOne("SELECT id FROM dns_zones WHERE account_id=? AND domain=?", [$acctId, $domain]);
+        if ($zoneRow) DNSManager::addRecord((int)$zoneRow['id'], "{$selector}._domainkey", 'TXT', "v=DKIM1; k=rsa; p={$pubKey}", 300);
         novacpx_log('info', "DKIM rotated for $domain, new selector: $selector");
         return $selector;
     }
@@ -185,6 +190,12 @@ class AccountManager {
     }
 
     private static function shell(string $cmd): string {
+        // Prefix privileged commands with sudo so www-data can run them
+        $privileged = ['useradd','userdel','usermod','chpasswd','a2ensite','a2dissite','apache2ctl','certbot','opendkim-genkey','rndc','named-checkzone','systemctl'];
+        $cmdBase    = explode(' ', ltrim($cmd))[0];
+        foreach ($privileged as $p) {
+            if (str_ends_with($cmdBase, $p) || $cmdBase === $p) { $cmd = 'sudo ' . $cmd; break; }
+        }
         $out = shell_exec($cmd . ' 2>&1');
         novacpx_log('debug', "shell: $cmd");
         return $out ?: '';
