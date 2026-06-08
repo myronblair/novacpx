@@ -76,17 +76,17 @@ match ($action) {
         $pkg = $db->fetchOne("SELECT * FROM packages WHERE id = ?", [$acct['package_id'] ?? 0]);
 
         Response::success([
-            'disk_mb'     => $diskMB,
-            'disk_limit'  => $pkg['disk_mb'] ?? 0,
-            'inodes'      => $inodes,
-            'databases'   => $dbCount,
-            'db_limit'    => $pkg['databases'] ?? 0,
-            'emails'      => $emailCount,
-            'email_limit' => $pkg['email_accounts'] ?? 0,
-            'ftp'         => $ftpCount,
-            'ftp_limit'   => $pkg['ftp_accounts'] ?? 0,
-            'domains'     => $domCount,
-            'subdomain_limit' => $pkg['subdomains'] ?? 0,
+            'disk_mb'         => $diskMB,
+            'disk_limit'      => $pkg['disk_mb']         ?? 0,
+            'inodes'          => $inodes,
+            'databases'       => $dbCount,
+            'db_limit'        => $pkg['max_databases']   ?? 0,
+            'emails'          => $emailCount,
+            'email_limit'     => $pkg['max_email']       ?? 0,
+            'ftp'             => $ftpCount,
+            'ftp_limit'       => $pkg['max_ftp']         ?? 0,
+            'domains'         => $domCount,
+            'subdomain_limit' => $pkg['max_subdomains']  ?? 0,
         ]);
     })(),
 

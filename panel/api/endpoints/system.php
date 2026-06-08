@@ -349,5 +349,43 @@ match ($action) {
         Response::paginate($rows, (int)$total, $page, $perPage);
     })(),
 
+    // ── Server Options (#22a-e) ───────────────────────────────────────────────
+    'server-options' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $keys = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname'];
+        $opts = [];
+        foreach ($db->fetchAll("SELECT `key`,`value` FROM settings WHERE `key` IN ('" . implode("','", $keys) . "')") as $r) {
+            $opts[$r['key']] = $r['value'];
+        }
+        // Detect actually-running services
+        $opts['apache_active']   = !empty(trim(shell_exec('systemctl is-active apache2 2>/dev/null') ?: '')) && trim(shell_exec('systemctl is-active apache2 2>/dev/null')) === 'active';
+        $opts['nginx_active']    = trim(shell_exec('systemctl is-active nginx 2>/dev/null') ?: '') === 'active';
+        $opts['proftpd_active']  = trim(shell_exec('systemctl is-active proftpd 2>/dev/null') ?: '') === 'active';
+        $opts['vsftpd_active']   = trim(shell_exec('systemctl is-active vsftpd 2>/dev/null') ?: '') === 'active';
+        $opts['pureftpd_active'] = trim(shell_exec('systemctl is-active pure-ftpd 2>/dev/null') ?: '') === 'active';
+        $opts['bind9_active']    = trim(shell_exec('systemctl is-active named 2>/dev/null || systemctl is-active bind9 2>/dev/null') ?: '') === 'active';
+        $opts['powerdns_active'] = trim(shell_exec('systemctl is-active pdns 2>/dev/null') ?: '') === 'active';
+        Response::success($opts);
+    })(),
+
+    'save-option' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $key   = $body['key']   ?? '';
+        $value = $body['value'] ?? '';
+        $allowed = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname'];
+        if (!in_array($key, $allowed)) Response::error("Invalid setting key: $key");
+        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$key, $value]);
+
+        // For server switches, run install/reload scripts
+        if (in_array($key, ['web_server','ftp_server','dns_server','mail_server'])) {
+            $script = "/opt/novacpx/bin/switch-{$key}.sh";
+            if (is_executable($script)) {
+                shell_exec("sudo {$script} " . escapeshellarg($value) . " > /var/log/novacpx/switch-{$key}.log 2>&1 &");
+            }
+        }
+        audit("settings.{$key}", $value);
+        Response::success(null, "Setting saved: {$key} = {$value}");
+    })(),
+
     default => Response::error("Unknown system action: $action", 404),
 };

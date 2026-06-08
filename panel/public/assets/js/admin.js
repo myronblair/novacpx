@@ -98,6 +98,7 @@
     updates,
     backups,
     cloudflare,
+    'server-options': serverOptions,
     settings,
   };
 
@@ -182,29 +183,81 @@
 
   // ── Server Status ──────────────────────────────────────────────────────────
   async function serverStatus() {
-    const res = await Nova.api('system', 'stats');
-    const s = res?.data || {};
-    return `
+    const [liveRes, histRes] = await Promise.all([
+      Nova.api('system', 'stats'),
+      Nova.api('stats', 'server'),
+    ]);
+    const s    = liveRes?.data || {};
+    const hist = histRes?.data?.history || [];
+
+    const html = `
+<div class="page-header"><h2 class="page-title">Server Status</h2>
+  <button class="btn btn-ghost btn-sm" onclick="adminPage('server-status')">↻ Refresh</button>
+</div>
+<div class="stats-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card"><div class="stat-label">CPU</div><div class="stat-value ${(s.cpu?.pct||0)>80?'stat-red':'stat-green'}">${s.cpu?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.cpu?.pct||0)}</div></div>
+  <div class="stat-card"><div class="stat-label">RAM</div><div class="stat-value ${(s.ram?.pct||0)>80?'stat-red':'stat-blue'}">${s.ram?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.ram?.pct||0)}</div></div>
+  <div class="stat-card"><div class="stat-label">Disk</div><div class="stat-value ${(s.disk?.pct||0)>85?'stat-red':'stat-yellow'}">${s.disk?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.disk?.pct||0)}</div></div>
+  <div class="stat-card"><div class="stat-label">Load Avg</div><div class="stat-value" style="font-size:1rem;padding-top:.4rem">${(s.cpu?.load||[0]).map(v=>v.toFixed(2)).join(' / ')}</div><div class="stat-sub">Uptime: ${s.uptime||'—'}</div></div>
+</div>
 <div class="card">
-  <div class="card-header"><span class="card-title">Real-Time Server Status</span>
-    <button class="btn btn-ghost btn-sm" onclick="adminPage('server-status')">&#x21bb; Refresh</button>
-  </div>
+  <div class="card-header"><span class="card-title">24-Hour History</span><span class="text-muted" style="font-size:.8rem">${hist.length} samples</span></div>
   <div class="card-body">
-    <div class="grid-3">
-      <div><p class="text-muted text-sm mb-1">CPU</p><h2>${s.cpu?.pct}%</h2>${Nova.progressBar(s.cpu?.pct||0)}</div>
-      <div><p class="text-muted text-sm mb-1">RAM</p><h2>${s.ram?.pct}%</h2>${Nova.progressBar(s.ram?.pct||0)}</div>
-      <div><p class="text-muted text-sm mb-1">Disk</p><h2>${s.disk?.pct}%</h2>${Nova.progressBar(s.disk?.pct||0)}</div>
-    </div>
-    <div class="mt-3">
-      <p class="text-muted text-sm mb-1">Load Average</p>
-      <p>${(s.cpu?.load||[]).join(' / ')}</p>
-    </div>
-    <div class="mt-3">
-      <p class="text-muted text-sm mb-1">Uptime</p>
-      <p>${s.uptime}</p>
-    </div>
+    ${hist.length === 0
+      ? '<p class="text-muted" style="text-align:center;padding:2rem">No history yet — stats are collected every 5 minutes.<br>Check that the collector cron is running: <code>*/5 * * * * root /usr/bin/php /opt/novacpx/bin/collect-stats.php</code></p>'
+      : '<canvas id="stats-chart" height="80"></canvas>'}
   </div>
 </div>`;
+
+    // Can't return html and async render chart — use a trick: render then init chart
+    setTimeout(() => {
+      const canvas = document.getElementById('stats-chart');
+      if (!canvas || !hist.length) return;
+      if (!window.Chart) {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+        s.onload = () => initStatsChart(canvas, hist);
+        document.head.appendChild(s);
+      } else {
+        initStatsChart(canvas, hist);
+      }
+    }, 100);
+
+    return html;
+  }
+
+  function initStatsChart(canvas, hist) {
+    const labels = hist.map(r => {
+      const d = new Date(r.recorded_at);
+      return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+    });
+    const step = Math.max(1, Math.floor(labels.length / 24));
+    const sparse = labels.map((l,i) => i % step === 0 ? l : '');
+
+    new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: sparse,
+        datasets: [
+          { label: 'CPU %',  data: hist.map(r=>parseFloat(r.cpu_usage||0)),  borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.1)', tension:.3, pointRadius:0, fill:true },
+          { label: 'RAM %',  data: hist.map(r=>parseFloat(r.ram_usage||0)),  borderColor:'#0ea5e9', backgroundColor:'rgba(14,165,233,.1)',  tension:.3, pointRadius:0, fill:true },
+          { label: 'Disk %', data: hist.map(r=>parseFloat(r.disk_usage||0)), borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.08)', tension:.3, pointRadius:0, fill:true },
+        ],
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        interaction: { mode:'index', intersect:false },
+        scales: {
+          x: { grid:{ color:'rgba(255,255,255,.05)' }, ticks:{ color:'#8b92a5', maxRotation:0 } },
+          y: { min:0, max:100, grid:{ color:'rgba(255,255,255,.05)' }, ticks:{ color:'#8b92a5', callback: v=>v+'%' } },
+        },
+        plugins: {
+          legend: { labels:{ color:'#e2e4f0', font:{ size:12 } } },
+          tooltip: { callbacks:{ label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%` } },
+        },
+      },
+    });
   }
 
   // ── Updates ────────────────────────────────────────────────────────────────
@@ -2526,4 +2579,183 @@ window.dockerQuotaModal = (userId, username) => {
     const r = await Nova.api('docker', 'quota-set', { method: 'POST', body: { user_id: uid, max_containers: cnt, max_memory_mb: mem, max_cpus: cpus } });
     Nova.toast(r?.success ? 'Quota saved' : (r?.message||'Failed'), r?.success?'success':'error');
   };
+};
+
+// ── #22a-e Server Options ──────────────────────────────────────────────────
+async function serverOptions() {
+  const r = await Nova.api('system', 'server-options');
+  const opts = r?.data || {};
+
+  return `
+<div class="page-header"><h2 class="page-title">Server Options</h2></div>
+
+<div class="grid-2 gap-2" style="margin-bottom:1.5rem">
+
+  <!-- Web Server (#22d) -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">Web Server</span>${Nova.badge(opts.web_server||'apache','green')}</div>
+    <div class="card-body">
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">Current web server for hosting accounts. Changing requires migration of all vhosts.</p>
+      <div class="form-group">
+        <label>Active Web Server</label>
+        <select id="so-web" class="form-control">
+          ${['apache','nginx','openlitespeed','caddy'].map(s=>`<option value="${s}" ${s===(opts.web_server||'apache')?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="soSave('web_server','so-web','Web server')">Save & Switch</button>
+    </div>
+  </div>
+
+  <!-- Mail Server (#22c) -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">Mail Server</span>${Nova.badge(opts.mail_server||'postfix-dovecot','green')}</div>
+    <div class="card-body">
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">Mail stack for all hosted domains.</p>
+      <div class="form-group">
+        <label>Mail Stack</label>
+        <select id="so-mail" class="form-control">
+          <option value="postfix-dovecot" ${opts.mail_server==='postfix-dovecot'?'selected':''}>Postfix + Dovecot</option>
+          <option value="postfix-dovecot-rspamd" ${opts.mail_server==='postfix-dovecot-rspamd'?'selected':''}>Postfix + Dovecot + Rspamd (spam filter)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="soSave('mail_server','so-mail','Mail server')">Save & Switch</button>
+    </div>
+  </div>
+
+  <!-- FTP Server (#22a) -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">FTP Server</span>${Nova.badge(opts.ftp_server||'proftpd','green')}</div>
+    <div class="card-body">
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">FTP server for hosting account file transfers.</p>
+      <div class="form-group">
+        <label>FTP Server</label>
+        <select id="so-ftp" class="form-control">
+          <option value="proftpd"  ${opts.ftp_server==='proftpd'?'selected':''}>ProFTPD (default)</option>
+          <option value="vsftpd"   ${opts.ftp_server==='vsftpd'?'selected':''}>vsftpd</option>
+          <option value="pureftpd" ${opts.ftp_server==='pureftpd'?'selected':''}>Pure-FTPd</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="soSave('ftp_server','so-ftp','FTP server')">Save & Switch</button>
+    </div>
+  </div>
+
+  <!-- DNS Server (#22e) -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">DNS Server</span>${Nova.badge(opts.dns_server||'bind9','green')}</div>
+    <div class="card-body">
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">DNS server for authoritative name service.</p>
+      <div class="form-group">
+        <label>DNS Server</label>
+        <select id="so-dns" class="form-control">
+          <option value="bind9"    ${opts.dns_server==='bind9'?'selected':''}>BIND9 (default)</option>
+          <option value="powerdns" ${opts.dns_server==='powerdns'?'selected':''}>PowerDNS</option>
+          <option value="nsd"      ${opts.dns_server==='nsd'?'selected':''}>NSD</option>
+          <option value="none"     ${opts.dns_server==='none'?'selected':''}>No local DNS (external API)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="soSave('dns_server','so-dns','DNS server')">Save & Switch</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- WHMCS Bridge (#22b) -->
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">
+    <span class="card-title">WHMCS Billing Bridge</span>
+    ${opts.whmcs_enabled==='1' ? Nova.badge('Enabled','green') : Nova.badge('Disabled','red')}
+  </div>
+  <div class="card-body">
+    <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">
+      Enable the WHMCS provisioning API so WHMCS can create, suspend, unsuspend, and terminate accounts automatically.
+      Use the API URL below in your WHMCS server module configuration.
+    </p>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>WHMCS API Key</label>
+        <div style="display:flex;gap:.5rem">
+          <input id="so-whmcs-key" type="text" class="form-control" value="${Nova.escHtml(opts.whmcs_api_key||'')}" placeholder="Generate a random key">
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('so-whmcs-key').value=Array.from(crypto.getRandomValues(new Uint8Array(24)),b=>b.toString(16).padStart(2,'0')).join('')">Generate</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>WHMCS Enabled</label>
+        <select id="so-whmcs-enabled" class="form-control">
+          <option value="0" ${opts.whmcs_enabled!=='1'?'selected':''}>Disabled</option>
+          <option value="1" ${opts.whmcs_enabled==='1'?'selected':''}>Enabled</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Provisioning API URL (set this in WHMCS server module)</label>
+      <input type="text" class="form-control" readonly value="${location.protocol}//${location.hostname}:${location.port}/api/whmcs/create" onclick="this.select()">
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="soSaveWhmcs()">Save WHMCS Settings</button>
+  </div>
+</div>
+
+<!-- NS Health Checker (#22e) -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Nameserver Health</span>
+    <button class="btn btn-sm btn-ghost" onclick="soCheckNS()">Check All</button>
+  </div>
+  <div class="card-body">
+    <div class="grid-2" style="margin-bottom:1rem">
+      <div class="form-group">
+        <label>NS1 Hostname</label>
+        <input id="so-ns1" class="form-control" value="${Nova.escHtml(opts.ns1_hostname||'')}" placeholder="ns1.yourdomain.com">
+      </div>
+      <div class="form-group">
+        <label>NS2 Hostname</label>
+        <input id="so-ns2" class="form-control" value="${Nova.escHtml(opts.ns2_hostname||'')}" placeholder="ns2.yourdomain.com">
+      </div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="soSaveNS()">Save Nameservers</button>
+    <div id="so-ns-results" style="margin-top:1rem"></div>
+  </div>
+</div>`;
+}
+
+window.soSave = async (key, inputId, label) => {
+  const val = document.getElementById(inputId)?.value;
+  if (!val) return;
+  Nova.confirm(`Switch ${label} to "${val}"? This will run install/migration scripts on the server.`, async () => {
+    const r = await Nova.api('system', 'save-option', { method:'POST', body:{ key, value: val } });
+    Nova.toast(r?.success ? `${label} updated` : (r?.message||'Failed'), r?.success?'success':'error');
+    if (r?.success) Nova.loadPage('server-options', window._novaPages);
+  }, true);
+};
+
+window.soSaveWhmcs = async () => {
+  const key     = document.getElementById('so-whmcs-key')?.value?.trim();
+  const enabled = document.getElementById('so-whmcs-enabled')?.value;
+  const r1 = await Nova.api('system', 'save-option', { method:'POST', body:{ key:'whmcs_api_key', value:key } });
+  const r2 = await Nova.api('system', 'save-option', { method:'POST', body:{ key:'whmcs_enabled', value:enabled } });
+  Nova.toast((r1?.success && r2?.success) ? 'WHMCS settings saved' : 'Save failed', (r1?.success && r2?.success)?'success':'error');
+};
+
+window.soSaveNS = async () => {
+  const ns1 = document.getElementById('so-ns1')?.value?.trim();
+  const ns2 = document.getElementById('so-ns2')?.value?.trim();
+  await Nova.api('system', 'save-option', { method:'POST', body:{ key:'ns1_hostname', value:ns1 } });
+  await Nova.api('system', 'save-option', { method:'POST', body:{ key:'ns2_hostname', value:ns2 } });
+  Nova.toast('Nameservers saved', 'success');
+};
+
+window.soCheckNS = async () => {
+  const tc = document.getElementById('so-ns-results');
+  if (!tc) return;
+  tc.innerHTML = '<div class="loading">Checking NS records…</div>';
+  const r = await Nova.api('dns', 'ns-health');
+  const results = r?.data?.results || [];
+  if (!results.length) { tc.innerHTML = '<p class="text-muted">No zones to check, or DNS manager not configured.</p>'; return; }
+  tc.innerHTML = `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Domain</th><th>NS1</th><th>NS2</th><th>Status</th></tr></thead><tbody>
+${results.map(z=>`<tr>
+  <td>${Nova.escHtml(z.domain)}</td>
+  <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(z.ns1||'—')}</td>
+  <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(z.ns2||'—')}</td>
+  <td>${z.ok ? Nova.badge('OK','green') : Nova.badge('Mismatch','red')}</td>
+</tr>`).join('')}
+</tbody></table></div>`;
 };

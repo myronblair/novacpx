@@ -19,6 +19,12 @@ match ($action) {
 
     'create' => (function() use ($db, $body, $accountId) {
         if (!$accountId) Response::error("account_id required");
+        // Package limit check
+        $acctPkg = $db->fetchOne("SELECT p.max_databases FROM accounts a LEFT JOIN packages p ON p.id=a.package_id WHERE a.id=?", [$accountId]);
+        if ($acctPkg && $acctPkg['max_databases'] > 0) {
+            $count = (int)$db->fetchOne("SELECT COUNT(*) c FROM databases WHERE account_id=?", [$accountId])['c'];
+            if ($count >= (int)$acctPkg['max_databases']) Response::error("Database limit ({$acctPkg['max_databases']}) reached for this package", 403);
+        }
         $type   = $body['type'] ?? 'mysql';
         $dbName = trim($body['db_name'] ?? '');
         $dbUser = trim($body['db_user'] ?? $dbName . '_user');

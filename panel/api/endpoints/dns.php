@@ -97,5 +97,29 @@ match ($action) {
         Response::success(['domain' => $domain, 'results' => $results]);
     })(),
 
+    // ── NS Health Checker (#22e) ─────────────────────────────────────────────
+    'ns-health' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $ns1 = $db->fetchOne("SELECT value FROM settings WHERE `key`='ns1_hostname'")['value'] ?? '';
+        $ns2 = $db->fetchOne("SELECT value FROM settings WHERE `key`='ns2_hostname'")['value'] ?? '';
+        $zones = $db->fetchAll("SELECT domain FROM dns_zones ORDER BY domain LIMIT 200");
+        $results = [];
+        foreach ($zones as $z) {
+            $domain = $z['domain'];
+            $raw = shell_exec("dig +short NS " . escapeshellarg($domain) . " 2>/dev/null") ?? '';
+            $nsRecords = array_filter(array_map('trim', explode("\n", $raw)));
+            $foundNs1 = $ns1 ? in_array(rtrim($ns1,'.').'.', array_map(fn($n)=>rtrim($n,'.').'.', $nsRecords)) : null;
+            $foundNs2 = $ns2 ? in_array(rtrim($ns2,'.').'.', array_map(fn($n)=>rtrim($n,'.').'.', $nsRecords)) : null;
+            $results[] = [
+                'domain' => $domain,
+                'ns1'    => $nsRecords[0] ?? null,
+                'ns2'    => $nsRecords[1] ?? null,
+                'ok'     => ($ns1 ? $foundNs1 : true) && ($ns2 ? $foundNs2 : true),
+                'ns_raw' => $nsRecords,
+            ];
+        }
+        Response::success(['results' => $results, 'expected_ns1' => $ns1, 'expected_ns2' => $ns2]);
+    })(),
+
     default => Response::error("Unknown dns action: $action", 404),
 };

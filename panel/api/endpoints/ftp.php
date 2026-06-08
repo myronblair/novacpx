@@ -15,6 +15,12 @@ match ($action) {
 
     'create' => (function() use ($db, $body, $accountId) {
         if (!$accountId) Response::error("account_id required");
+        // Package limit check
+        $acctPkg = $db->fetchOne("SELECT p.max_ftp FROM accounts a LEFT JOIN packages p ON p.id=a.package_id WHERE a.id=?", [$accountId]);
+        if ($acctPkg && $acctPkg['max_ftp'] > 0) {
+            $count = (int)$db->fetchOne("SELECT COUNT(*) c FROM ftp_accounts WHERE account_id=?", [$accountId])['c'];
+            if ($count >= (int)$acctPkg['max_ftp']) Response::error("FTP account limit ({$acctPkg['max_ftp']}) reached for this package", 403);
+        }
         $username = trim($body['username'] ?? '');
         $password = $body['password'] ?? bin2hex(random_bytes(6));
         $acct     = $db->fetchOne("SELECT home_dir FROM accounts WHERE id = ?", [$accountId]);

@@ -30,6 +30,12 @@ match ($action) {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) Response::error("Invalid email address");
         if (strlen($password) < 6) Response::error("Password must be at least 6 characters");
         if (!$accountId) Response::error("account_id required");
+        // Package limit check
+        $acctPkg = $db->fetchOne("SELECT p.max_email FROM accounts a LEFT JOIN packages p ON p.id=a.package_id WHERE a.id=?", [$accountId]);
+        if ($acctPkg && $acctPkg['max_email'] > 0) {
+            $count = (int)$db->fetchOne("SELECT COUNT(*) c FROM email_accounts WHERE account_id=?", [$accountId])['c'];
+            if ($count >= (int)$acctPkg['max_email']) Response::error("Email account limit ({$acctPkg['max_email']}) reached for this package", 403);
+        }
         $id = EmailManager::createAccount($accountId, $email, $password, $quota);
         audit('email.create', $email);
         Response::success(['id' => $id], "Email account created: $email");
