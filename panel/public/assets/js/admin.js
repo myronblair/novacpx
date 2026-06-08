@@ -457,28 +457,156 @@
 
   // ── PHP Manager ────────────────────────────────────────────────────────────
   async function phpManager() {
+    const res  = await Nova.api('php', 'versions');
+    const data = res?.data || {};
+    const vers = data.versions || [];
+    const panelPhp = data.panel_php || '—';
+
     return `
-<div class="card">
-  <div class="card-header"><span class="card-title">PHP Version Manager</span></div>
+<div class="page-header">
+  <h2 class="page-title">PHP Manager</h2>
+  <button class="btn btn-ghost btn-sm" onclick="adminPage('php-manager')">↻ Refresh</button>
+</div>
+
+<div class="card mb-2">
+  <div class="card-header"><span class="card-title">Panel PHP</span></div>
   <div class="card-body">
-    <p class="text-muted mb-2">Manage installed PHP versions and global extensions.</p>
+    <p class="text-muted text-sm">NovaCPX itself runs on <strong>PHP ${panelPhp}</strong> (always the highest installed version, updated automatically when a new version is installed).</p>
+  </div>
+</div>
+
+<div class="card mb-2">
+  <div class="card-header"><span class="card-title">Installed Versions</span></div>
+  <div class="card-body">
     <div class="grid-4">
-      ${['7.4','8.1','8.2','8.3'].map(v => `
+      ${vers.map(v => `
         <div class="stat-card">
-          <div class="stat-label">PHP ${v}</div>
-          <div class="stat-value" style="font-size:1rem">${Nova.badge('Active','green')}</div>
-          <div class="mt-2 flex gap-1">
-            <button class="btn btn-ghost btn-sm" onclick="phpAction('${v}','fpm-restart')">Restart FPM</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+            <strong>PHP ${v.version}</strong>
+            ${v.installed ? Nova.badge(v.fpm_active ? 'active' : 'stopped', v.fpm_active ? 'green' : 'yellow') : Nova.badge('not installed','muted')}
+          </div>
+          ${v.is_default ? `<div class="text-xs text-muted mb-1">Panel default</div>` : ''}
+          <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.5rem">
+            ${v.installed ? `
+              <button class="btn btn-xs" onclick="phpExtModal('${v.version}')">Extensions</button>
+              <button class="btn btn-xs" onclick="phpFpmAction('${v.version}','restart')">Restart FPM</button>
+              ${!v.is_default ? `<button class="btn btn-xs btn-danger" onclick="phpRemoveVersion('${v.version}')">Remove</button>` : ''}
+            ` : `
+              <button class="btn btn-xs btn-primary" onclick="phpInstallVersion('${v.version}')">Install</button>
+            `}
           </div>
         </div>`).join('')}
     </div>
-    <div class="mt-3">
-      <h4 class="mb-1">Global PHP Extensions</h4>
-      <p class="text-muted text-sm">Extensions installed across all PHP versions: mbstring, curl, gd, xml, zip, opcache, redis, imagick, pdo, pdo_mysql, pdo_pgsql</p>
+  </div>
+</div>
+
+<div id="php-ext-panel" style="display:none"></div>`;
+  }
+
+  window.phpInstallVersion = (ver) => {
+    Nova.confirm(`Install PHP ${ver}? This will run apt-get and may take a minute.`, async () => {
+      Nova.toast(`Installing PHP ${ver}…`, 'info', 15000);
+      const r = await Nova.api('php', 'install-version', { method: 'POST', body: { version: ver } });
+      if (r?.success) { Nova.toast(`PHP ${ver} installed`, 'success'); adminPage('php-manager'); }
+      else Nova.toast(r?.message || 'Install failed', 'error');
+    });
+  };
+
+  window.phpRemoveVersion = (ver) => {
+    Nova.confirm(`Remove PHP ${ver}? All FPM pools for this version will stop.`, async () => {
+      const r = await Nova.api('php', 'remove-version', { method: 'POST', body: { version: ver } });
+      if (r?.success) { Nova.toast(`PHP ${ver} removed`, 'success'); adminPage('php-manager'); }
+      else Nova.toast(r?.message || 'Remove failed', 'error');
+    }, true);
+  };
+
+  window.phpFpmAction = async (ver, cmd) => {
+    const r = await Nova.api('php', 'fpm-action', { method: 'POST', body: { version: ver, command: cmd } });
+    if (r?.success) { Nova.toast(r.message, 'success'); adminPage('php-manager'); }
+    else Nova.toast(r?.message || 'Action failed', 'error');
+  };
+
+  window.phpExtModal = async (ver) => {
+    const panel = document.getElementById('php-ext-panel');
+    if (!panel) return;
+    panel.style.display = '';
+    panel.innerHTML = `<div class="card"><div class="card-body"><p class="text-muted">Loading extensions for PHP ${ver}…</p></div></div>`;
+    panel.scrollIntoView({ behavior: 'smooth' });
+
+    const r = await Nova.api('php', 'version-extensions', { params: { version: ver } });
+    if (!r?.success) { panel.innerHTML = `<div class="card"><div class="card-body"><p class="text-muted">${r?.message || 'Failed to load'}</p></div></div>`; return; }
+
+    const installed = r.data.installed || [];
+    const available = r.data.available || [];
+    const notInstalled = available.filter(pkg => {
+      const ext = pkg.replace(/^php[\d.]+-/, '');
+      return !installed.some(i => i.toLowerCase() === ext.toLowerCase() || i.toLowerCase().replace('_','-') === ext.toLowerCase());
+    });
+
+    panel.innerHTML = `
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">PHP ${ver} Extensions</span>
+    <div style="display:flex;gap:.5rem;align-items:center">
+      <input id="php-ext-search" class="form-control" style="width:160px" placeholder="Filter…" oninput="phpExtFilter(this.value)">
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('php-ext-panel').style.display='none'">✕ Close</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div style="margin-bottom:1rem">
+      <strong>Add extension</strong>
+      <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
+        <select id="php-ext-add-sel" class="form-control" style="width:220px">
+          <option value="">— choose from common list —</option>
+          ${notInstalled.map(p => `<option value="${p.replace(/^php[\d.]+-/,'')}">${p.replace(/^php[\d.]+-/,'')}</option>`).join('')}
+        </select>
+        <span class="text-muted" style="align-self:center">or</span>
+        <input id="php-ext-add-custom" class="form-control" style="width:140px" placeholder="custom name">
+        <button class="btn btn-primary btn-sm" onclick="phpExtInstall('${ver}')">Install</button>
+      </div>
+    </div>
+    <div id="php-ext-list">
+      <table class="table">
+        <thead><tr><th>Extension</th><th style="text-align:right">Action</th></tr></thead>
+        <tbody>
+          ${installed.map(e => `
+            <tr class="php-ext-row" data-ext="${e.toLowerCase()}">
+              <td><code>${e}</code></td>
+              <td style="text-align:right">
+                <button class="btn btn-xs btn-danger" onclick="phpExtRemove('${ver}','${e}')">Remove</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
     </div>
   </div>
 </div>`;
-  }
+  };
+
+  window.phpExtFilter = (q) => {
+    document.querySelectorAll('.php-ext-row').forEach(row => {
+      row.style.display = row.dataset.ext.includes(q.toLowerCase()) ? '' : 'none';
+    });
+  };
+
+  window.phpExtInstall = async (ver) => {
+    const sel    = document.getElementById('php-ext-add-sel')?.value;
+    const custom = document.getElementById('php-ext-add-custom')?.value?.trim();
+    const ext    = custom || sel;
+    if (!ext) { Nova.toast('Choose or type an extension name', 'error'); return; }
+    Nova.toast(`Installing ${ext} for PHP ${ver}…`, 'info', 15000);
+    const r = await Nova.api('php', 'install-extension', { method: 'POST', body: { version: ver, extension: ext } });
+    if (r?.success) { Nova.toast(r.message, 'success'); phpExtModal(ver); }
+    else Nova.toast(r?.message || 'Install failed', 'error');
+  };
+
+  window.phpExtRemove = (ver, ext) => {
+    Nova.confirm(`Remove extension ${ext} from PHP ${ver}?`, async () => {
+      const r = await Nova.api('php', 'remove-extension', { method: 'POST', body: { version: ver, extension: ext } });
+      if (r?.success) { Nova.toast(r.message, 'success'); phpExtModal(ver); }
+      else Nova.toast(r?.message || 'Remove failed', 'error');
+    }, true);
+  };
 
   // ── Notifications (#25) ───────────────────────────────────────────────────
   async function notifications() {

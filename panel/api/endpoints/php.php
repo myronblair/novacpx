@@ -26,10 +26,96 @@ match ($action) {
     'versions' => (function() {
         $versions = [];
         foreach (['7.4','8.1','8.2','8.3'] as $v) {
-            $installed = file_exists("/usr/bin/php{$v}");
-            $versions[] = ['version' => $v, 'installed' => $installed, 'is_default' => $v === PHP_DEFAULT];
+            $installed  = file_exists("/usr/bin/php{$v}");
+            $fpmActive  = $installed ? trim(shell_exec("systemctl is-active php{$v}-fpm 2>/dev/null") ?: '') : '';
+            $versions[] = [
+                'version'    => $v,
+                'installed'  => $installed,
+                'fpm_active' => $fpmActive === 'active',
+                'is_default' => $v === PHP_DEFAULT,
+            ];
         }
-        Response::success($versions);
+        // Detect which version the panel itself runs on (highest installed)
+        $panelVer = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+        Response::success(['versions' => $versions, 'panel_php' => $panelVer]);
+    })(),
+
+    'install-version' => (function() use ($body) {
+        Auth::getInstance()->require('admin');
+        $ver = $body['version'] ?? '';
+        if (!preg_match('/^[78]\.\d$/', $ver)) Response::error("Invalid version");
+        $pkgs = "php{$ver} php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-curl php{$ver}-gd php{$ver}-xml php{$ver}-mbstring php{$ver}-zip php{$ver}-intl php{$ver}-bcmath php{$ver}-soap php{$ver}-opcache";
+        $out  = shell_exec("apt-get install -y $pkgs 2>&1");
+        shell_exec("systemctl enable php{$ver}-fpm && systemctl start php{$ver}-fpm 2>/dev/null");
+        audit('php.install-version', $ver);
+        Response::success(['output' => substr($out ?: '', -1000)], "PHP $ver installed");
+    })(),
+
+    'remove-version' => (function() use ($body) {
+        Auth::getInstance()->require('admin');
+        $ver = $body['version'] ?? '';
+        if (!preg_match('/^[78]\.\d$/', $ver)) Response::error("Invalid version");
+        if ($ver === PHP_DEFAULT) Response::error("Cannot remove the panel's default PHP version");
+        shell_exec("systemctl stop php{$ver}-fpm 2>/dev/null || true");
+        $out = shell_exec("apt-get remove -y php{$ver}* 2>&1");
+        audit('php.remove-version', $ver);
+        Response::success(['output' => substr($out ?: '', -1000)], "PHP $ver removed");
+    })(),
+
+    'version-extensions' => (function() use ($body) {
+        Auth::getInstance()->require('admin');
+        $ver = $body['version'] ?? $_GET['version'] ?? '';
+        if (!preg_match('/^[78]\.\d$/', $ver)) Response::error("Invalid version");
+        if (!file_exists("/usr/bin/php{$ver}")) Response::error("PHP $ver not installed");
+        $out = shell_exec("php{$ver} -m 2>/dev/null") ?: '';
+        $exts = array_values(array_filter(explode("\n", trim($out)), fn($l) => $l && !str_starts_with($l, '[')));
+
+        // Available apt packages for this version (common ones)
+        $common = ['bcmath','bz2','curl','gd','gmp','igbinary','imagick','imap','intl','ldap','mbstring',
+                   'memcached','mongodb','msgpack','mysql','odbc','opcache','pdo','pdo-mysql','pdo-pgsql',
+                   'pgsql','redis','soap','sqlite3','tidy','tokenizer','uuid','xml','xmlrpc','xsl','zip'];
+        $available = array_map(fn($e) => "php{$ver}-{$e}", $common);
+        Response::success(['version' => $ver, 'installed' => $exts, 'available' => $available]);
+    })(),
+
+    'install-extension' => (function() use ($body) {
+        Auth::getInstance()->require('admin');
+        $ver = $body['version'] ?? '';
+        $ext = preg_replace('/[^a-z0-9\-]/', '', strtolower($body['extension'] ?? ''));
+        if (!preg_match('/^[78]\.\d$/', $ver) || !$ext) Response::error("Invalid input");
+        $pkg = "php{$ver}-{$ext}";
+        $out = shell_exec("apt-get install -y $pkg 2>&1");
+        if (str_contains($out ?: '', 'Unable to locate') || str_contains($out ?: '', 'E:')) {
+            // Try pecl fallback
+            $out2 = shell_exec("php{$ver} /usr/bin/pecl install {$ext} 2>&1");
+            $out .= "\n[pecl] " . $out2;
+        }
+        shell_exec("systemctl reload php{$ver}-fpm 2>/dev/null || true");
+        audit('php.install-extension', "$ver/$ext");
+        Response::success(['output' => substr($out ?: '', -1000)], "Extension $ext installed for PHP $ver");
+    })(),
+
+    'remove-extension' => (function() use ($body) {
+        Auth::getInstance()->require('admin');
+        $ver = $body['version'] ?? '';
+        $ext = preg_replace('/[^a-z0-9\-]/', '', strtolower($body['extension'] ?? ''));
+        if (!preg_match('/^[78]\.\d$/', $ver) || !$ext) Response::error("Invalid input");
+        $pkg = "php{$ver}-{$ext}";
+        $out = shell_exec("apt-get remove -y $pkg 2>&1");
+        shell_exec("systemctl reload php{$ver}-fpm 2>/dev/null || true");
+        audit('php.remove-extension', "$ver/$ext");
+        Response::success(['output' => substr($out ?: '', -1000)], "Extension $ext removed from PHP $ver");
+    })(),
+
+    'fpm-action' => (function() use ($body) {
+        Auth::getInstance()->require('admin');
+        $ver = $body['version'] ?? '';
+        $cmd = $body['command'] ?? 'restart';
+        if (!preg_match('/^[78]\.\d$/', $ver)) Response::error("Invalid version");
+        if (!in_array($cmd, ['start','stop','restart','reload'])) Response::error("Invalid command");
+        shell_exec("systemctl $cmd php{$ver}-fpm 2>/dev/null");
+        audit('php.fpm-action', "$cmd php{$ver}-fpm");
+        Response::success(null, "php{$ver}-fpm {$cmd}ed");
     })(),
 
     'switch-version' => (function() use ($body, $accountId) {
