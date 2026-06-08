@@ -449,7 +449,7 @@ match ($action) {
         if (!$apiKey) Response::error("No CyberMail API key configured");
 
         $payload = json_encode([
-            'from'    => "$fromName <$fromEmail>",
+            'from'    => $fromEmail,
             'to'      => $to,
             'subject' => 'NovaCPX — test notification',
             'html'    => '<h2>Test Notification</h2><p>Email notifications are working correctly from your NovaCPX panel.</p>',

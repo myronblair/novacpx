@@ -18,7 +18,7 @@ class Notifier {
         if (!$apiKey || !$to) return false;
 
         $payload = json_encode([
-            'from'    => "$fromName <$fromEmail>",
+            'from'    => $fromEmail,
             'to'      => $to,
             'subject' => $subject,
             'html'    => $html,

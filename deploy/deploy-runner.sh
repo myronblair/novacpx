@@ -59,6 +59,14 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
     --exclude='*.log' \
     "$REPO_PATH/panel/public/" "$WEB_ROOT/" >> "$LOG" 2>&1
 
+  # Sync backend API and lib (not in panel/public, deployed separately)
+  rsync -av --delete --exclude='config.php' "$REPO_PATH/panel/api/" "$WEB_ROOT/api/" >> "$LOG" 2>&1
+  rsync -av --delete "$REPO_PATH/panel/lib/" "$WEB_ROOT/lib/" >> "$LOG" 2>&1
+
+  # Sync cron scripts to bin directory
+  rsync -av "$REPO_PATH/panel/bin/" /opt/novacpx/bin/ >> "$LOG" 2>&1
+  chmod +x /opt/novacpx/bin/*.php 2>/dev/null || true
+
   # Run pending DB migrations
   MIGR_DIR="$REPO_PATH/db/migrations"
   if [[ -d "$MIGR_DIR" ]]; then
