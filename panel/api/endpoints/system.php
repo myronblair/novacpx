@@ -188,15 +188,18 @@ match ($action) {
         Auth::getInstance()->require('admin');
         $srcDir = '/opt/novacpx-src';
         if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
-        $out = shell_exec("git -C " . escapeshellarg($srcDir) . " fetch origin 2>&1 && git -C " . escapeshellarg($srcDir) . " log HEAD..origin/main --oneline 2>/dev/null");
-        $updates = array_values(array_filter(explode("\n", trim($out ?: ''))));
-        $branch  = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " branch --show-current 2>/dev/null") ?: 'main');
-        $commit  = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse --short HEAD 2>/dev/null") ?: '');
+        // Use sudo git so www-data can access root-owned repo
+        $fetchOut = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " fetch origin 2>&1");
+        $logOut   = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " log HEAD..origin/main --oneline 2>/dev/null") ?: '';
+        $updates  = array_values(array_filter(explode("\n", trim($logOut))));
+        $branch   = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " branch --show-current 2>/dev/null") ?: 'main');
+        $commit   = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse --short HEAD 2>/dev/null") ?: '');
         Response::success([
             'updates_available' => count($updates),
             'current_commit'    => $commit,
             'branch'            => $branch,
             'commits'           => $updates,
+            'fetch_output'      => trim($fetchOut ?: ''),
         ]);
     })(),
 
@@ -207,44 +210,54 @@ match ($action) {
         $srcDir  = '/opt/novacpx-src';
         $webRoot = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
         $webSvc  = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
+        $steps   = [];
 
         if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
 
-        $before = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
+        $before = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
+        $steps[] = "Before: $before";
 
         // Backup current web root
         $backupDir = '/var/novacpx/backups/pre-novacpx-update-' . date('YmdHis');
         shell_exec("mkdir -p " . escapeshellarg($backupDir));
         shell_exec("cp -a " . escapeshellarg($webRoot) . " " . escapeshellarg("$backupDir/public") . " 2>&1");
+        $steps[] = "Backup: $backupDir";
 
-        // Pull new code
-        $pull = shell_exec("git -C " . escapeshellarg($srcDir) . " pull origin main 2>&1");
-        $after = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
+        // Pull new code (sudo so www-data can write root-owned repo)
+        $pull = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " pull origin main 2>&1");
+        $steps[] = "Pull: " . trim($pull ?: '(no output)');
+
+        $after   = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
         $changed = $before !== $after;
+        $steps[] = "After: $after" . ($changed ? " (changed)" : " (no change)");
 
         if ($changed) {
-            // Validate PHP syntax before deploying
-            $phpFiles = glob($srcDir . '/panel/**/*.php', GLOB_BRACE) ?: [];
+            // Validate PHP syntax (use php8.3; find all .php files recursively)
+            $phpFiles = [];
+            $found = shell_exec("find " . escapeshellarg("$srcDir/panel") . " -name '*.php' 2>/dev/null") ?: '';
+            foreach (array_filter(explode("\n", trim($found))) as $f) { $phpFiles[] = trim($f); }
+
             $syntaxErr = [];
             foreach ($phpFiles as $f) {
-                $check = shell_exec("php -l " . escapeshellarg($f) . " 2>&1");
+                $check = shell_exec("php8.3 -l " . escapeshellarg($f) . " 2>&1");
                 if (!str_contains($check, 'No syntax errors')) {
                     $syntaxErr[] = basename($f) . ': ' . trim($check);
                 }
             }
+            $steps[] = "Syntax check: " . count($phpFiles) . " files, " . count($syntaxErr) . " errors";
 
             if ($syntaxErr) {
-                // Syntax errors — abort, restore
-                shell_exec("git -C " . escapeshellarg($srcDir) . " reset --hard " . escapeshellarg($before) . " 2>&1");
+                shell_exec("sudo git -C " . escapeshellarg($srcDir) . " reset --hard " . escapeshellarg($before) . " 2>&1");
                 Response::error('Update aborted — PHP syntax errors: ' . implode('; ', $syntaxErr));
             }
 
-            // Deploy files to web root
-            shell_exec("rsync -a --delete " . escapeshellarg("$srcDir/panel/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
-            shell_exec("rsync -a " . escapeshellarg("$srcDir/panel/lib/") . " " . escapeshellarg("$webRoot/lib/") . " 2>&1");
-            shell_exec("rsync -a " . escapeshellarg("$srcDir/panel/api/") . " " . escapeshellarg("$webRoot/api/") . " 2>&1");
+            // Deploy files to web root (sudo rsync)
+            shell_exec("sudo rsync -a --delete " . escapeshellarg("$srcDir/panel/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
+            shell_exec("sudo rsync -a " . escapeshellarg("$srcDir/panel/lib/") . " " . escapeshellarg("$webRoot/lib/") . " 2>&1");
+            shell_exec("sudo rsync -a " . escapeshellarg("$srcDir/panel/api/") . " " . escapeshellarg("$webRoot/api/") . " 2>&1");
             shell_exec("cp " . escapeshellarg("$srcDir/VERSION") . " " . escapeshellarg("$webRoot/VERSION") . " 2>/dev/null");
-            shell_exec("chown -R www-data:www-data " . escapeshellarg($webRoot));
+            shell_exec("sudo chown -R www-data:www-data " . escapeshellarg($webRoot));
+            $steps[] = "Deploy: rsync complete";
 
             // Run pending DB migrations
             $migrDir = "$srcDir/db/migrations";
@@ -253,27 +266,28 @@ match ($action) {
                     $migName = basename($sql, '.sql');
                     $already = $db->fetchOne("SELECT 1 FROM settings WHERE `key` = ?", ["migration_$migName"]);
                     if (!$already) {
-                        $db->pdo()->exec(file_get_contents($sql));
+                        try { $db->pdo()->exec(file_get_contents($sql)); } catch (\Throwable $e) { /* skip dupes */ }
                         $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,NOW()) ON DUPLICATE KEY UPDATE `value`=NOW()", ["migration_$migName"]);
+                        $steps[] = "Migration: $migName applied";
                     }
                 }
             }
 
             // Reload PHP-FPM to pick up new code
-            shell_exec("systemctl reload php8.3-fpm 2>/dev/null || systemctl reload php8.2-fpm 2>/dev/null || true");
+            shell_exec("sudo systemctl reload php8.3-fpm 2>/dev/null || sudo systemctl reload php8.2-fpm 2>/dev/null || true");
+            $steps[] = "PHP-FPM reloaded";
 
-            // Verify panel is still up using curl (handles both HTTP and HTTPS)
+            // Verify panel is still up
             sleep(2);
             $port    = defined('PORT_ADMIN') ? PORT_ADMIN : 8882;
-            $schemes = ['https','http'];
             $panelOk = false;
-            foreach ($schemes as $scheme) {
+            foreach (['https','http'] as $scheme) {
                 $code = trim(shell_exec("curl -sk -o /dev/null -w '%{http_code}' {$scheme}://127.0.0.1:{$port}/api/system/version --max-time 5 2>/dev/null") ?: '');
                 if (in_array($code, ['200','401','302','301'])) { $panelOk = true; break; }
             }
             if (!$panelOk) {
-                shell_exec("rsync -a --delete " . escapeshellarg("$backupDir/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
-                shell_exec("systemctl reload $webSvc 2>/dev/null");
+                shell_exec("sudo rsync -a --delete " . escapeshellarg("$backupDir/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
+                shell_exec("sudo systemctl reload $webSvc 2>/dev/null");
                 novacpx_log('error', "NovaCPX update failed — panel down after deploy; restored from backup");
                 Response::error('Update deployed but panel went down — auto-restored from backup. Check logs.');
             }
@@ -286,8 +300,9 @@ match ($action) {
             'updated'     => $changed,
             'from_commit' => $before,
             'to_commit'   => $after,
-            'pull_output' => $pull,
+            'pull_output' => trim($pull ?? ''),
             'backup_path' => $backupDir,
+            'steps'       => $steps,
         ]);
     })(),
 
