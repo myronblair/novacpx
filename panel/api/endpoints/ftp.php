@@ -4,9 +4,12 @@ $body = json_decode(file_get_contents('php://input'), true) ?? [];
 require_once NOVACPX_LIB . '/FTPManager.php';
 
 $user      = Auth::getInstance()->user();
-$accountId = $user['role'] === 'user'
-    ? (int)($db->fetchOne("SELECT id FROM accounts WHERE user_id = ?", [$user['uid']])['id'] ?? 0)
-    : (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
+if ($user['role'] === 'user') {
+    $accountId = (int)($db->fetchOne("SELECT id FROM accounts WHERE user_id = ?", [$user['uid']])['id'] ?? 0);
+} else {
+    $accountId = (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
+    if ($accountId && $user['role'] === 'reseller') assert_account_access($accountId);
+}
 
 match ($action) {
     'list' => (function() use ($db, $accountId) {

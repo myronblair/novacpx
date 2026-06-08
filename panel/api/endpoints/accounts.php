@@ -37,7 +37,7 @@ match ($action) {
                     p.name as package_name,
                     (SELECT COUNT(*) FROM domains WHERE account_id = a.id) as domain_count,
                     (SELECT COUNT(*) FROM email_accounts WHERE account_id = a.id) as email_count,
-                    (SELECT COUNT(*) FROM databases WHERE account_id = a.id) as db_count
+                    (SELECT COUNT(*) FROM `databases` WHERE account_id = a.id) as db_count
              FROM accounts a
              JOIN users u ON u.id = a.user_id
              LEFT JOIN packages p ON p.id = a.package_id
@@ -132,7 +132,7 @@ match ($action) {
             'disk_limit_mb'  => $pkg['disk_mb'] ?? 0,
             'email_count'    => $db->fetchOne("SELECT COUNT(*) c FROM email_accounts WHERE account_id = ?", [$id])['c'],
             'email_limit'    => $pkg['max_email'] ?? 0,
-            'db_count'       => $db->fetchOne("SELECT COUNT(*) c FROM databases WHERE account_id = ?", [$id])['c'],
+            'db_count'       => $db->fetchOne("SELECT COUNT(*) c FROM `databases` WHERE account_id = ?", [$id])['c'],
             'db_limit'       => $pkg['max_databases'] ?? 0,
             'domain_count'   => $db->fetchOne("SELECT COUNT(*) c FROM domains WHERE account_id = ?", [$id])['c'],
             'domain_limit'   => $pkg['max_domains'] ?? 0,

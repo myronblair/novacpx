@@ -90,4 +90,24 @@ if (!file_exists($endpointFile)) {
     }
 })();
 
+/**
+ * Verify the current user can access a given account_id.
+ * Returns the account row or sends a 404 error response.
+ * Resellers may only access their own customers; users may only access their own account.
+ */
+function assert_account_access(int $accountId): array {
+    global $currentUser;
+    $db   = DB::getInstance();
+    $acct = $db->fetchOne("SELECT a.*, u.reseller_id FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.id = ?", [$accountId]);
+    if (!$acct) Response::error("Account not found", 404);
+    if ($currentUser['role'] === 'reseller' && (int)$acct['reseller_id'] !== $currentUser['uid']) {
+        Response::error("Account not found", 404);
+    }
+    if ($currentUser['role'] === 'user') {
+        $own = $db->fetchOne("SELECT id FROM accounts WHERE id = ? AND user_id = ?", [$accountId, $currentUser['uid']]);
+        if (!$own) Response::error("Account not found", 404);
+    }
+    return $acct;
+}
+
 require $endpointFile;

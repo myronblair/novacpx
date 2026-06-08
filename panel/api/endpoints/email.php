@@ -11,7 +11,9 @@ function self_account_id($db, $user): ?int {
         $a = $db->fetchOne("SELECT id FROM accounts WHERE user_id = ?", [$user['uid']]);
         return $a ? (int)$a['id'] : null;
     }
-    return (int)(request_param('account_id') ?? 0) ?: null;
+    $id = (int)(request_param('account_id') ?? 0);
+    if ($id && $user['role'] === 'reseller') assert_account_access($id);
+    return $id ?: null;
 }
 function request_param(string $k): mixed { return $_GET[$k] ?? (json_decode(file_get_contents('php://input'), true) ?? [])[$k] ?? null; }
 

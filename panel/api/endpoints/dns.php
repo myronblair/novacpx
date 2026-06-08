@@ -12,6 +12,7 @@ if ($user['role'] === 'user') {
     $accountId = $acct ? (int)$acct['id'] : null;
 } else {
     $accountId = (int)($_GET['account_id'] ?? $body['account_id'] ?? 0) ?: null;
+    if ($accountId && $user['role'] === 'reseller') assert_account_access($accountId);
 }
 
 match ($action) {

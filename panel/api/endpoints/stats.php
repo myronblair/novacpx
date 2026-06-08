@@ -49,7 +49,13 @@ match ($action) {
     })(),
 
     'account' => (function() use ($db, $body) {
-        $accountId = (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
+        $user = Auth::getInstance()->user();
+        if ($user['role'] === 'user') {
+            $acctRow = $db->fetchOne("SELECT id FROM accounts WHERE user_id = ?", [$user['uid']]);
+            $accountId = $acctRow ? (int)$acctRow['id'] : 0;
+        } else {
+            $accountId = (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
+        }
         if (!$accountId) Response::error("account_id required");
         $acct = $db->fetchOne("SELECT * FROM accounts WHERE id = ?", [$accountId]);
         if (!$acct) Response::error("Account not found", 404);
@@ -62,7 +68,7 @@ match ($action) {
         $inodes = (int)trim(shell_exec("find " . escapeshellarg($acct['home_dir']) . " 2>/dev/null | wc -l") ?: 0);
 
         // DB count & size
-        $dbs     = $db->fetchAll("SELECT id FROM databases WHERE account_id = ?", [$accountId]);
+        $dbs     = $db->fetchAll("SELECT id FROM `databases` WHERE account_id = ?", [$accountId]);
         $dbCount = count($dbs);
 
         // Email count

@@ -4,15 +4,18 @@ $body = json_decode(file_get_contents('php://input'), true) ?? [];
 require_once NOVACPX_LIB . '/DatabaseManager.php';
 
 $user      = Auth::getInstance()->user();
-$accountId = $user['role'] === 'user'
-    ? (int)($db->fetchOne("SELECT id FROM accounts WHERE user_id = ?", [$user['uid']])['id'] ?? 0)
-    : (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
+if ($user['role'] === 'user') {
+    $accountId = (int)($db->fetchOne("SELECT id FROM accounts WHERE user_id = ?", [$user['uid']])['id'] ?? 0);
+} else {
+    $accountId = (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
+    if ($accountId && $user['role'] === 'reseller') assert_account_access($accountId);
+}
 
 match ($action) {
 
     'list' => (function() use ($db, $accountId) {
         if (!$accountId) Response::error("account_id required");
-        $rows = $db->fetchAll("SELECT id, db_name, db_user, db_type, size_mb, created_at FROM databases WHERE account_id = ?", [$accountId]);
+        $rows = $db->fetchAll("SELECT id, db_name, db_user, db_type, size_mb, created_at FROM `databases` WHERE account_id = ?", [$accountId]);
         foreach ($rows as &$r) { $r['size_mb'] = DatabaseManager::getSize($r['db_name'], $r['db_type']); }
         Response::success($rows);
     })(),
@@ -22,7 +25,7 @@ match ($action) {
         // Package limit check
         $acctPkg = $db->fetchOne("SELECT p.max_databases FROM accounts a LEFT JOIN packages p ON p.id=a.package_id WHERE a.id=?", [$accountId]);
         if ($acctPkg && $acctPkg['max_databases'] > 0) {
-            $count = (int)$db->fetchOne("SELECT COUNT(*) c FROM databases WHERE account_id=?", [$accountId])['c'];
+            $count = (int)$db->fetchOne("SELECT COUNT(*) c FROM `databases` WHERE account_id=?", [$accountId])['c'];
             if ($count >= (int)$acctPkg['max_databases']) Response::error("Database limit ({$acctPkg['max_databases']}) reached for this package", 403);
         }
         $type   = $body['type'] ?? 'mysql';
@@ -47,7 +50,7 @@ match ($action) {
 
     'drop' => (function() use ($db, $body) {
         $id  = (int)($body['id'] ?? 0);
-        $dbe = $db->fetchOne("SELECT db_name, db_user, db_type FROM databases WHERE id = ?", [$id]);
+        $dbe = $db->fetchOne("SELECT db_name, db_user, db_type FROM `databases` WHERE id = ?", [$id]);
         if (!$dbe) Response::error("Database not found", 404);
         DatabaseManager::drop($dbe['db_name'], $dbe['db_user'], $dbe['db_type']);
         audit('database.drop', $dbe['db_name']);

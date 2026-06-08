@@ -15,7 +15,7 @@ class DatabaseManager {
         $pdo->exec("FLUSH PRIVILEGES");
 
         return (int)$db->insert(
-            "INSERT INTO databases (account_id, db_name, db_user, db_pass, db_type) VALUES (?,?,?,?,?)",
+            "INSERT INTO `databases`(account_id, db_name, db_user, db_pass, db_type) VALUES (?,?,?,?,?)",
             [$accountId, $dbName, $dbUser, encrypt($dbPass), 'mysql']
         );
     }
@@ -28,7 +28,7 @@ class DatabaseManager {
         shell_exec("sudo -u postgres createdb -O {$dbUser} {$dbName} 2>/dev/null");
 
         return (int)$db->insert(
-            "INSERT INTO databases (account_id, db_name, db_user, db_pass, db_type) VALUES (?,?,?,?,?)",
+            "INSERT INTO `databases`(account_id, db_name, db_user, db_pass, db_type) VALUES (?,?,?,?,?)",
             [$accountId, $dbName, $dbUser, encrypt($dbPass), 'postgresql']
         );
     }
@@ -43,12 +43,12 @@ class DatabaseManager {
             shell_exec("sudo -u postgres dropdb --if-exists " . escapeshellarg($dbName) . " 2>/dev/null");
             shell_exec("sudo -u postgres dropuser --if-exists " . escapeshellarg($dbUser) . " 2>/dev/null");
         }
-        DB::getInstance()->execute("DELETE FROM databases WHERE db_name = ? AND db_type = ?", [$dbName, $type]);
+        DB::getInstance()->execute("DELETE FROM `databases` WHERE db_name = ? AND db_type = ?", [$dbName, $type]);
     }
 
     public static function changePassword(int $id, string $newPass): void {
         $db  = DB::getInstance();
-        $dbe = $db->fetchOne("SELECT * FROM databases WHERE id = ?", [$id]);
+        $dbe = $db->fetchOne("SELECT * FROM `databases` WHERE id = ?", [$id]);
         if (!$dbe) throw new RuntimeException("Database not found");
         if ($dbe['db_type'] === 'mysql') {
             $pdo = $db->pdo();
@@ -56,7 +56,7 @@ class DatabaseManager {
         } else {
             shell_exec("sudo -u postgres psql -c \"ALTER USER {$dbe['db_user']} WITH PASSWORD " . escapeshellarg($newPass) . "\" 2>/dev/null");
         }
-        $db->execute("UPDATE databases SET db_pass = ? WHERE id = ?", [encrypt($newPass), $id]);
+        $db->execute("UPDATE `databases` SET db_pass = ? WHERE id = ?", [encrypt($newPass), $id]);
     }
 
     public static function getSize(string $dbName, string $type = 'mysql'): float {
