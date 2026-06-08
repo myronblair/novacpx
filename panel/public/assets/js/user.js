@@ -69,6 +69,7 @@ const userPages = {
   files,
   stats: statsPage,
   backups,
+  docker: dockerPage,
   'change-password': changePasswordPage,
 };
 
@@ -773,6 +774,7 @@ const navItems = [
   { id: 'files',           label: 'File Manager',    icon: 'ni-files' },
   { id: 'stats',           label: 'Statistics',      icon: 'ni-stats' },
   { id: 'backups',         label: 'Backups',         icon: 'ni-backups' },
+  { id: 'docker',          label: 'Docker',          icon: 'ni-docker' },
   { id: 'change-password', label: 'Change Password', icon: 'ni-lock' },
 ];
 
@@ -839,6 +841,167 @@ window.submitChangePassword = async () => {
   } else {
     Nova.toast(res?.message || 'Failed to update password', 'error');
   }
+};
+
+/* ── Docker (#34) ────────────────────────────────────────────────────────── */
+async function dockerPage(el) {
+  el.innerHTML = '<div class="loading">Loading Docker…</div>';
+  const [contRes, quotaRes, catRes] = await Promise.all([
+    Nova.api('docker', 'containers'),
+    Nova.api('docker', 'quota-get'),
+    Nova.api('docker', 'catalog'),
+  ]);
+
+  const containers = contRes?.data?.containers || [];
+  const quota      = quotaRes?.data?.quota || { max_containers: 2, max_memory_mb: 512, max_cpus: 1.0 };
+  const catalog    = catRes?.data?.catalog || {};
+  const used       = containers.length;
+
+  el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Docker Containers</h2></div>
+<div class="stats-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card"><div class="stat-label">Containers Used</div><div class="stat-value">${used} / ${quota.max_containers}</div><div class="mt-1">${Nova.progressBar(Math.round(used/Math.max(quota.max_containers,1)*100))}</div></div>
+  <div class="stat-card"><div class="stat-label">Max Memory / Container</div><div class="stat-value stat-blue">${quota.max_memory_mb} MB</div></div>
+  <div class="stat-card"><div class="stat-label">Max CPUs / Container</div><div class="stat-value stat-green">${quota.max_cpus}</div></div>
+</div>
+
+<div style="display:flex;gap:.5rem;margin-bottom:1rem">
+  <button class="btn btn-sm ${_uDockerTab==='my-containers'?'btn-primary':'btn-ghost'}" onclick="uDockerTab('my-containers')">My Containers</button>
+  <button class="btn btn-sm ${_uDockerTab==='catalog'?'btn-primary':'btn-ghost'}" onclick="uDockerTab('catalog')">App Catalog</button>
+</div>
+<div id="udocker-content"><div class="loading">Loading…</div></div>`;
+
+  window._uDockerContainers = containers;
+  window._uDockerQuota      = quota;
+  window._uDockerCatalog    = catalog;
+  window._uDockerTab        = window._uDockerTab || 'my-containers';
+
+  window.uDockerTab = async (tab) => {
+    window._uDockerTab = tab;
+    document.querySelectorAll('[onclick^="uDockerTab"]').forEach(b => {
+      const t = b.getAttribute('onclick').match(/'([^']+)'/)?.[1];
+      b.className = 'btn btn-sm ' + (t === tab ? 'btn-primary' : 'btn-ghost');
+    });
+    uDockerLoadTab(tab);
+  };
+
+  uDockerLoadTab(window._uDockerTab);
+}
+
+window._uDockerTab = 'my-containers';
+
+function uDockerLoadTab(tab) {
+  const tc = document.getElementById('udocker-content');
+  if (!tc) return;
+  const containers = window._uDockerContainers || [];
+  const catalog    = window._uDockerCatalog || {};
+  const quota      = window._uDockerQuota || {};
+
+  if (tab === 'my-containers') {
+    tc.innerHTML = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <strong>${containers.length} container${containers.length===1?'':'s'}</strong>
+  <button class="btn btn-sm btn-primary" onclick="uDockerLaunchModal()" ${containers.length>=quota.max_containers?'disabled title="Quota reached"':''}>+ Launch App</button>
+</div>
+${containers.length === 0
+  ? `<div class="card"><div class="card-body" style="text-align:center;padding:3rem">
+      <div style="font-size:2.5rem;margin-bottom:1rem">🐳</div>
+      <p class="text-muted">No containers yet. Launch an app from the catalog!</p>
+      <button class="btn btn-primary" onclick="uDockerTab('catalog')">Browse Catalog</button>
+    </div></div>`
+  : `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>App</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+${containers.map(c=>`<tr>
+  <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(c.name)}</td>
+  <td>${Nova.escHtml(c.app_key||c.image||'—')}</td>
+  <td>${Nova.badge(c.status, c.status==='running'?'green':c.status==='stopped'?'red':'yellow')}</td>
+  <td style="white-space:nowrap">
+    ${c.status==='running'
+      ? `<button class="btn btn-xs btn-warning" onclick="uDockerAct('${Nova.escHtml(c.container_id||'')}','stop')">Stop</button>
+         <button class="btn btn-xs btn-ghost" onclick="uDockerAct('${Nova.escHtml(c.container_id||'')}','restart')">Restart</button>`
+      : `<button class="btn btn-xs btn-success" onclick="uDockerAct('${Nova.escHtml(c.container_id||'')}','start')">Start</button>`}
+    <button class="btn btn-xs btn-ghost" onclick="uDockerLogs('${Nova.escHtml(c.container_id||'')}','${Nova.escHtml(c.name)}')">Logs</button>
+  </td>
+</tr>`).join('')}
+</tbody></table></div>`}`;
+
+  } else if (tab === 'catalog') {
+    tc.innerHTML = `
+<p class="text-muted" style="margin-bottom:1rem">One-click app deployment. Each app runs as an isolated Docker container.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem">
+${Object.entries(catalog).map(([key,app])=>`
+<div class="card" style="cursor:pointer;transition:var(--transition)" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor=''">
+  <div class="card-body" style="text-align:center;padding:1.5rem">
+    <div style="font-size:1.8rem;font-weight:700;margin-bottom:.5rem;color:var(--primary)">${Nova.escHtml(app.icon)}</div>
+    <div style="font-weight:600;margin-bottom:.25rem">${Nova.escHtml(app.name)}</div>
+    <div style="font-size:.78rem;color:var(--text-muted)">${Nova.escHtml(app.description)}</div>
+    <button class="btn btn-sm btn-primary" style="margin-top:1rem" onclick="uDockerLaunchApp('${key}')">Launch</button>
+  </div>
+</div>`).join('')}
+</div>`;
+  }
+}
+
+window.uDockerAct = async (cid, action) => {
+  const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
+  Nova.toast(r?.success ? `Container ${action}ed` : (r?.message||'Failed'), r?.success?'success':'error');
+  if (r?.success) {
+    const c = (window._uDockerContainers||[]).find(x=>x.container_id===cid);
+    if (c) c.status = action==='stop'?'stopped':'running';
+    uDockerLoadTab('my-containers');
+  }
+};
+
+window.uDockerLogs = async (cid, name) => {
+  const r = await Nova.api('docker', 'container-logs', { params: { container_id: cid, lines: 100 } });
+  Nova.modal(`Logs: ${name}`, `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(r?.data?.logs||'No logs available')}</pre>`);
+};
+
+window.uDockerLaunchModal = () => uDockerLaunchApp(null);
+
+window.uDockerLaunchApp = async (preselect) => {
+  const catalog = window._uDockerCatalog || {};
+  const entries = Object.entries(catalog);
+  const appOpts = entries.map(([k,a])=>`<option value="${k}" ${k===preselect?'selected':''}>${Nova.escHtml(a.name)}</option>`).join('');
+
+  const ov = Nova.modal('Launch App',
+    `<div class="form-group"><label>App</label>
+     <select id="ul-app" class="form-control" onchange="uDockerUpdateParams(this.value)">${appOpts}</select></div>
+     <div id="ul-params"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="uDockerLaunchSubmit()">Launch</button>`
+  );
+
+  const initialKey = preselect || entries[0]?.[0];
+  if (initialKey) uDockerUpdateParams(initialKey);
+
+  window.uDockerUpdateParams = (key) => {
+    const app = catalog[key];
+    if (!app) return;
+    const tc = document.getElementById('ul-params');
+    if (!tc) return;
+    tc.innerHTML = (app.params||[]).map(p=>`
+      <div class="form-group"><label>${Nova.escHtml(p.label)}${p.required?' *':''}</label>
+      <input id="ul-${Nova.escHtml(p.key)}" type="${p.type||'text'}" class="form-control" ${p.placeholder?`placeholder="${Nova.escHtml(p.placeholder)}"`:''}></div>`).join('');
+  };
+
+  window.uDockerLaunchSubmit = async () => {
+    const key = document.getElementById('ul-app')?.value;
+    const app = catalog[key];
+    if (!app) return;
+    const params = {};
+    (app.params||[]).forEach(p => { params[p.key] = document.getElementById('ul-'+p.key)?.value||''; });
+    const missing = (app.params||[]).filter(p=>p.required && !params[p.key]);
+    if (missing.length) { Nova.toast(`Required: ${missing.map(p=>p.label).join(', ')}`, 'error'); return; }
+    ov.remove();
+    Nova.toast(`Launching ${app.name}… this may take a minute`, 'info', 15000);
+    const r = await Nova.api('docker', 'launch', { method: 'POST', body: { app_key: key, params } });
+    Nova.toast(r?.success ? `${app.name} launched!` : (r?.message||'Launch failed'), r?.success?'success':'error');
+    if (r?.success) {
+      const cr = await Nova.api('docker', 'containers');
+      window._uDockerContainers = cr?.data?.containers || [];
+      uDockerTab('my-containers');
+    }
+  };
 };
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */

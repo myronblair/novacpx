@@ -297,8 +297,9 @@ const rNavItems = [
   { id:'createAccount',  label:'New Account', icon:'ni-add' },
   { id:'packages',       label:'Packages',    icon:'ni-packages' },
   { id:'dns',            label:'DNS Zones',   icon:'ni-dns' },
+  { id:'docker',         label:'Docker',      icon:'ni-docker' },
 ];
-const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS };
+const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker };
 
 let _rActivePage = 'dashboard';
 
@@ -327,3 +328,157 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderRNav();
   window.resellerNav('dashboard');
 });
+
+/* ── Docker (Reseller #33) ────────────────────────────────────────────────── */
+async function rDocker(el) {
+  el.innerHTML = '<div class="loading">Loading…</div>';
+  const [stRes, acctRes] = await Promise.all([
+    Nova.api('docker', 'stacks'),
+    Nova.api('accounts', 'list', { params: { limit: 200 } }),
+  ]);
+  const stacks = stRes?.data?.stacks || [];
+  const accts  = acctRes?.data?.accounts || [];
+
+  el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Docker</h2></div>
+<p class="text-muted" style="margin-bottom:1.5rem">Manage Docker containers and quotas for your customers. Contact the server admin to change your own Docker allocation.</p>
+
+<div style="display:flex;gap:.5rem;margin-bottom:1rem">
+  <button class="btn btn-sm ${_rDockerTab==='containers'?'btn-primary':'btn-ghost'}" onclick="rDockerTab('containers')">Containers</button>
+  <button class="btn btn-sm ${_rDockerTab==='quotas'?'btn-primary':'btn-ghost'}" onclick="rDockerTab('quotas')">Customer Quotas</button>
+  <button class="btn btn-sm ${_rDockerTab==='catalog'?'btn-primary':'btn-ghost'}" onclick="rDockerTab('catalog')">App Catalog</button>
+</div>
+<div id="rdocker-content"><div class="loading">Loading…</div></div>`;
+
+  window._rDockerAccts = accts;
+  window._rDockerTab   = window._rDockerTab || 'containers';
+
+  window.rDockerTab = async (tab) => {
+    window._rDockerTab = tab;
+    document.querySelectorAll('[onclick^="rDockerTab"]').forEach(b => {
+      const t = b.getAttribute('onclick').match(/'([^']+)'/)?.[1];
+      b.className = 'btn btn-sm ' + (t === tab ? 'btn-primary' : 'btn-ghost');
+    });
+    await rDockerLoadTab(tab);
+  };
+
+  await rDockerLoadTab(window._rDockerTab);
+}
+
+window._rDockerTab = 'containers';
+
+async function rDockerLoadTab(tab) {
+  const tc = document.getElementById('rdocker-content');
+  if (!tc) return;
+  tc.innerHTML = '<div class="loading">Loading…</div>';
+
+  if (tab === 'containers') {
+    const r = await Nova.api('docker', 'containers');
+    const rows = r?.data?.containers || [];
+    tc.innerHTML = rows.length === 0
+      ? '<div class="text-muted" style="padding:2rem;text-align:center">No containers for your accounts</div>'
+      : `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>Image</th><th>Status</th><th>Account</th><th>Actions</th></tr></thead><tbody>
+${rows.map(c=>`<tr>
+  <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(c.name)}</td>
+  <td style="font-size:.82rem">${Nova.escHtml(c.image)}</td>
+  <td>${Nova.badge(c.status,c.status==='running'?'green':'red')}</td>
+  <td>${c.account_id||'—'}</td>
+  <td>
+    ${c.status==='running'
+      ? `<button class="btn btn-xs btn-warning" onclick="rDockerAct('${Nova.escHtml(c.container_id||'')}','stop')">Stop</button>`
+      : `<button class="btn btn-xs btn-success" onclick="rDockerAct('${Nova.escHtml(c.container_id||'')}','start')">Start</button>`}
+    <button class="btn btn-xs btn-ghost" onclick="rDockerLogs('${Nova.escHtml(c.container_id||'')}','${Nova.escHtml(c.name)}')">Logs</button>
+  </td>
+</tr>`).join('')}
+</tbody></table></div>`;
+
+  } else if (tab === 'quotas') {
+    const accts = window._rDockerAccts || [];
+    tc.innerHTML = accts.length === 0
+      ? '<div class="text-muted" style="padding:2rem;text-align:center">No accounts</div>'
+      : `<p class="text-muted" style="margin-bottom:1rem">Set Docker limits for each of your customers.</p>
+<div style="overflow-x:auto"><table class="table"><thead><tr><th>Username</th><th>Max Containers</th><th>Max Memory</th><th>Max CPUs</th><th>Actions</th></tr></thead><tbody>
+${accts.map(u=>`<tr>
+  <td>${Nova.escHtml(u.username)}</td>
+  <td>2</td><td>512 MB</td><td>1.0</td>
+  <td><button class="btn btn-xs btn-primary" onclick="rDockerQuotaModal(${u.user_id},'${Nova.escHtml(u.username)}')">Edit</button></td>
+</tr>`).join('')}
+</tbody></table></div>`;
+
+  } else if (tab === 'catalog') {
+    const r = await Nova.api('docker', 'catalog');
+    const catalog = r?.data?.catalog || {};
+    const accts   = window._rDockerAccts || [];
+    tc.innerHTML = `
+<p class="text-muted" style="margin-bottom:1rem">Pre-install app stacks for your customers.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem">
+${Object.entries(catalog).map(([key,app])=>`
+<div class="card" style="cursor:pointer" onclick="rDockerLaunchModal('${key}','${Nova.escHtml(app.name)}')">
+  <div class="card-body" style="text-align:center;padding:1.5rem">
+    <div style="font-size:1.5rem;font-weight:700;margin-bottom:.5rem;color:var(--primary)">${Nova.escHtml(app.icon)}</div>
+    <div style="font-weight:600">${Nova.escHtml(app.name)}</div>
+    <div style="font-size:.8rem;color:var(--text-muted);margin-top:.25rem">${Nova.escHtml(app.description)}</div>
+    <button class="btn btn-sm btn-primary" style="margin-top:1rem">Deploy</button>
+  </div>
+</div>`).join('')}
+</div>`;
+  }
+}
+
+window.rDockerAct = async (cid, action) => {
+  const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
+  Nova.toast(r?.success ? `Container ${action}ed` : (r?.message||'Failed'), r?.success?'success':'error');
+  if (r?.success) rDockerLoadTab('containers');
+};
+
+window.rDockerLogs = async (cid, name) => {
+  const r = await Nova.api('docker', 'container-logs', { params: { container_id: cid, lines: 100 } });
+  Nova.modal(`Logs: ${name}`, `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(r?.data?.logs||'')}</pre>`);
+};
+
+window.rDockerQuotaModal = (userId, username) => {
+  const ov = Nova.modal(`Docker Quota: ${username}`,
+    `<div class="form-group"><label>Max Containers</label><input id="rdq-cnt" type="number" class="form-control" value="2" min="0"></div>
+     <div class="form-group"><label>Max Memory (MB)</label><input id="rdq-mem" type="number" class="form-control" value="512" min="64"></div>
+     <div class="form-group"><label>Max CPUs</label><input id="rdq-cpus" type="number" step="0.5" class="form-control" value="1.0" min="0.1"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="rDockerQuotaSubmit(${userId})">Save</button>`
+  );
+  window.rDockerQuotaSubmit = async (uid) => {
+    ov.remove();
+    const r = await Nova.api('docker', 'quota-set', { method:'POST', body:{
+      user_id: uid,
+      max_containers: parseInt(document.getElementById('rdq-cnt').value)||2,
+      max_memory_mb:  parseInt(document.getElementById('rdq-mem').value)||512,
+      max_cpus:       parseFloat(document.getElementById('rdq-cpus').value)||1.0,
+    }});
+    Nova.toast(r?.success?'Quota saved':(r?.message||'Failed'),r?.success?'success':'error');
+  };
+};
+
+window.rDockerLaunchModal = async (appKey, appName) => {
+  const catRes = await Nova.api('docker', 'catalog');
+  const app    = catRes?.data?.catalog?.[appKey];
+  if (!app) return;
+  const accts  = window._rDockerAccts || [];
+  const acctOpts = accts.map(a=>`<option value="${a.id}">${Nova.escHtml(a.username)}</option>`).join('');
+  const paramFields = (app.params||[]).map(p=>`
+    <div class="form-group"><label>${Nova.escHtml(p.label)}${p.required?' *':''}</label>
+    <input id="rl-${Nova.escHtml(p.key)}" type="${p.type||'text'}" class="form-control" ${p.placeholder?`placeholder="${Nova.escHtml(p.placeholder)}"`:''}></div>`).join('');
+  const ov = Nova.modal(`Deploy ${appName}`,
+    `<div class="form-group"><label>Account</label><select id="rl-acct" class="form-control"><option value="">Select account</option>${acctOpts}</select></div>${paramFields}`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="rDockerLaunchSubmit('${appKey}')">Deploy</button>`
+  );
+  window.rDockerLaunchSubmit = async (key) => {
+    const acctId = parseInt(document.getElementById('rl-acct').value)||0;
+    if (!acctId) { Nova.toast('Select an account','error'); return; }
+    const params = {};
+    (app.params||[]).forEach(p => { params[p.key] = document.getElementById('rl-'+p.key)?.value||''; });
+    ov.remove();
+    Nova.toast('Deploying…', 'info', 10000);
+    const r = await Nova.api('docker', 'launch', { method:'POST', body:{ account_id: acctId, app_key: key, params }});
+    Nova.toast(r?.success?`${appName} deployed!`:(r?.message||'Deploy failed'), r?.success?'success':'error');
+    if (r?.success) rDockerLoadTab('containers');
+  };
+};

@@ -106,6 +106,10 @@ $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           WordPress
         </a>
+        <a href="#" class="sidebar-link" data-page="docker">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="8" width="4" height="4" rx="1"/><rect x="8" y="8" width="4" height="4" rx="1"/><rect x="14" y="8" width="4" height="4" rx="1"/><rect x="8" y="2" width="4" height="4" rx="1"/><path d="M2 14c0 4 3 6 10 6s10-2 10-6"/><path d="M20 14c1.5 0 2.5-1 2.5-2.5S21.5 9 20 9h-1"/></svg>
+          Docker
+        </a>
       </div>
 
       <div class="sidebar-section">

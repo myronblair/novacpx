@@ -90,6 +90,7 @@
     'nginx-proxy': nginxProxy,
     sessions,
     wordpress,
+    docker,
     'ssl-manager': sslManager,
     firewall,
     'audit-log': auditLog,
@@ -2235,4 +2236,294 @@ window.sessionsRevokeAll = () => {
     Nova.toast(r?.success?'All sessions revoked — logging out...':'Failed',r?.success?'success':'error');
     if(r?.success) setTimeout(()=>location.reload(),1500);
   },true);
+};
+
+// ── #31-35 Docker Management ───────────────────────────────────────────────
+async function docker(el) {
+  el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading Docker status…</div>';
+  const st = await Nova.api('docker', 'status');
+  const status = st?.data || {};
+
+  if (!status.installed) {
+    el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Docker</h2></div>
+<div class="card"><div class="card-body" style="text-align:center;padding:3rem">
+  <div style="font-size:3rem;margin-bottom:1rem">🐳</div>
+  <h3>Docker is not installed</h3>
+  <p class="text-muted" style="margin:.5rem 0 1.5rem">Install Docker CE + Compose on this server to enable container management.</p>
+  <button class="btn btn-primary" onclick="dockerInstall(this)">Install Docker CE</button>
+</div></div>`;
+    window.dockerInstall = async (btn) => {
+      btn.disabled = true; btn.textContent = 'Installing… (this may take 2-3 minutes)';
+      const r = await Nova.api('docker', 'install', { method: 'POST', body: {} });
+      Nova.toast(r?.message || (r?.success ? 'Installed' : 'Failed'), r?.success ? 'success' : 'error');
+      if (r?.success) Nova.loadPage('docker', window._novaPages);
+    };
+    return;
+  }
+
+  const tab = (id, label) => `<button class="btn btn-sm ${id===_dockerTab?'btn-primary':'btn-ghost'}" onclick="dockerTab('${id}')">${label}</button>`;
+  window._dockerTab = window._dockerTab || 'containers';
+
+  el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Docker</h2></div>
+<div class="stats-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card"><div class="stat-label">Engine</div><div class="stat-value stat-green">${Nova.escHtml(status.version || '—')}</div><div class="stat-sub">${status.running ? 'Running' : 'Stopped'}</div></div>
+  ${(status.disk||[]).map(d=>`<div class="stat-card"><div class="stat-label">${Nova.escHtml(d.Type||d.type||'?')}</div><div class="stat-value" style="font-size:1rem">${Nova.escHtml(d.TotalCount||d.Size||'—')}</div><div class="stat-sub">${Nova.escHtml(d.Reclaimable||d.reclaimable||'')}</div></div>`).join('')}
+</div>
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">
+  ${tab('containers','Containers')} ${tab('images','Images')} ${tab('volumes','Volumes')} ${tab('networks','Networks')} ${tab('stacks','Compose Stacks')} ${tab('quotas','User Quotas')}
+  <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="dockerPrune()">System Prune</button>
+</div>
+<div id="docker-tab-content"><div class="loading">Loading…</div></div>`;
+
+  window.dockerTab = async (id) => {
+    window._dockerTab = id;
+    document.querySelectorAll('[onclick^="dockerTab"]').forEach(b => {
+      b.className = 'btn btn-sm ' + (b.getAttribute('onclick').includes(`'${id}'`) ? 'btn-primary' : 'btn-ghost');
+    });
+    await dockerLoadTab(id);
+  };
+
+  window.dockerPrune = () => Nova.confirm('Remove all stopped containers, unused images, and build cache?', async () => {
+    const r = await Nova.api('docker', 'prune', { method: 'POST', body: { volumes: false } });
+    Nova.toast(r?.success ? 'Pruned' : 'Failed', r?.success ? 'success' : 'error');
+    if (r?.success) dockerLoadTab(_dockerTab);
+  }, true);
+
+  await dockerLoadTab(window._dockerTab);
+}
+
+async function dockerLoadTab(tab) {
+  const tc = document.getElementById('docker-tab-content');
+  if (!tc) return;
+  tc.innerHTML = '<div class="loading">Loading…</div>';
+
+  if (tab === 'containers') {
+    const r = await Nova.api('docker', 'containers');
+    const rows = r?.data?.containers || [];
+    tc.innerHTML = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <strong>${rows.length} containers</strong>
+  <button class="btn btn-sm btn-primary" onclick="dockerRunModal()">+ Run Container</button>
+</div>
+${rows.length === 0 ? '<div class="card"><div class="card-body text-muted" style="text-align:center;padding:2rem">No containers</div></div>' : `
+<div style="overflow-x:auto"><table class="table"><thead><tr>
+  <th>Name</th><th>Image</th><th>Status</th><th>Account</th><th>Created</th><th>Actions</th>
+</tr></thead><tbody>
+${rows.map(c => `<tr>
+  <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(c.name)}</td>
+  <td style="font-size:.82rem">${Nova.escHtml(c.image)}</td>
+  <td>${Nova.badge(c.status, c.status==='running'?'green':c.status==='stopped'?'red':'yellow')}</td>
+  <td>${c.account_id || '—'}</td>
+  <td style="font-size:.8rem">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
+  <td style="white-space:nowrap">
+    ${c.status==='running'
+      ? `<button class="btn btn-xs btn-warning" onclick="dockerContainerAct('${Nova.escHtml(c.container_id||'')}','stop')">Stop</button>
+         <button class="btn btn-xs btn-ghost" onclick="dockerContainerAct('${Nova.escHtml(c.container_id||'')}','restart')">Restart</button>`
+      : `<button class="btn btn-xs btn-success" onclick="dockerContainerAct('${Nova.escHtml(c.container_id||'')}','start')">Start</button>`}
+    <button class="btn btn-xs btn-ghost" onclick="dockerLogs('${Nova.escHtml(c.container_id||'')}','${Nova.escHtml(c.name)}')">Logs</button>
+    <button class="btn btn-xs btn-danger" onclick="dockerRemove('${Nova.escHtml(c.container_id||'')}')">Remove</button>
+  </td>
+</tr>`).join('')}
+</tbody></table></div>`}`;
+
+  } else if (tab === 'images') {
+    const r = await Nova.api('docker', 'images');
+    const imgs = r?.data?.images || [];
+    tc.innerHTML = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <strong>${imgs.length} images</strong>
+  <button class="btn btn-sm btn-primary" onclick="dockerPullModal()">Pull Image</button>
+</div>
+${imgs.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:center">No images</div>' : `
+<div style="overflow-x:auto"><table class="table"><thead><tr><th>Repository</th><th>Tag</th><th>ID</th><th>Size</th><th>Actions</th></tr></thead><tbody>
+${imgs.map(i => `<tr>
+  <td>${Nova.escHtml(i.Repository||i.repository||'—')}</td>
+  <td><code>${Nova.escHtml(i.Tag||i.tag||'latest')}</code></td>
+  <td style="font-family:monospace;font-size:.78rem">${Nova.escHtml((i.ID||i.id||'').substring(7,19))}</td>
+  <td>${Nova.escHtml(i.Size||i.size||'—')}</td>
+  <td><button class="btn btn-xs btn-danger" onclick="dockerImgRemove('${Nova.escHtml(i.ID||i.id||'')}')">Remove</button></td>
+</tr>`).join('')}
+</tbody></table></div>`}`;
+
+  } else if (tab === 'volumes') {
+    const r = await Nova.api('docker', 'volumes');
+    const vols = r?.data?.volumes || [];
+    tc.innerHTML = `<strong>${vols.length} volumes</strong>
+${vols.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:center">No volumes</div>' : `
+<div style="overflow-x:auto;margin-top:1rem"><table class="table"><thead><tr><th>Name</th><th>Driver</th><th>Scope</th></tr></thead><tbody>
+${vols.map(v=>`<tr><td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(v.Name||v.name||'')}</td><td>${Nova.escHtml(v.Driver||v.driver||'')}</td><td>${Nova.escHtml(v.Scope||v.scope||'')}</td></tr>`).join('')}
+</tbody></table></div>`}`;
+
+  } else if (tab === 'networks') {
+    const r = await Nova.api('docker', 'networks');
+    const nets = r?.data?.networks || [];
+    tc.innerHTML = `<strong>${nets.length} networks</strong>
+${nets.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:center">No networks</div>' : `
+<div style="overflow-x:auto;margin-top:1rem"><table class="table"><thead><tr><th>Name</th><th>Driver</th><th>Scope</th><th>ID</th></tr></thead><tbody>
+${nets.map(n=>`<tr><td>${Nova.escHtml(n.Name||n.name||'')}</td><td>${Nova.escHtml(n.Driver||n.driver||'')}</td><td>${Nova.escHtml(n.Scope||n.scope||'')}</td><td style="font-family:monospace;font-size:.78rem">${Nova.escHtml((n.ID||n.id||'').substring(0,12))}</td></tr>`).join('')}
+</tbody></table></div>`}`;
+
+  } else if (tab === 'stacks') {
+    const r = await Nova.api('docker', 'stacks');
+    const stacks = r?.data?.stacks || [];
+    tc.innerHTML = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <strong>${stacks.length} stacks</strong>
+  <button class="btn btn-sm btn-primary" onclick="dockerStackCreateModal()">+ Create Stack</button>
+</div>
+${stacks.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:center">No compose stacks</div>' : `
+<div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>Status</th><th>Account</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+${stacks.map(s=>`<tr>
+  <td>${Nova.escHtml(s.name)}</td>
+  <td>${Nova.badge(s.status, s.status==='running'?'green':s.status==='stopped'?'red':'yellow')}</td>
+  <td>${s.account_id||'admin'}</td>
+  <td style="font-size:.8rem">${new Date(s.created_at).toLocaleDateString()}</td>
+  <td style="white-space:nowrap">
+    <button class="btn btn-xs btn-success" onclick="dockerStackAct(${s.id},'up')">Up</button>
+    <button class="btn btn-xs btn-warning" onclick="dockerStackAct(${s.id},'down')">Down</button>
+    <button class="btn btn-xs btn-ghost" onclick="dockerStackAct(${s.id},'logs')">Logs</button>
+    <button class="btn btn-xs btn-danger" onclick="dockerStackRemove(${s.id})">Remove</button>
+  </td>
+</tr>`).join('')}
+</tbody></table></div>`}`;
+
+  } else if (tab === 'quotas') {
+    const r = await Nova.api('accounts', 'list', { params: { limit: 200 } });
+    const users = r?.data?.accounts || [];
+    tc.innerHTML = `
+<p class="text-muted" style="margin-bottom:1rem">Set Docker resource limits per user. Click a row to edit.</p>
+<div style="overflow-x:auto"><table class="table"><thead><tr><th>Username</th><th>Max Containers</th><th>Max Memory</th><th>Max CPUs</th><th>Actions</th></tr></thead><tbody>
+${users.map(u=>`<tr id="docker-quota-row-${u.user_id}">
+  <td>${Nova.escHtml(u.username)}</td>
+  <td id="dq-cnt-${u.user_id}">2</td>
+  <td id="dq-mem-${u.user_id}">512 MB</td>
+  <td id="dq-cpu-${u.user_id}">1.0</td>
+  <td><button class="btn btn-xs btn-primary" onclick="dockerQuotaModal(${u.user_id},'${Nova.escHtml(u.username)}')">Edit</button></td>
+</tr>`).join('')}
+</tbody></table></div>`;
+  }
+}
+
+window.dockerContainerAct = async (cid, action) => {
+  const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
+  Nova.toast(r?.success ? `Container ${action}ed` : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
+  if (r?.success) dockerLoadTab('containers');
+};
+
+window.dockerRemove = (cid) => Nova.confirm('Remove this container?', async () => {
+  const r = await Nova.api('docker', 'container-remove', { method: 'DELETE', body: { container_id: cid, force: true } });
+  Nova.toast(r?.success ? 'Removed' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
+  if (r?.success) dockerLoadTab('containers');
+}, true);
+
+window.dockerLogs = async (cid, name) => {
+  const r = await Nova.api('docker', 'container-logs', { params: { container_id: cid, lines: 200 } });
+  const logs = r?.data?.logs || r?.message || 'No logs';
+  Nova.modal(`Logs: ${name}`, `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(logs)}</pre>`);
+};
+
+window.dockerImgRemove = (id) => Nova.confirm('Remove this image?', async () => {
+  const r = await Nova.api('docker', 'image-remove', { method: 'DELETE', body: { image_id: id } });
+  Nova.toast(r?.success ? 'Image removed' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
+  if (r?.success) dockerLoadTab('images');
+}, true);
+
+window.dockerPullModal = () => {
+  const ov = Nova.modal('Pull Image',
+    `<div class="form-group"><label>Image Name</label><input id="di-image" class="form-control" placeholder="nginx:latest" autofocus></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="dockerPullSubmit()">Pull</button>`
+  );
+  window.dockerPullSubmit = async () => {
+    const image = document.getElementById('di-image').value.trim();
+    if (!image) return;
+    ov.remove();
+    Nova.toast('Pulling image…', 'info', 10000);
+    const r = await Nova.api('docker', 'image-pull', { method: 'POST', body: { image } });
+    Nova.toast(r?.success ? 'Image pulled' : (r?.message || 'Pull failed'), r?.success ? 'success' : 'error');
+    if (r?.success) dockerLoadTab('images');
+  };
+};
+
+window.dockerRunModal = () => {
+  const ov = Nova.modal('Run Container',
+    `<div class="form-group"><label>Image</label><input id="dr-image" class="form-control" placeholder="nginx:latest"></div>
+     <div class="form-group"><label>Name</label><input id="dr-name" class="form-control" placeholder="my-app"></div>
+     <div class="form-group"><label>Account ID</label><input id="dr-acct" type="number" class="form-control" placeholder="1"></div>
+     <div class="form-group"><label>Ports (host:container, one per line)</label><textarea id="dr-ports" class="form-control" rows="2" placeholder="8080:80"></textarea></div>
+     <div class="form-group"><label>Memory (MB)</label><input id="dr-mem" type="number" class="form-control" value="256"></div>
+     <div class="form-group"><label>CPUs</label><input id="dr-cpus" type="number" step="0.1" class="form-control" value="0.5"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="dockerRunSubmit()">Run</button>`
+  );
+  window.dockerRunSubmit = async () => {
+    const image = document.getElementById('dr-image').value.trim();
+    const name  = document.getElementById('dr-name').value.trim();
+    const acct  = parseInt(document.getElementById('dr-acct').value) || 0;
+    const ports = document.getElementById('dr-ports').value.trim().split('\n').map(p=>p.trim()).filter(Boolean);
+    const mem   = parseInt(document.getElementById('dr-mem').value) || 256;
+    const cpus  = parseFloat(document.getElementById('dr-cpus').value) || 0.5;
+    if (!image || !name || !acct) { Nova.toast('Image, name and account required','error'); return; }
+    ov.remove();
+    const r = await Nova.api('docker', 'container-run', { method: 'POST', body: { image, name, account_id: acct, ports, memory_mb: mem, cpus } });
+    Nova.toast(r?.success ? 'Container started' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) dockerLoadTab('containers');
+  };
+};
+
+window.dockerStackAct = async (id, action) => {
+  Nova.toast(`Running docker compose ${action}…`, 'info', 5000);
+  const r = await Nova.api('docker', 'stack-action', { method: 'POST', body: { stack_id: id, action } });
+  if (action === 'logs') {
+    Nova.modal('Stack Logs', `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(r?.data?.output||'')}</pre>`);
+  } else {
+    Nova.toast(r?.success ? `Stack ${action} complete` : (r?.message||'Failed'), r?.success?'success':'error');
+    if (r?.success) dockerLoadTab('stacks');
+  }
+};
+
+window.dockerStackRemove = (id) => Nova.confirm('Remove this stack? Docker Compose down will be run first.', async () => {
+  const r = await Nova.api('docker', 'stack-remove', { method: 'DELETE', body: { stack_id: id } });
+  Nova.toast(r?.success ? 'Stack removed' : (r?.message||'Failed'), r?.success?'success':'error');
+  if (r?.success) dockerLoadTab('stacks');
+}, true);
+
+window.dockerStackCreateModal = () => {
+  const ov = Nova.modal('Create Compose Stack',
+    `<div class="form-group"><label>Stack Name</label><input id="dsc-name" class="form-control" placeholder="my-stack"></div>
+     <div class="form-group"><label>Account ID (leave blank for admin)</label><input id="dsc-acct" type="number" class="form-control"></div>
+     <div class="form-group"><label>docker-compose.yml content</label><textarea id="dsc-yaml" class="form-control" rows="12" style="font-family:monospace;font-size:.8rem" placeholder="version: '3.8'\nservices:\n  app:\n    image: nginx\n"></textarea></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="dockerStackCreateSubmit()">Create</button>`
+  );
+  window.dockerStackCreateSubmit = async () => {
+    const name = document.getElementById('dsc-name').value.trim();
+    const acct = document.getElementById('dsc-acct').value.trim();
+    const yaml = document.getElementById('dsc-yaml').value;
+    if (!name || !yaml) { Nova.toast('Name and YAML required','error'); return; }
+    ov.remove();
+    const r = await Nova.api('docker', 'stack-create', { method: 'POST', body: { name, account_id: acct||null, compose_yaml: yaml } });
+    Nova.toast(r?.success ? 'Stack created' : (r?.message||'Failed'), r?.success?'success':'error');
+    if (r?.success) dockerLoadTab('stacks');
+  };
+};
+
+window.dockerQuotaModal = (userId, username) => {
+  const ov = Nova.modal(`Docker Quota: ${username}`,
+    `<div class="form-group"><label>Max Containers</label><input id="dq-cnt" type="number" class="form-control" value="2" min="0"></div>
+     <div class="form-group"><label>Max Memory (MB)</label><input id="dq-mem" type="number" class="form-control" value="512" min="64"></div>
+     <div class="form-group"><label>Max CPUs</label><input id="dq-cpus" type="number" step="0.5" class="form-control" value="1.0" min="0.1"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="dockerQuotaSubmit(${userId})">Save</button>`
+  );
+  window.dockerQuotaSubmit = async (uid) => {
+    const cnt  = parseInt(document.getElementById('dq-cnt').value)  || 2;
+    const mem  = parseInt(document.getElementById('dq-mem').value)  || 512;
+    const cpus = parseFloat(document.getElementById('dq-cpus').value) || 1.0;
+    ov.remove();
+    const r = await Nova.api('docker', 'quota-set', { method: 'POST', body: { user_id: uid, max_containers: cnt, max_memory_mb: mem, max_cpus: cpus } });
+    Nova.toast(r?.success ? 'Quota saved' : (r?.message||'Failed'), r?.success?'success':'error');
+  };
 };

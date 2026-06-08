@@ -1,0 +1,210 @@
+<?php
+require_once NOVACPX_LIB . '/DockerManager.php';
+
+$auth    = Auth::getInstance();
+$role    = $currentUser['role'];
+$body    = json_decode(file_get_contents('php://input'), true) ?? [];
+$dm      = new DockerManager();
+$isAdmin = $role === 'admin';
+
+match ($action) {
+
+    // ── Engine ──────────────────────────────────────────────────────────────
+    'status' => (function() use ($dm, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        Response::success($dm->engineStatus());
+    })(),
+
+    'install' => (function() use ($dm, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $msg = $dm->install();
+        audit('docker.install', 'system');
+        Response::success(null, $msg);
+    })(),
+
+    'prune' => (function() use ($dm, $body, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $out = $dm->systemPrune((bool)($body['volumes'] ?? false));
+        audit('docker.prune', 'system');
+        Response::success(['output' => $out], 'Prune complete');
+    })(),
+
+    // ── Containers ──────────────────────────────────────────────────────────
+    'containers' => (function() use ($dm, $currentUser, $isAdmin, $role) {
+        $accountId = $isAdmin ? (isset($_GET['account_id']) ? (int)$_GET['account_id'] : null)
+                              : ($currentUser['account_id'] ?? null);
+        if ($role === 'reseller') $accountId = null; // resellers see their customers' containers below
+        $list = $dm->listContainers($accountId);
+        Response::success(['containers' => $list]);
+    })(),
+
+    'container-action' => (function() use ($dm, $body, $currentUser, $isAdmin, $role) {
+        $cid    = $body['container_id'] ?? '';
+        $act    = $body['action'] ?? '';
+        if (!$cid || !$act) Response::error('container_id and action required');
+        // Access check for non-admins
+        if (!$isAdmin) {
+            $acctId = $currentUser['account_id'] ?? 0;
+            $row = DB::getInstance()->fetchOne("SELECT id FROM docker_containers WHERE container_id=? AND account_id=?", [$cid, $acctId]);
+            if (!$row) Response::error('Container not found', 404);
+        }
+        $out = $dm->containerAction($cid, $act);
+        audit("docker.container.{$act}", "container:{$cid}");
+        Response::success(['output' => $out]);
+    })(),
+
+    'container-remove' => (function() use ($dm, $body, $currentUser, $isAdmin) {
+        $cid   = $body['container_id'] ?? '';
+        $force = (bool)($body['force'] ?? false);
+        if (!$cid) Response::error('container_id required');
+        if (!$isAdmin) {
+            $acctId = $currentUser['account_id'] ?? 0;
+            $row = DB::getInstance()->fetchOne("SELECT id FROM docker_containers WHERE container_id=? AND account_id=?", [$cid, $acctId]);
+            if (!$row) Response::error('Container not found', 404);
+        }
+        $dm->removeContainer($cid, $force);
+        audit('docker.container.remove', "container:{$cid}");
+        Response::success(null, 'Container removed');
+    })(),
+
+    'container-logs' => (function() use ($dm, $currentUser, $isAdmin) {
+        $cid   = $_GET['container_id'] ?? '';
+        $lines = min((int)($_GET['lines'] ?? 100), 500);
+        if (!$cid) Response::error('container_id required');
+        if (!$isAdmin) {
+            $acctId = $currentUser['account_id'] ?? 0;
+            $row = DB::getInstance()->fetchOne("SELECT id FROM docker_containers WHERE container_id=? AND account_id=?", [$cid, $acctId]);
+            if (!$row) Response::error('Container not found', 404);
+        }
+        $logs = $dm->containerLogs($cid, $lines);
+        Response::success(['logs' => $logs]);
+    })(),
+
+    'container-inspect' => (function() use ($dm, $currentUser, $isAdmin) {
+        $cid = $_GET['container_id'] ?? '';
+        if (!$cid) Response::error('container_id required');
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $data = $dm->containerInspect($cid);
+        Response::success(['inspect' => $data]);
+    })(),
+
+    'container-run' => (function() use ($dm, $body, $currentUser, $isAdmin, $role) {
+        if ($isAdmin) {
+            $accountId = (int)($body['account_id'] ?? 0);
+            if (!$accountId) Response::error('account_id required');
+        } else {
+            $accountId = $currentUser['account_id'] ?? 0;
+        }
+        if (!$accountId) Response::error('No account context');
+        $image = $body['image'] ?? '';
+        $name  = $body['name']  ?? '';
+        if (!$image || !$name) Response::error('image and name required');
+        $result = $dm->runContainer($accountId, $image, $name, $body);
+        audit('docker.container.run', "account:{$accountId} image:{$image}");
+        Response::success($result, 'Container started');
+    })(),
+
+    // ── Images ──────────────────────────────────────────────────────────────
+    'images' => (function() use ($dm, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        Response::success(['images' => $dm->listImages()]);
+    })(),
+
+    'image-pull' => (function() use ($dm, $body, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $image = $body['image'] ?? '';
+        if (!$image) Response::error('image required');
+        $out = $dm->pullImage($image);
+        audit('docker.image.pull', "image:{$image}");
+        Response::success(['output' => $out], 'Image pulled');
+    })(),
+
+    'image-remove' => (function() use ($dm, $body, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $id = $body['image_id'] ?? '';
+        if (!$id) Response::error('image_id required');
+        $out = $dm->removeImage($id);
+        audit('docker.image.remove', "image:{$id}");
+        Response::success(['output' => $out], 'Image removed');
+    })(),
+
+    // ── Volumes & Networks ───────────────────────────────────────────────────
+    'volumes' => (function() use ($dm, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        Response::success(['volumes' => $dm->listVolumes()]);
+    })(),
+
+    'networks' => (function() use ($dm, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        Response::success(['networks' => $dm->listNetworks()]);
+    })(),
+
+    // ── Compose Stacks ───────────────────────────────────────────────────────
+    'stacks' => (function() use ($dm, $currentUser, $isAdmin) {
+        $accountId = $isAdmin ? (isset($_GET['account_id']) ? (int)$_GET['account_id'] : null)
+                              : ($currentUser['account_id'] ?? null);
+        Response::success(['stacks' => $dm->listStacks($accountId)]);
+    })(),
+
+    'stack-create' => (function() use ($dm, $body, $currentUser, $isAdmin) {
+        $accountId = $isAdmin ? ($body['account_id'] ?? null) : ($currentUser['account_id'] ?? null);
+        $name      = $body['name']         ?? '';
+        $yaml      = $body['compose_yaml'] ?? '';
+        if (!$name || !$yaml) Response::error('name and compose_yaml required');
+        $result = $dm->createStack($accountId ? (int)$accountId : null, $name, $yaml);
+        audit('docker.stack.create', "name:{$name}");
+        Response::success($result, 'Stack created');
+    })(),
+
+    'stack-action' => (function() use ($dm, $body, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $id  = (int)($body['stack_id'] ?? 0);
+        $act = $body['action'] ?? '';
+        if (!$id || !$act) Response::error('stack_id and action required');
+        $out = $dm->composeAction($id, $act);
+        audit("docker.stack.{$act}", "stack:{$id}");
+        Response::success(['output' => $out]);
+    })(),
+
+    'stack-remove' => (function() use ($dm, $body, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $id = (int)($body['stack_id'] ?? 0);
+        if (!$id) Response::error('stack_id required');
+        $dm->removeStack($id);
+        audit('docker.stack.remove', "stack:{$id}");
+        Response::success(null, 'Stack removed');
+    })(),
+
+    // ── Quotas ───────────────────────────────────────────────────────────────
+    'quota-get' => (function() use ($dm, $currentUser, $isAdmin) {
+        $userId = $isAdmin && isset($_GET['user_id']) ? (int)$_GET['user_id'] : (int)$currentUser['uid'];
+        Response::success(['quota' => $dm->getQuota($userId)]);
+    })(),
+
+    'quota-set' => (function() use ($dm, $body, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $userId = (int)($body['user_id'] ?? 0);
+        if (!$userId) Response::error('user_id required');
+        $dm->setQuota($userId, (int)($body['max_containers'] ?? 2), (int)($body['max_memory_mb'] ?? 512), (float)($body['max_cpus'] ?? 1.0));
+        audit('docker.quota.set', "user:{$userId}");
+        Response::success(null, 'Quota saved');
+    })(),
+
+    // ── App Catalog ──────────────────────────────────────────────────────────
+    'catalog' => (function() use ($dm) {
+        Response::success(['catalog' => DockerManager::getCatalog()]);
+    })(),
+
+    'launch' => (function() use ($dm, $body, $currentUser, $isAdmin) {
+        $accountId = $isAdmin ? (int)($body['account_id'] ?? 0) : ($currentUser['account_id'] ?? 0);
+        if (!$accountId) Response::error('account_id required');
+        $appKey = $body['app_key'] ?? '';
+        $params = $body['params'] ?? [];
+        if (!$appKey) Response::error('app_key required');
+        $result = $dm->launchFromCatalog($accountId, $appKey, $params);
+        audit("docker.launch.{$appKey}", "account:{$accountId}");
+        Response::success($result, ucfirst($appKey) . ' launched successfully');
+    })(),
+
+    default => Response::error("Unknown docker action: $action", 404),
+};
