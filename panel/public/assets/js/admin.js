@@ -454,7 +454,6 @@
     });
   };
   window.alGoPage = (p) => auditLog({ ...(window._alOpts || {}), page: p });
-  }
 
   // ── PHP Manager ────────────────────────────────────────────────────────────
   async function phpManager() {
