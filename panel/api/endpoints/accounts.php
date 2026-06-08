@@ -129,7 +129,7 @@ match ($action) {
     })(),
 
     'suspend' => (function() use ($db, $body, $ownerClause) {
-        $id = (int)($body['id'] ?? 0);
+        $id = (int)($body['id'] ?? $body['account_id'] ?? 0);
         $acct = $db->fetchOne(
             "SELECT a.id, a.username, a.domain, u.email FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.id = ? $ownerClause",
             [$id]
@@ -143,7 +143,7 @@ match ($action) {
     })(),
 
     'unsuspend' => (function() use ($db, $body, $ownerClause) {
-        $id = (int)($body['id'] ?? 0);
+        $id = (int)($body['id'] ?? $body['account_id'] ?? 0);
         AccountManager::unsuspend($id);
         audit('account.unsuspend', "account:$id");
         Response::success(null, 'Account unsuspended');
@@ -151,7 +151,7 @@ match ($action) {
 
     'terminate' => (function() use ($db, $body, $user) {
         Auth::getInstance()->require('admin');
-        $id = (int)($body['id'] ?? 0);
+        $id = (int)($body['id'] ?? $body['account_id'] ?? 0);
         AccountManager::terminate($id);
         audit('account.terminate', "account:$id");
         Response::success(null, 'Account terminated');
