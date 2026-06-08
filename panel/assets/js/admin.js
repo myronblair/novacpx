@@ -724,7 +724,7 @@
   // ── Accounts ───────────────────────────────────────────────────────────────
   async function accounts() {
     const res = await Nova.api('accounts', 'list');
-    const accts = res?.data?.accounts || [];
+    const accts = res?.data || [];
     window._adminAccts = accts;
     return `
 <div class="card">
@@ -766,7 +766,7 @@
   window.adminSearchAccounts = async (q) => {
     const res = await Nova.api('accounts', 'list', { params: q ? { search: q } : {}});
     const el = document.getElementById('admin-acct-table');
-    if (el) el.innerHTML = renderAccountTable(res?.data?.accounts || []);
+    if (el) el.innerHTML = renderAccountTable(res?.data || []);
   };
   window.adminSuspend = async (id, user) => {
     Nova.confirm(`Suspend ${user}?`, async () => {
@@ -843,7 +843,7 @@
   // ── Resellers ──────────────────────────────────────────────────────────────
   async function resellers() {
     const res = await Nova.api('accounts', 'list', { params:{ role: 'reseller' }});
-    const rows = res?.data?.accounts || [];
+    const rows = res?.data || [];
     return `
 <div class="card">
   <div class="card-header">
@@ -1101,7 +1101,7 @@
     Nova.toast('Queuing SSL for all domains without certificates…','info',6000);
     const accts = await Nova.api('accounts','list',{params:{limit:1000}});
     let count = 0;
-    for (const a of (accts?.data?.accounts || [])) {
+    for (const a of (accts?.data || [])) {
       await Nova.api('ssl','issue',{method:'POST',body:{domain:a.domain}});
       count++;
     }
@@ -1881,21 +1881,48 @@ ${dbs.map(d=>`<tr>
   };
 
   window.applyOSUpdate = async () => {
-    Nova.confirm('Apply OS package upgrades? Services will be automatically restarted if needed. The NovaCPX panel will self-restore from backup if any ports go down.', async () => {
-      Nova.loading('Running OS upgrade — this may take a few minutes…');
-      const res = await Nova.api('system', 'apply-os-update', { method: 'POST', timeout: 120000 });
-      Nova.loadingDone();
-      if (res?.data) {
-        const d = res.data;
-        const healed = Object.entries(d.services_healed || {}).map(([s,r]) => `${s}: ${r}`).join(', ');
-        let msg = 'OS upgrade complete.';
-        if (healed) msg += ` Auto-healed: ${healed}.`;
-        if (!d.panel_ports_ok) msg += ' ⚠ Panel ports were down — auto-restored from backup.';
-        Nova.toast(msg, d.panel_ports_ok ? 'success' : 'warning', 10000);
-        Nova.loadPage('updates', pages);
-      } else {
-        Nova.toast(res?.error || 'Upgrade failed', 'error', 8000);
+    Nova.confirm('Apply OS package upgrades? Services will be automatically restarted if needed.', async () => {
+      const startRes = await Nova.api('system', 'apply-os-update', { method: 'POST' });
+      if (!startRes?.success) {
+        Nova.toast(startRes?.message || 'Failed to start upgrade', 'error');
+        return;
       }
+      const jobId = startRes.data.job_id;
+
+      const ov = Nova.modal('OS Update Progress',
+        `<div id="os-term" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.8rem;line-height:1.5;padding:1rem;height:340px;overflow-y:auto;border-radius:6px;white-space:pre-wrap;word-break:break-word">Starting upgrade…</div>`,
+        `<span id="os-upd-status" style="color:var(--text-muted);font-size:.85rem">Running…</span>
+         <div style="flex:1"></div>
+         <button class="btn btn-ghost" id="os-close-btn" disabled onclick="this.closest('.modal-overlay').remove()">Close</button>`
+      );
+
+      const term     = document.getElementById('os-term');
+      const statusEl = document.getElementById('os-upd-status');
+      const closeBtn = document.getElementById('os-close-btn');
+
+      const poll = async () => {
+        const r = await Nova.api('system', 'os-update-status', { params: { job_id: jobId } });
+        if (!r?.success) {
+          if (term) term.textContent += '\n[Error reading job status]';
+          if (statusEl) statusEl.textContent = 'Error';
+          if (closeBtn) closeBtn.disabled = false;
+          return;
+        }
+        if (term) {
+          term.textContent = (r.data.lines || []).join('\n') || 'Waiting for output…';
+          term.scrollTop = term.scrollHeight;
+        }
+        if (r.data.done) {
+          const ok = r.data.exit_code === 0;
+          if (statusEl) { statusEl.textContent = ok ? 'Complete' : `Failed (exit ${r.data.exit_code})`; statusEl.style.color = ok ? 'var(--success,#22c55e)' : 'var(--error,#ef4444)'; }
+          if (closeBtn) closeBtn.disabled = false;
+          Nova.toast(ok ? 'OS upgrade complete' : 'OS upgrade finished with errors — see log', ok ? 'success' : 'error', 8000);
+        } else {
+          setTimeout(poll, 2000);
+        }
+      };
+
+      setTimeout(poll, 2000);
     });
   };
 
@@ -1965,7 +1992,7 @@ async function wordpressPage() {
     Nova.api('accounts','list',{params:{limit:500}}),
     Nova.api('wordpress','list'),
   ]);
-  const accts = acctRes?.data?.accounts || [];
+  const accts = acctRes?.data || [];
   const installs = wpRes?.data?.installs || [];
   window._adminAcctsWP = accts;
 
@@ -2090,7 +2117,7 @@ async function backupsFull() {
     Nova.api('accounts','list',{params:{limit:500}}),
     Nova.api('backup','list'),
   ]);
-  const accts = acctRes?.data?.accounts || [];
+  const accts = acctRes?.data || [];
   const backupList = bkRes?.data?.backups || [];
   const diskUsed = bkRes?.data?.disk_used || 0;
   window._adminAcctsBK = accts;
@@ -2264,7 +2291,7 @@ window.bkSaveScheduleFor = async (id) => {
 // ── Cloudflare Integration (#16) ──────────────────────────────────────────
 async function cloudflarePage() {
   const acctRes = await Nova.api('accounts','list',{params:{limit:500}});
-  const accts = acctRes?.data?.accounts || [];
+  const accts = acctRes?.data || [];
   window._adminAcctsCF = accts;
 
   return `
@@ -2413,7 +2440,7 @@ window.cfPurge = async (zoneId, acctId) => {
 // ── TOTP / 2FA Admin (#17) ────────────────────────────────────────────────
 async function twofaPage() {
   const res = await Nova.api('accounts','list',{params:{limit:500}});
-  const users = res?.data?.accounts || [];
+  const users = res?.data || [];
   return `
 <div class="page-header mb-3">
   <h2 class="page-title">Two-Factor Authentication</h2>
@@ -2934,7 +2961,7 @@ ${stacks.map(s=>`<tr>
 
   } else if (tab === 'quotas') {
     const r = await Nova.api('accounts', 'list', { params: { limit: 200 } });
-    const users = r?.data?.accounts || [];
+    const users = r?.data || [];
     tc.innerHTML = `
 <p class="text-muted" style="margin-bottom:1rem">Set Docker resource limits per user. Click a row to edit.</p>
 <div style="overflow-x:auto"><table class="table"><thead><tr><th>Username</th><th>Max Containers</th><th>Max Memory</th><th>Max CPUs</th><th>Actions</th></tr></thead><tbody>

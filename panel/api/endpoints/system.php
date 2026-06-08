@@ -111,76 +111,73 @@ match ($action) {
         ]);
     })(),
 
-    // ── Apply OS update ───────────────────────────────────────────────────────
+    // ── Start OS update (background job) ─────────────────────────────────────
     'apply-os-update' => (function() use ($db) {
         Auth::getInstance()->require('admin');
-        set_time_limit(300);
+        $jobId    = bin2hex(random_bytes(8));
+        $logFile  = "/tmp/ncpx-os-update-{$jobId}.log";
+        $doneFile = "/tmp/ncpx-os-update-{$jobId}.done";
+        $script   = "/tmp/ncpx-os-update-{$jobId}.sh";
+        $webSvc   = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
+        $webRoot  = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
+        $backupDir = '/var/novacpx/backups/pre-os-update-' . date('YmdHis');
 
-        $panelPorts = [PORT_USER, PORT_RESELLER, PORT_ADMIN];
-        $webSvc = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
+        $sh = <<<BASH
+#!/bin/bash
+exec > {$logFile} 2>&1
+echo "[$(date -u +%H:%M:%S UTC)] Preparing backup..."
+mkdir -p {$backupDir}
+cp -a {$webRoot} {$backupDir}/public 2>/dev/null
+echo "[$(date -u +%H:%M:%S UTC)] Updating package lists..."
+sudo apt-get update -q
+echo "[$(date -u +%H:%M:%S UTC)] Running upgrade (non-interactive)..."
+DEBIAN_FRONTEND=noninteractive sudo apt-get upgrade -y \\
+  -o Dpkg::Options::="--force-confdef" \\
+  -o Dpkg::Options::="--force-confold"
+UPGRADE_EXIT=\$?
+echo "[$(date -u +%H:%M:%S UTC)] Checking services..."
+for SVC in {$webSvc} mysql postfix dovecot; do
+  if systemctl is-active --quiet \$SVC 2>/dev/null; then :; else
+    echo "[$(date -u +%H:%M:%S UTC)] Restarting \$SVC..."
+    sudo systemctl restart \$SVC 2>/dev/null && echo "  \$SVC restarted OK" || echo "  \$SVC restart FAILED"
+  fi
+done
+if [ \$UPGRADE_EXIT -eq 0 ]; then
+  echo "[$(date -u +%H:%M:%S UTC)] Upgrade complete."
+else
+  echo "[$(date -u +%H:%M:%S UTC)] Upgrade finished with errors (exit code \$UPGRADE_EXIT)."
+fi
+echo \$UPGRADE_EXIT > {$doneFile}
+BASH;
+        file_put_contents($script, $sh);
+        chmod($script, 0755);
+        shell_exec("nohup " . escapeshellarg($script) . " > /dev/null 2>&1 &");
 
-        // Snapshot service states before upgrade
-        $beforeServices = [];
-        foreach ([$webSvc, 'mysql', 'postfix', 'dovecot', 'proftpd', 'named'] as $svc) {
-            $beforeServices[$svc] = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: 'unknown');
+        audit('system.os-update-start', $jobId);
+        Response::success(['job_id' => $jobId]);
+    })(),
+
+    // ── Poll OS update job status ─────────────────────────────────────────────
+    'os-update-status' => (function() {
+        Auth::getInstance()->require('admin');
+        $jobId = preg_replace('/[^a-f0-9]/', '', $_GET['job_id'] ?? '');
+        if (!$jobId) Response::error('job_id required');
+
+        $logFile  = "/tmp/ncpx-os-update-{$jobId}.log";
+        $doneFile = "/tmp/ncpx-os-update-{$jobId}.done";
+
+        $content  = @file_get_contents($logFile) ?: '';
+        $lines    = $content !== '' ? explode("\n", rtrim($content)) : [];
+        $done     = file_exists($doneFile);
+        $exitCode = $done ? (int)trim(@file_get_contents($doneFile) ?: '1') : null;
+
+        if ($done) {
+            @unlink($logFile);
+            @unlink($doneFile);
+            @unlink("/tmp/ncpx-os-update-{$jobId}.sh");
         }
 
-        // Backup panel web root
-        $backupDir  = '/var/novacpx/backups/pre-os-update-' . date('YmdHis');
-        $webRoot    = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
-        shell_exec("mkdir -p " . escapeshellarg($backupDir));
-        shell_exec("cp -a " . escapeshellarg($webRoot) . " " . escapeshellarg("$backupDir/public") . " 2>&1");
-
-        // Run upgrade (non-interactive, hold back kernel packages to avoid reboot surprise)
-        $env  = 'DEBIAN_FRONTEND=noninteractive';
-        $opts = '-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"';
-        $out  = shell_exec("$env apt-get upgrade -y -q $opts 2>&1");
-
-        // Self-healing: restart any service that went down
-        $healed = [];
-        sleep(3);
-        foreach ($beforeServices as $svc => $wasBefore) {
-            if ($wasBefore !== 'active') continue;
-            $nowState = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
-            if ($nowState !== 'active') {
-                shell_exec("sudo systemctl restart $svc 2>/dev/null");
-                sleep(2);
-                $afterHeal = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
-                $healed[$svc] = $afterHeal === 'active' ? 'restarted' : 'FAILED';
-                if ($afterHeal !== 'active') {
-                    novacpx_log('error', "Self-heal FAILED for $svc after OS upgrade");
-                }
-            }
-        }
-
-        // Verify panel ports respond
-        $panelOk = [];
-        foreach ($panelPorts as $port) {
-            $proto = in_array($port, [PORT_ADMIN, PORT_RESELLER, PORT_USER]) ? 'https' : 'http';
-            $ch = curl_init("{$proto}://127.0.0.1:{$port}/");
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_TIMEOUT => 5]);
-            curl_exec($ch);
-            $panelOk[$port] = curl_getinfo($ch, CURLINFO_HTTP_CODE) > 0;
-            curl_close($ch);
-        }
-        $panelDown = array_keys(array_filter($panelOk, fn($ok) => !$ok));
-
-        // If panel ports down, restore from backup and restart web server
-        if ($panelDown) {
-            shell_exec("cp -a " . escapeshellarg("$backupDir/public") . " " . escapeshellarg($webRoot) . " 2>&1");
-            shell_exec("sudo systemctl restart $webSvc 2>/dev/null");
-            novacpx_log('error', 'Panel ports down after OS upgrade — restored from backup');
-        }
-
-        audit('system.os-update', "upgraded; healed:" . implode(',', array_keys($healed)));
-        Response::success([
-            'upgraded'         => true,
-            'panel_ports_ok'   => empty($panelDown),
-            'panel_ports_down' => $panelDown,
-            'services_healed'  => $healed,
-            'backup_path'      => $backupDir,
-            'upgrade_output'   => substr($out ?: '', -2000),
-        ]);
+        Response::success(['lines' => $lines, 'done' => $done, 'exit_code' => $exitCode]);
     })(),
 
     // ── Check NovaCPX update ─────────────────────────────────────────────────
