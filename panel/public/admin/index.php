@@ -14,6 +14,7 @@ $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
 <body>
 
 <div class="panel-layout" id="app" style="display:none">
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
 
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
@@ -97,6 +98,14 @@ $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           FTP Server
         </a>
+        <a href="#" class="sidebar-link" data-page="nginx-proxy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          Nginx Proxy
+        </a>
+        <a href="#" class="sidebar-link" data-page="wordpress">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          WordPress
+        </a>
       </div>
 
       <div class="sidebar-section">
@@ -113,6 +122,14 @@ $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
           Audit Log
         </a>
+        <a href="#" class="sidebar-link" data-page="twofa">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
+          2FA Manager
+        </a>
+        <a href="#" class="sidebar-link" data-page="sessions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          Sessions
+        </a>
       </div>
 
       <div class="sidebar-section">
@@ -124,6 +141,10 @@ $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
         <a href="#" class="sidebar-link" data-page="backups">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           Backups
+        </a>
+        <a href="#" class="sidebar-link" data-page="cloudflare">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/></svg>
+          Cloudflare
         </a>
         <a href="#" class="sidebar-link" data-page="settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -149,7 +170,8 @@ $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
   <!-- Main Content -->
   <div class="main-content">
     <header class="topbar">
-      <button class="btn btn-ghost btn-icon" id="sidebar-toggle" style="display:none">☰</button>
+      <button class="btn btn-ghost btn-icon" id="sidebar-toggle" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+
       <div class="topbar-title" id="page-title">Dashboard</div>
       <div class="topbar-actions">
         <span id="server-ip" class="text-muted text-sm"></span>

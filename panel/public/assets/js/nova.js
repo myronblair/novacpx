@@ -144,3 +144,22 @@ window.Nova = (() => {
 
   return { api, toast, modal, confirm, initNav, loadPage, progressBar, bytes, relTime, badge, serviceDot, escHtml };
 })();
+
+// #26 Mobile sidebar toggle — shared across all panels
+document.addEventListener('DOMContentLoaded', () => {
+  const toggle  = document.getElementById('sidebar-toggle');
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!toggle || !sidebar) return;
+
+  const open  = () => { sidebar.classList.add('open');  overlay?.classList.add('open');  document.body.style.overflow = 'hidden'; };
+  const close = () => { sidebar.classList.remove('open'); overlay?.classList.remove('open'); document.body.style.overflow = ''; };
+
+  toggle.addEventListener('click', () => sidebar.classList.contains('open') ? close() : open());
+  overlay?.addEventListener('click', close);
+
+  // Close when a nav link is clicked on mobile
+  sidebar.querySelectorAll('.sidebar-link').forEach(link =>
+    link.addEventListener('click', () => { if (window.innerWidth <= 768) close(); })
+  );
+});

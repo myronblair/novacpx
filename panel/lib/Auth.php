@@ -1,7 +1,12 @@
 <?php
+if (!class_exists('TOTP')) require_once __DIR__ . '/TOTP.php';
+
 class Auth {
     private static ?Auth $instance = null;
     private ?array $user = null;
+
+    // Returned by attempt() when password is correct but TOTP code still needed
+    public const TOTP_REQUIRED = 'TOTP_REQUIRED';
 
     private function __construct() {}
 
@@ -54,13 +59,35 @@ class Auth {
         return true;
     }
 
-    public function attempt(string $username, string $password): ?string {
-        $db  = DB::getInstance();
+    /**
+     * Returns null (bad credentials), self::TOTP_REQUIRED (need 2FA code), or session token string.
+     */
+    public function attempt(string $username, string $password, ?string $totpCode = null): ?string {
+        $db   = DB::getInstance();
         $user = $db->fetchOne(
             "SELECT * FROM users WHERE (username = ? OR email = ?) AND status = 'active'",
             [$username, $username]
         );
         if (!$user || !password_verify($password, $user['password'])) return null;
+
+        // TOTP check
+        if (!empty($user['totp_enabled'])) {
+            if ($totpCode === null) {
+                $this->user = $user;
+                return self::TOTP_REQUIRED;
+            }
+            $verified = TOTP::verify($user['totp_secret'] ?? '', $totpCode);
+            if (!$verified && !empty($user['totp_backup_codes'])) {
+                $verified = TOTP::verifyBackupCode($totpCode, $user['totp_backup_codes']);
+                if ($verified) {
+                    // Consume used backup code
+                    $hashes = json_decode($user['totp_backup_codes'], true) ?? [];
+                    $hashes = array_values(array_filter($hashes, fn($h) => !password_verify(strtoupper($totpCode), $h)));
+                    $db->execute("UPDATE users SET totp_backup_codes=? WHERE id=?", [json_encode($hashes), $user['id']]);
+                }
+            }
+            if (!$verified) return null;
+        }
 
         // Create session
         $token     = bin2hex(random_bytes(32));
