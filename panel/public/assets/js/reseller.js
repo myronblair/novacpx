@@ -13,6 +13,8 @@ async function initReseller() {
   }
   _rUser = res.data;
   document.getElementById('user-name').textContent = _rUser.username || 'Reseller';
+  document.getElementById('auth-check').style.display = 'none';
+  document.getElementById('main-layout').style.display = '';
   return true;
 }
 
@@ -56,10 +58,10 @@ async function rDashboard(el) {
     </div>`;
 
   const res = await Nova.api('accounts', 'list', { params:{ limit:5 }});
-  const accts = res?.data?.accounts || [];
+  const accts = res?.data || [];
 
   document.getElementById('r-stats').innerHTML = [
-    { label: 'Total Accounts', val: res?.data?.total || 0, icon: 'ni-accounts' },
+    { label: 'Total Accounts', val: res?.meta?.total || accts.length, icon: 'ni-accounts' },
     { label: 'Active', val: accts.filter(a=>a.status==='active').length, icon: 'ni-stats' },
     { label: 'Suspended', val: accts.filter(a=>a.status==='suspended').length, icon: 'ni-suspend' },
   ].map(s => `<div class="stat-card" style="display:flex;align-items:center;gap:1rem">
@@ -95,9 +97,10 @@ async function loadRAccounts(search = '') {
   const el = document.getElementById('r-accounts-list');
   if (!el) return;
   const res = await Nova.api('accounts', 'list', { params: search ? { search } : {}});
-  if (!res?.success || !res.data.accounts.length) { el.innerHTML = '<div class="empty">No accounts found.</div>'; return; }
+  const acctRows = res?.data || [];
+  if (!res?.success || !acctRows.length) { el.innerHTML = '<div class="empty">No accounts found.</div>'; return; }
   el.innerHTML = `<table class="table"><thead><tr><th>Username</th><th>Domain</th><th>Package</th><th>Disk</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-    ${res.data.accounts.map(a => `<tr>
+    ${acctRows.map(a => `<tr>
       <td><strong>${a.username}</strong></td>
       <td>${a.domain}</td>
       <td>${a.package_name || '—'}</td>
@@ -326,6 +329,11 @@ window.resellerNav = (page) => {
 document.addEventListener('DOMContentLoaded', async () => {
   const ok = await initReseller();
   if (!ok) return;
+  document.getElementById('logout-btn')?.addEventListener('click', async e => {
+    e.preventDefault();
+    await Nova.api('auth', 'logout', { method: 'POST' });
+    location.href = '/';
+  });
   renderRNav();
   window.resellerNav('dashboard');
 });
@@ -338,7 +346,7 @@ async function rDocker(el) {
     Nova.api('accounts', 'list', { params: { limit: 200 } }),
   ]);
   const stacks = stRes?.data?.stacks || [];
-  const accts  = acctRes?.data?.accounts || [];
+  const accts  = acctRes?.data || [];
 
   el.innerHTML = `
 <div class="page-header"><h2 class="page-title">Docker</h2></div>

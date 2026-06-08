@@ -188,11 +188,11 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
     </div>
     <div class="card">
       <div class="card-body">
-        <div id="login-err" class="alert alert-error" style="display:none"></div>
-        <form id="login-form">
-          <div class="form-group"><label>Username or Email</label><input type="text" id="l-user" autofocus required></div>
-          <div class="form-group"><label>Password</label><input type="password" id="l-pass" required></div>
-          <button type="submit" class="btn btn-primary btn-full" id="l-btn">Sign In</button>
+        <div id="li-err" class="alert alert-error" style="display:none"></div>
+        <form id="login-form" onsubmit="event.preventDefault();doLogin()">
+          <div class="form-group"><label>Username or Email</label><input type="text" id="li-user" autofocus autocomplete="username"></div>
+          <div class="form-group"><label>Password</label><input type="password" id="li-pass" autocomplete="current-password"></div>
+          <button type="submit" class="btn btn-primary btn-full">Sign In</button>
         </form>
       </div>
     </div>
