@@ -905,13 +905,13 @@
   <div style="padding:1.5rem">
     <div class="stats-grid" style="margin-bottom:1.5rem">
       ${Object.entries(svcs).map(([s,st]) => `<div class="stat-card">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <strong>${s}</strong>${Nova.badge(st,st==='active'?'green':'red')}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+          <strong style="word-break:break-all">${s}</strong>${Nova.badge(st,st==='active'?'green':'red')}
         </div>
-        <div style="margin-top:.75rem;display:flex;gap:.5rem">
-          <button class="btn btn-sm" onclick="adminServiceAction('${s}','restart')">Restart</button>
-          <button class="btn btn-sm" onclick="adminServiceAction('${s}','start')">Start</button>
-          <button class="btn btn-sm btn-danger" onclick="adminServiceAction('${s}','stop')">Stop</button>
+        <div style="display:flex;flex-wrap:wrap;gap:.35rem">
+          <button class="btn btn-xs" onclick="adminServiceAction('${s}','restart')">Restart</button>
+          <button class="btn btn-xs" onclick="adminServiceAction('${s}','start')">Start</button>
+          <button class="btn btn-xs btn-danger" onclick="adminServiceAction('${s}','stop')">Stop</button>
         </div>
       </div>`).join('')}
     </div>
