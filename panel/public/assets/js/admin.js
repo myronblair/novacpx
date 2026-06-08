@@ -1597,30 +1597,106 @@ ${ips.length ? `
 
   // ── MySQL/DB Manager ───────────────────────────────────────────────────────
   async function mysqlManager() {
-    const res = await Nova.api('databases','list',{params:{account_id:0}});
-    const dbs = res?.data || [];
-    return `
+    const [engRes, dbRes] = await Promise.all([
+      Nova.api('system','db-engines'),
+      Nova.api('databases','list',{params:{account_id:0}}),
+    ]);
+    const eng  = engRes?.data?.engines  || {};
+    const actE = engRes?.data?.active_engine || 'mysql';
+    const dbs  = dbRes?.data || [];
+
+    const engineCard = (id, label, icon) => {
+      const e = eng[id] || {};
+      const statusColor = e.active ? 'green' : (e.installed ? 'red' : 'default');
+      const statusText  = !e.installed ? 'Not Installed' : (e.active ? 'Running' : 'Stopped');
+      return `
 <div class="card">
-  <div class="card-header"><span class="card-title">Databases</span></div>
-  ${dbs.length ? `<table class="table"><thead><tr><th>Database</th><th>User</th><th>Type</th><th>Account</th><th>Size</th><th>Actions</th></tr></thead><tbody>
-    ${dbs.map(d => `<tr>
-      <td><strong>${d.db_name}</strong></td>
-      <td>${d.db_user}</td>
-      <td>${Nova.badge(d.db_type,'default')}</td>
-      <td>${d.username||'—'}</td>
-      <td>${d.size||'—'}</td>
-      <td><button class="btn btn-xs btn-danger" onclick="adminDropDB(${d.id},'${d.db_name}')">Drop</button></td>
-    </tr>`).join('')}
-  </tbody></table>`
-  : '<div class="empty" style="padding:2rem">No databases.</div>'}
+  <div class="card-header">
+    <span class="card-title">${icon} ${label}</span>
+    ${Nova.badge(statusText, statusColor)}
+    ${e.version ? `<span class="text-muted" style="font-size:.8rem;margin-left:.5rem">v${e.version}</span>` : ''}
+  </div>
+  <div class="card-body">
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.75rem">
+      ${!e.installed
+        ? `<button class="btn btn-xs btn-primary" onclick="dbEngineAction('${id}','install')">Install</button>`
+        : `
+        <button class="btn btn-xs" onclick="dbEngineAction('${id}','start')">Start</button>
+        <button class="btn btn-xs" onclick="dbEngineAction('${id}','stop')">Stop</button>
+        <button class="btn btn-xs" onclick="dbEngineAction('${id}','restart')">Restart</button>
+        <button class="btn btn-xs btn-danger" onclick="dbEngineAction('${id}','remove')">Remove</button>`
+      }
+    </div>
+    ${e.installed && id !== 'postgresql' ? `<a href="http://${location.hostname}/phpmyadmin" target="_blank" class="btn btn-xs btn-ghost">phpMyAdmin ↗</a>` : ''}
+    ${e.installed && id === 'postgresql' ? `<a href="http://${location.hostname}/pgadmin" target="_blank" class="btn btn-xs btn-ghost">pgAdmin ↗</a>` : ''}
+  </div>
+</div>`;
+    };
+
+    const dbTable = dbs.length ? `
+<table class="table"><thead><tr><th>Database</th><th>User</th><th>Type</th><th>Account</th><th>Actions</th></tr></thead><tbody>
+${dbs.map(d=>`<tr>
+  <td><strong>${Nova.escHtml(d.db_name)}</strong></td>
+  <td>${Nova.escHtml(d.db_user||'—')}</td>
+  <td>${Nova.badge(d.db_type||'mysql','default')}</td>
+  <td>${Nova.escHtml(d.username||'—')}</td>
+  <td><button class="btn btn-xs btn-danger" onclick="adminDropDB(${d.id},'${Nova.escHtml(d.db_name)}')">Drop</button></td>
+</tr>`).join('')}
+</tbody></table>` : '<div class="empty" style="padding:2rem">No databases yet.</div>';
+
+    return `
+<div class="page-header"><h2 class="page-title">Database Engine Manager</h2></div>
+
+<div class="grid-3 gap-2" style="margin-bottom:1.5rem">
+  ${engineCard('mysql',    'MySQL',      '🐬')}
+  ${engineCard('mariadb',  'MariaDB',    '🦭')}
+  ${engineCard('postgresql','PostgreSQL','🐘')}
+</div>
+
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header"><span class="card-title">Active Engine</span><span class="text-muted" style="font-size:.82rem">Used for new account databases</span></div>
+  <div class="card-body" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <select id="db-active-engine" class="form-control" style="max-width:200px">
+      <option value="mysql"      ${actE==='mysql'?'selected':''}>MySQL</option>
+      <option value="mariadb"    ${actE==='mariadb'?'selected':''}>MariaDB</option>
+      <option value="postgresql" ${actE==='postgresql'?'selected':''}>PostgreSQL</option>
+    </select>
+    <button class="btn btn-primary btn-sm" onclick="dbSetActive()">Set Active</button>
+    <span class="text-muted" style="font-size:.82rem">Currently: ${Nova.badge(actE,'green')}</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><span class="card-title">All Databases</span><span class="text-muted" style="font-size:.8rem">${dbs.length} total</span></div>
+  ${dbTable}
 </div>`;
   }
+
   window.adminDropDB = (id, name) => {
     Nova.confirm(`Drop database ${name}? ALL DATA WILL BE LOST.`, async () => {
       const r = await Nova.api('databases','drop',{method:'POST',body:{id}});
       if (r?.success) { Nova.toast('Dropped','success'); adminPage('mysql-manager'); }
       else Nova.toast(r?.message,'error');
     }, true);
+  };
+  window.dbEngineAction = (engine, action) => {
+    const labels = {install:`Installing ${engine}…`,remove:`Removing ${engine}…`,start:`Starting…`,stop:`Stopping…`,restart:`Restarting…`};
+    const doIt = async () => {
+      Nova.toast(labels[action]||'Working…','info');
+      const r = await Nova.api('system','db-engine-action',{method:'POST',body:{engine,action}});
+      Nova.toast(r?.message||(r?.success?'Done':'Failed'), r?.success?'success':'error');
+      if (r?.success) adminPage('mysql-manager');
+    };
+    if (['install','remove'].includes(action)) {
+      Nova.confirm(`${action === 'install' ? 'Install' : 'Remove'} ${engine}?`, doIt, action === 'remove');
+    } else { doIt(); }
+  };
+  window.dbSetActive = async () => {
+    const engine = document.getElementById('db-active-engine')?.value;
+    if (!engine) return;
+    const r = await Nova.api('system','db-engine-action',{method:'POST',body:{engine,action:'set-active'}});
+    Nova.toast(r?.message||(r?.success?'Active engine updated':'Failed'), r?.success?'success':'error');
+    if (r?.success) adminPage('mysql-manager');
   };
 
   // ── Mail Server ────────────────────────────────────────────────────────────
@@ -1660,21 +1736,28 @@ ${ips.length ? `
 
   // ── FTP Server ────────────────────────────────────────────────────────────
   async function ftpServer() {
-    const r = await Nova.api('system','stats');
-    const ftpStatus = r?.data?.services?.proftpd || 'unknown';
+    const [sRes, optsRes] = await Promise.all([
+      Nova.api('system','stats'),
+      Nova.api('system','server-options'),
+    ]);
+    const svcs    = sRes?.data?.services   || {};
+    const ftpConf = optsRes?.data?.ftp_server || 'proftpd';
+    const svcName = ftpConf === 'vsftpd' ? 'vsftpd' : (ftpConf === 'pureftpd' ? 'pure-ftpd' : 'proftpd');
+    const label   = ftpConf === 'vsftpd' ? 'vsftpd' : (ftpConf === 'pureftpd' ? 'Pure-FTPd' : 'ProFTPD');
+    const status  = svcs[svcName] || 'unknown';
     return `
 <div class="card">
   <div class="card-header">
-    <span class="card-title">FTP Server (ProFTPD)</span>
-    ${Nova.badge(ftpStatus, ftpStatus==='active'?'green':'red')}
+    <span class="card-title">FTP Server (${label})</span>
+    ${Nova.badge(status, status==='active'?'green':'red')}
     <div style="display:flex;gap:.5rem;margin-left:auto">
-      <button class="btn btn-sm" onclick="adminServiceAction('proftpd','restart')">Restart</button>
-      <button class="btn btn-sm" onclick="adminServiceAction('proftpd','reload')">Reload</button>
+      <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','restart')">Restart</button>
+      <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','reload')">Reload</button>
     </div>
   </div>
   <div style="padding:1.25rem">
     <div style="color:var(--muted);font-size:.85rem">
-      <p>ProFTPD uses virtual users stored in <code>/etc/proftpd/novacpx-users.passwd</code></p>
+      <p>Active FTP server: <strong>${label}</strong> — change in <a href="#" onclick="adminPage('server-options')">Server Options</a>.</p>
       <p style="margin-top:.5rem">FTP connections use SFTP on port 22 or passive FTP on ports 20/21.</p>
       <p style="margin-top:.5rem">Per-account FTP management is available in each account's FTP page.</p>
     </div>

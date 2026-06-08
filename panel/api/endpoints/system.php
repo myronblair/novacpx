@@ -302,9 +302,16 @@ match ($action) {
         $diskFree  = disk_free_space('/');
         $diskPct   = $diskTotal > 0 ? round((($diskTotal - $diskFree) / $diskTotal) * 100, 1) : 0;
 
-        // Services
+        // Services — dynamic list based on configured servers
+        $webSetting  = $db->fetchOne("SELECT `value` FROM settings WHERE `key`='web_server'")['value']  ?? 'apache';
+        $ftpSetting  = $db->fetchOne("SELECT `value` FROM settings WHERE `key`='ftp_server'")['value']  ?? 'proftpd';
+        $dnsSetting  = $db->fetchOne("SELECT `value` FROM settings WHERE `key`='dns_server'")['value']  ?? 'bind9';
+        $webSvc      = match($webSetting) { 'nginx' => 'nginx', 'apache' => 'apache2', default => 'apache2' };
+        $ftpSvc      = match($ftpSetting) { 'vsftpd' => 'vsftpd', 'pureftpd' => 'pure-ftpd', default => 'proftpd' };
+        $dnsSvc      = match($dnsSetting) { 'powerdns' => 'pdns', 'nsd' => 'nsd', 'none' => null, default => 'named' };
+        $svcList     = array_filter([$webSvc,'mysql','postfix','dovecot',$ftpSvc,$dnsSvc,'fail2ban']);
         $services = [];
-        foreach (['apache2','nginx','mysql','postfix','dovecot','proftpd','named','fail2ban'] as $svc) {
+        foreach ($svcList as $svc) {
             $active = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
             if ($active) $services[$svc] = $active;
         }
@@ -329,7 +336,9 @@ match ($action) {
         Auth::getInstance()->require('admin');
         $svc    = preg_replace('/[^a-z0-9\-_]/', '', $body['service'] ?? '');
         $cmd    = $body['command'] ?? 'status';
-        $allowed = ['apache2','nginx','mysql','postfix','dovecot','proftpd','named','fail2ban','php7.4-fpm','php8.1-fpm','php8.2-fpm','php8.3-fpm'];
+        $allowed = ['apache2','nginx','lighttpd','caddy','mysql','mariadb','postgresql','postfix','dovecot',
+                    'proftpd','vsftpd','pure-ftpd','named','bind9','pdns','nsd','fail2ban',
+                    'php7.4-fpm','php8.1-fpm','php8.2-fpm','php8.3-fpm'];
         if (!in_array($svc, $allowed)) Response::error("Service not managed: $svc");
         if (!in_array($cmd, ['start','stop','restart','reload','status'])) Response::error("Invalid command");
 
@@ -390,15 +399,31 @@ match ($action) {
         $value = $body['value'] ?? '';
         $allowed = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname'];
         if (!in_array($key, $allowed)) Response::error("Invalid setting key: $key");
+
+        // Save before switching so the new value is in DB
         $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$key, $value]);
 
-        // For server switches, run install/reload scripts
-        if (in_array($key, ['web_server','ftp_server','dns_server','mail_server'])) {
-            $script = "/opt/novacpx/bin/switch-{$key}.sh";
-            if (is_executable($script)) {
-                shell_exec("sudo {$script} " . escapeshellarg($value) . " > /var/log/novacpx/switch-{$key}.log 2>&1 &");
+        // Inline service switching — stop all alternatives, start the chosen one
+        if ($key === 'web_server') {
+            $webSvcs = ['apache2','nginx','lighttpd','caddy'];
+            foreach ($webSvcs as $s) { shell_exec("systemctl stop $s 2>/dev/null; systemctl disable $s 2>/dev/null"); }
+            $startSvc = match($value) { 'nginx' => 'nginx', 'apache' => 'apache2', default => 'apache2' };
+            shell_exec("systemctl enable $startSvc 2>/dev/null && systemctl start $startSvc 2>/dev/null");
+        } elseif ($key === 'ftp_server') {
+            foreach (['proftpd','vsftpd','pure-ftpd'] as $s) { shell_exec("systemctl stop $s 2>/dev/null; systemctl disable $s 2>/dev/null"); }
+            $startSvc = match($value) { 'vsftpd' => 'vsftpd', 'pureftpd' => 'pure-ftpd', default => 'proftpd' };
+            if (trim(shell_exec("dpkg -l $startSvc 2>/dev/null | grep -c '^ii'") ?: '0') > 0) {
+                shell_exec("systemctl enable $startSvc 2>/dev/null && systemctl start $startSvc 2>/dev/null");
+            }
+        } elseif ($key === 'dns_server') {
+            foreach (['named','bind9','pdns','nsd'] as $s) { shell_exec("systemctl stop $s 2>/dev/null; systemctl disable $s 2>/dev/null"); }
+            if ($value !== 'none') {
+                $startSvc = match($value) { 'powerdns' => 'pdns', 'nsd' => 'nsd', default => 'named' };
+                shell_exec("systemctl enable $startSvc 2>/dev/null && systemctl start $startSvc 2>/dev/null");
             }
         }
+        // mail_server: postfix + dovecot are always running; mail_server setting controls config template only
+
         audit("settings.{$key}", $value);
         Response::success(null, "Setting saved: {$key} = {$value}");
     })(),
@@ -469,6 +494,78 @@ match ($action) {
 
         if ($code === 202) Response::success(null, "Test email sent to {$to}");
         else Response::error("CyberMail returned HTTP {$code}: " . substr($resp, 0, 200));
+    })(),
+
+    // ── Database engine management ────────────────────────────────────────────
+    'db-engines' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $engines = [];
+        foreach (['mysql','mariadb','postgresql'] as $eng) {
+            $svc = match($eng) {
+                'mysql'      => 'mysql',
+                'mariadb'    => 'mariadb',
+                'postgresql' => 'postgresql',
+            };
+            $active   = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
+            $enabled  = trim(shell_exec("systemctl is-enabled $svc 2>/dev/null") ?: '');
+            $pkgCheck = match($eng) {
+                'mysql'      => 'dpkg -l mysql-server 2>/dev/null | grep -c "^ii"',
+                'mariadb'    => 'dpkg -l mariadb-server 2>/dev/null | grep -c "^ii"',
+                'postgresql' => 'dpkg -l postgresql 2>/dev/null | grep -c "^ii"',
+            };
+            $installed = (int)trim(shell_exec($pkgCheck) ?: '0') > 0;
+            $version   = '';
+            if ($installed) {
+                $version = match($eng) {
+                    'mysql'      => trim(shell_exec("mysql --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+'") ?: ''),
+                    'mariadb'    => trim(shell_exec("mariadb --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+'") ?: ''),
+                    'postgresql' => trim(shell_exec("psql --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+'") ?: ''),
+                };
+            }
+            $engines[$eng] = [
+                'installed' => $installed,
+                'active'    => $active === 'active',
+                'enabled'   => $enabled === 'enabled',
+                'version'   => $version,
+            ];
+        }
+        $active_db = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'active_db_engine'")['value'] ?? 'mysql';
+        Response::success(['engines' => $engines, 'active_engine' => $active_db]);
+    })(),
+
+    'db-engine-action' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $engine = preg_replace('/[^a-z]/', '', $body['engine'] ?? '');
+        $action = $body['action'] ?? '';
+        if (!in_array($engine, ['mysql','mariadb','postgresql'])) Response::error("Invalid engine");
+        if (!in_array($action, ['install','remove','start','stop','restart','set-active'])) Response::error("Invalid action");
+
+        $out = '';
+        if ($action === 'install') {
+            $pkg = match($engine) {
+                'mysql'      => 'mysql-server',
+                'mariadb'    => 'mariadb-server',
+                'postgresql' => 'postgresql postgresql-contrib',
+            };
+            $out = shell_exec("DEBIAN_FRONTEND=noninteractive apt-get install -y $pkg 2>&1");
+            shell_exec("systemctl enable $engine && systemctl start $engine 2>/dev/null");
+        } elseif ($action === 'remove') {
+            $pkg = match($engine) {
+                'mysql'      => 'mysql-server mysql-client',
+                'mariadb'    => 'mariadb-server mariadb-client',
+                'postgresql' => 'postgresql postgresql-contrib',
+            };
+            shell_exec("systemctl stop $engine 2>/dev/null || true");
+            $out = shell_exec("apt-get remove -y $pkg 2>&1");
+        } elseif ($action === 'set-active') {
+            $db->execute("INSERT INTO settings (`key`,`value`) VALUES ('active_db_engine',?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$engine]);
+            audit('settings.active_db_engine', $engine);
+            Response::success(null, "Active database engine set to $engine");
+        } else {
+            shell_exec("systemctl $action $engine 2>/dev/null");
+        }
+        audit("db-engine.$action", $engine);
+        Response::success(['output' => substr($out ?: '', -1000)], ucfirst($action) . " $engine done");
     })(),
 
     default => Response::error("Unknown system action: $action", 404),
