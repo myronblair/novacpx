@@ -1,10 +1,10 @@
 <?php
 class WordPressManager {
-    private PDO $db;
+    private \PDO $db;
     private string $wpcli = '/usr/local/bin/wp';
 
     public function __construct() {
-        $this->db = Database::getInstance()->getPDO();
+        $this->db = DB::getInstance()->pdo();
         $this->ensureWpCli();
     }
 

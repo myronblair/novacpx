@@ -19,19 +19,24 @@ class DockerManager {
 
     public function install(): string {
         if ($this->isInstalled()) return 'Docker is already installed';
+        // Write install script to /tmp then run it via sudo bash (no interactive terminal needed)
         $script = <<<'SH'
-        export DEBIAN_FRONTEND=noninteractive
-        curl -fsSL https://get.docker.com | sh
-        systemctl enable --now docker
-        usermod -aG docker www-data
-        SH;
+#!/bin/bash
+set -e
+export DEBIAN_FRONTEND=noninteractive
+curl -fsSL https://get.docker.com -o /tmp/ncpx-get-docker.sh
+bash /tmp/ncpx-get-docker.sh
+rm -f /tmp/ncpx-get-docker.sh
+systemctl enable --now docker
+usermod -aG docker www-data
+SH;
+        $scriptFile = '/tmp/ncpx-docker-install.sh';
+        file_put_contents($scriptFile, $script);
+        chmod($scriptFile, 0700);
         $out = [];
-        exec('bash -c ' . escapeshellarg($script) . ' 2>&1', $out, $rc);
+        exec('sudo bash ' . escapeshellarg($scriptFile) . ' 2>&1', $out, $rc);
+        @unlink($scriptFile);
         if ($rc !== 0) throw new RuntimeException("Docker install failed: " . implode("\n", $out));
-        // Add sudoers entry so www-data can run docker without password
-        file_put_contents('/etc/sudoers.d/novacpx-docker',
-            "www-data ALL=(root) NOPASSWD: /usr/bin/docker\n");
-        chmod('/etc/sudoers.d/novacpx-docker', 0440);
         novacpx_log('info', 'DockerManager: Docker CE installed');
         return 'Docker installed successfully';
     }
