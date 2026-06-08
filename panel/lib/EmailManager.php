@@ -6,11 +6,12 @@
 class EmailManager {
 
     public static function createAccount(int $accountId, string $email, string $password, int $quotaMb = 500): int {
-        $db    = DB::getInstance();
+        $db     = DB::getInstance();
         $hashed = self::hashPassword($password);
+        $enc    = self::encryptPassword($password);
         $id = (int)$db->insert(
-            "INSERT INTO email_accounts (account_id, email, password, quota_mb) VALUES (?,?,?,?)",
-            [$accountId, $email, $hashed, $quotaMb]
+            "INSERT INTO email_accounts (account_id, email, password, enc_password, quota_mb) VALUES (?,?,?,?,?)",
+            [$accountId, $email, $hashed, $enc, $quotaMb]
         );
         self::syncPostfix();
         novacpx_log('info', "Email account created: $email");
@@ -27,7 +28,10 @@ class EmailManager {
 
     public static function changePassword(int $id, string $newPassword): void {
         $db = DB::getInstance();
-        $db->execute("UPDATE email_accounts SET password = ? WHERE id = ?", [self::hashPassword($newPassword), $id]);
+        $db->execute(
+            "UPDATE email_accounts SET password = ?, enc_password = ? WHERE id = ?",
+            [self::hashPassword($newPassword), self::encryptPassword($newPassword), $id]
+        );
     }
 
     public static function suspend(int $id): void {
@@ -57,8 +61,20 @@ class EmailManager {
     }
 
     /**
+     * Decrypt stored IMAP password for SSO use only.
+     */
+    public static function decryptPassword(string $enc): ?string {
+        $key  = substr(hash('sha256', SECRET_KEY, true), 0, 32);
+        $data = base64_decode($enc);
+        if (strlen($data) <= 16) return null;
+        $iv        = substr($data, 0, 16);
+        $encrypted = substr($data, 16);
+        $plain = openssl_decrypt($encrypted, 'AES-256-CBC', $key, OPENSSL_RAW_DATA, $iv);
+        return $plain !== false ? $plain : null;
+    }
+
+    /**
      * Sync Postfix virtual_mailbox_maps + virtual_alias_maps files from DB
-     * Postfix reads these files (postmap creates .db hash)
      */
     private static function syncPostfix(): void {
         $db = DB::getInstance();
@@ -93,7 +109,13 @@ class EmailManager {
     }
 
     private static function hashPassword(string $password): string {
-        // Dovecot SHA512-CRYPT compatible
         return '{SHA512-CRYPT}' . crypt($password, '$6$' . bin2hex(random_bytes(8)) . '$');
+    }
+
+    private static function encryptPassword(string $password): string {
+        $key = substr(hash('sha256', SECRET_KEY, true), 0, 32);
+        $iv  = random_bytes(16);
+        $enc = openssl_encrypt($password, 'AES-256-CBC', $key, OPENSSL_RAW_DATA, $iv);
+        return base64_encode($iv . $enc);
     }
 }

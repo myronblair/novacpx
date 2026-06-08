@@ -4,11 +4,15 @@ $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 
 match ($action) {
     'login' => (function() use ($body) {
-        $username = trim($body['username'] ?? '');
-        $password = $body['password'] ?? '';
+        $username  = trim($body['username'] ?? '');
+        $password  = $body['password']   ?? '';
+        $totpCode  = isset($body['totp_code']) ? trim($body['totp_code']) : null;
         if (!$username || !$password) Response::error('Username and password required');
         $auth  = Auth::getInstance();
-        $token = $auth->attempt($username, $password);
+        $token = $auth->attempt($username, $password, $totpCode);
+        if ($token === Auth::TOTP_REQUIRED) {
+            Response::json(['success' => false, 'totp_required' => true, 'message' => 'Enter your 2FA code'], 200);
+        }
         if (!$token) {
             // Log failure for Fail2Ban to detect
             $ip     = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
@@ -51,6 +55,24 @@ match ($action) {
             'role'     => $u['role'],
             'theme'    => $u['theme'],
         ]);
+    })(),
+
+    'change-password' => (function() use ($body) {
+        $auth = Auth::getInstance();
+        if (!$auth->check()) Response::error('Unauthorized', 401);
+        $user    = $auth->user();
+        $current = $body['current_password'] ?? '';
+        $new     = $body['new_password']     ?? '';
+        $confirm = $body['confirm_password'] ?? '';
+        if (!$current || !$new) Response::error('current_password and new_password required');
+        if (strlen($new) < 8) Response::error('Password must be at least 8 characters');
+        if ($new !== $confirm) Response::error('Passwords do not match');
+        $db   = DB::getInstance();
+        $full = $db->fetchOne("SELECT password FROM users WHERE id = ?", [$user['uid']]);
+        if (!$full || !password_verify($current, $full['password'])) Response::error('Current password is incorrect', 400);
+        $db->execute("UPDATE users SET password = ? WHERE id = ?", [password_hash($new, PASSWORD_BCRYPT), $user['uid']]);
+        audit('auth.change-password', 'user:' . $user['uid']);
+        Response::success(null, 'Password changed');
     })(),
 
     default => Response::error('Unknown auth action', 404),

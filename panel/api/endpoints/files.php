@@ -12,12 +12,23 @@ if (!$acct && $user['role'] !== 'admin') Response::error("No hosting account fou
 
 $baseDir = $acct ? realpath($acct['home_dir']) : '/';
 
+// For existing paths only — throws if path doesn't exist or escapes baseDir
 function safe_path(string $base, string $rel): string {
     $full = realpath($base . '/' . ltrim($rel, '/'));
-    if (!$full || !str_starts_with($full, $base)) {
+    if ($full === false || !str_starts_with($full . '/', $base . '/')) {
         throw new RuntimeException("Path outside account directory");
     }
     return $full;
+}
+
+// For paths that may not exist yet (write/mkdir) — validates parent dir
+function safe_path_new(string $base, string $rel): string {
+    $candidate = $base . '/' . ltrim(str_replace(['../', '..\\'], '', $rel), '/');
+    $parent    = realpath(dirname($candidate));
+    if ($parent === false || !str_starts_with($parent . '/', $base . '/')) {
+        throw new RuntimeException("Path outside account directory");
+    }
+    return $parent . '/' . basename($candidate);
 }
 
 function fmt_size(int $bytes): string {
@@ -58,39 +69,46 @@ match ($action) {
     })(),
 
     'write' => (function() use ($baseDir, $body) {
-        $path    = safe_path($baseDir, $body['path'] ?? '');
+        $rel     = $body['path'] ?? '';
         $content = $body['content'] ?? '';
+        // Use safe_path for existing files, safe_path_new for new ones
+        try {
+            $path = safe_path($baseDir, $rel);
+        } catch (RuntimeException) {
+            $path = safe_path_new($baseDir, $rel);
+        }
         // PHP syntax check for .php files
         if (str_ends_with($path, '.php')) {
             $tmp = tempnam(sys_get_temp_dir(), 'ncpx_');
             file_put_contents($tmp, $content);
             $result = shell_exec("php8.3 -l " . escapeshellarg($tmp) . " 2>&1");
             unlink($tmp);
-            if (!str_contains($result, 'No syntax errors')) Response::error("PHP syntax error: $result");
+            if (!str_contains($result ?? '', 'No syntax errors')) Response::error("PHP syntax error: $result");
         }
         file_put_contents($path, $content);
-        audit('files.write', $body['path'] ?? '');
+        audit('files.write', $rel);
         Response::success(null, 'File saved');
     })(),
 
     'mkdir' => (function() use ($baseDir, $body) {
-        $path = $baseDir . '/' . ltrim($body['path'] ?? '', '/');
-        // Don't use safe_path since dir may not exist yet
-        if (!str_starts_with(realpath(dirname($path)) ?: '', $baseDir)) Response::error("Invalid path");
+        $path = safe_path_new($baseDir, $body['path'] ?? '');
+        if (is_dir($path)) Response::error("Directory already exists");
         if (!mkdir($path, 0755, true)) Response::error("Could not create directory");
         Response::success(null, 'Directory created');
     })(),
 
     'rename' => (function() use ($baseDir, $body) {
         $from = safe_path($baseDir, $body['from'] ?? '');
-        $to   = $baseDir . '/' . ltrim($body['to'] ?? '', '/');
-        if (!str_starts_with(realpath(dirname($to)) ?: $baseDir, $baseDir)) Response::error("Invalid destination");
+        $to   = safe_path_new($baseDir, $body['to'] ?? '');
+        if (file_exists($to)) Response::error("Destination already exists");
         rename($from, $to);
         Response::success(null, 'Renamed');
     })(),
 
     'delete' => (function() use ($baseDir, $body) {
         $path = safe_path($baseDir, $body['path'] ?? '');
+        // Prevent deleting the account root or its direct children (public_html, logs, tmp)
+        if ($path === $baseDir || dirname($path) === $baseDir) Response::error("Cannot delete root account directories");
         if (is_dir($path)) {
             shell_exec("rm -rf " . escapeshellarg($path));
         } else {
@@ -103,23 +121,28 @@ match ($action) {
     'chmod' => (function() use ($baseDir, $body) {
         $path  = safe_path($baseDir, $body['path'] ?? '');
         $perms = octdec((string)($body['perms'] ?? '755'));
+        // Clamp to sane range: no setuid/setgid/sticky, no world-write on dirs
+        $perms = $perms & 0777;
         chmod($path, $perms);
         Response::success(null, 'Permissions updated');
     })(),
 
     'upload' => (function() use ($baseDir, $body) {
         $dir = safe_path($baseDir, $body['path'] ?? '/public_html');
+        if (!is_dir($dir)) Response::error("Target directory not found");
         if (empty($_FILES['file'])) Response::error("No file uploaded");
-        $dest = $dir . '/' . basename($_FILES['file']['name']);
-        if (!str_starts_with(realpath(dirname($dest)) ?: $baseDir, $baseDir)) Response::error("Invalid destination");
+        $filename = basename($_FILES['file']['name']);
+        if ($filename === '' || $filename === '.') Response::error("Invalid filename");
+        $dest = $dir . '/' . $filename;
+        if (!str_starts_with($dest, $baseDir . '/')) Response::error("Invalid destination");
         move_uploaded_file($_FILES['file']['tmp_name'], $dest);
-        Response::success(['name' => basename($dest)], 'File uploaded');
+        Response::success(['name' => $filename], 'File uploaded');
     })(),
 
     'compress' => (function() use ($baseDir, $body) {
-        $paths  = array_map(fn($p) => safe_path($baseDir, $p), (array)($body['paths'] ?? []));
-        $dest   = $baseDir . '/' . ltrim($body['dest'] ?? 'archive.zip', '/');
-        $files  = implode(' ', array_map('escapeshellarg', $paths));
+        $paths = array_map(fn($p) => safe_path($baseDir, $p), (array)($body['paths'] ?? []));
+        $dest  = safe_path_new($baseDir, $body['dest'] ?? 'archive.zip');
+        $files = implode(' ', array_map('escapeshellarg', $paths));
         shell_exec("cd " . escapeshellarg($baseDir) . " && zip -r " . escapeshellarg($dest) . " $files 2>/dev/null");
         Response::success(null, 'Archive created');
     })(),

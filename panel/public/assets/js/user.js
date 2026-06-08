@@ -69,6 +69,7 @@ const userPages = {
   files,
   stats: statsPage,
   backups,
+  'change-password': changePasswordPage,
 };
 
 /* ── Dashboard ───────────────────────────────────────────────────────────── */
@@ -761,17 +762,18 @@ window.createBackup = () => Nova.toast('Backup request submitted — you will be
 
 /* ── Navigation ─────────────────────────────────────────────────────────── */
 const navItems = [
-  { id: 'dashboard',  label: 'Dashboard',    icon: 'ni-dashboard' },
-  { id: 'domains',    label: 'Domains',       icon: 'ni-domains' },
-  { id: 'email',      label: 'Email',         icon: 'ni-email' },
-  { id: 'databases',  label: 'Databases',     icon: 'ni-databases' },
-  { id: 'ftp',        label: 'FTP',           icon: 'ni-ftp' },
-  { id: 'ssl',        label: 'SSL / TLS',     icon: 'ni-ssl' },
-  { id: 'php',        label: 'PHP',           icon: 'ni-php' },
-  { id: 'cron',       label: 'Cron Jobs',     icon: 'ni-cron' },
-  { id: 'files',      label: 'File Manager',  icon: 'ni-files' },
-  { id: 'stats',      label: 'Statistics',    icon: 'ni-stats' },
-  { id: 'backups',    label: 'Backups',       icon: 'ni-backups' },
+  { id: 'dashboard',       label: 'Dashboard',       icon: 'ni-dashboard' },
+  { id: 'domains',         label: 'Domains',         icon: 'ni-domains' },
+  { id: 'email',           label: 'Email',           icon: 'ni-email' },
+  { id: 'databases',       label: 'Databases',       icon: 'ni-databases' },
+  { id: 'ftp',             label: 'FTP',             icon: 'ni-ftp' },
+  { id: 'ssl',             label: 'SSL / TLS',       icon: 'ni-ssl' },
+  { id: 'php',             label: 'PHP',             icon: 'ni-php' },
+  { id: 'cron',            label: 'Cron Jobs',       icon: 'ni-cron' },
+  { id: 'files',           label: 'File Manager',    icon: 'ni-files' },
+  { id: 'stats',           label: 'Statistics',      icon: 'ni-stats' },
+  { id: 'backups',         label: 'Backups',         icon: 'ni-backups' },
+  { id: 'change-password', label: 'Change Password', icon: 'ni-lock' },
 ];
 
 let _activePage = 'dashboard';
@@ -793,6 +795,50 @@ window.userNav = (page) => {
   if (!content) return;
   content.innerHTML = '<div class="loading">Loading…</div>';
   if (userPages[page]) userPages[page](content);
+};
+
+/* ── Change Password ─────────────────────────────────────────────────────── */
+async function changePasswordPage(el) {
+  el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Change Password</h2></div>
+<div class="card" style="max-width:480px">
+  <div class="card-header"><span class="card-title">Update Your Password</span></div>
+  <div class="card-body">
+    <div class="form-group">
+      <label class="form-label">Current Password</label>
+      <input type="password" id="cp-current" class="form-control" autocomplete="current-password">
+    </div>
+    <div class="form-group">
+      <label class="form-label">New Password <span style="color:var(--muted);font-size:.8rem">(min 8 chars)</span></label>
+      <input type="password" id="cp-new" class="form-control" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Confirm New Password</label>
+      <input type="password" id="cp-confirm" class="form-control" autocomplete="new-password">
+    </div>
+    <button class="btn btn-primary" onclick="submitChangePassword()">Update Password</button>
+  </div>
+</div>`;
+}
+
+window.submitChangePassword = async () => {
+  const current = document.getElementById('cp-current')?.value;
+  const newPass  = document.getElementById('cp-new')?.value;
+  const confirm  = document.getElementById('cp-confirm')?.value;
+  if (!current || !newPass || !confirm) { Nova.toast('All fields required', 'error'); return; }
+  if (newPass !== confirm) { Nova.toast('New passwords do not match', 'error'); return; }
+  const res = await Nova.api('auth', 'change-password', {
+    method: 'POST',
+    body: { current_password: current, new_password: newPass, confirm_password: confirm },
+  });
+  if (res?.success) {
+    Nova.toast('Password updated successfully', 'success');
+    document.getElementById('cp-current').value = '';
+    document.getElementById('cp-new').value = '';
+    document.getElementById('cp-confirm').value = '';
+  } else {
+    Nova.toast(res?.message || 'Failed to update password', 'error');
+  }
 };
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */

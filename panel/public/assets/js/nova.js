@@ -8,14 +8,31 @@ window.Nova = (() => {
     const { method = 'GET', body, params } = opts;
     let url = `/api/${endpoint}/${action}`;
     if (params) url += '?' + new URLSearchParams(params);
-    const res = await fetch(url, {
-      method,
-      credentials: 'include',
-      headers: body ? { 'Content-Type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        credentials: 'include',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) {
+      console.error(`Nova.api network error [${endpoint}/${action}]:`, e);
+      return { success: false, message: 'Network error — check your connection' };
+    }
     if (res.status === 401) { location.href = '/?redirect=' + encodeURIComponent(location.pathname); return null; }
-    return res.json();
+    if (res.status === 429) {
+      const reset = res.headers.get('X-RateLimit-Reset');
+      const wait  = reset ? Math.max(0, Math.ceil(Number(reset) - Date.now() / 1000)) : 60;
+      return { success: false, message: `Rate limited — try again in ${wait}s` };
+    }
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      console.error(`Nova.api non-JSON from [${endpoint}/${action}] (HTTP ${res.status}):`, text.slice(0, 500));
+      return { success: false, message: `Server error (HTTP ${res.status}) — see browser console` };
+    }
   }
 
   // ── Toast ─────────────────────────────────────────────────────────────────

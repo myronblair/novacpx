@@ -1,6 +1,6 @@
 <?php
 // NovaCPX User Panel — End-user hosting dashboard
-// Design: Horizontal feature cards with usage rings, NOT cPanel icon grid
+$_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -9,7 +9,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NovaCPX — My Hosting</title>
 <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-<link rel="stylesheet" href="/assets/css/nova.css">
+<link rel="stylesheet" href="/assets/css/nova.css<?= $_v('/assets/css/nova.css') ?>">
 <style>
 /* ── User panel specific ─────────────────────────────── */
 .feature-grid {
@@ -195,8 +195,8 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
   </div>
 </div>
 
-<script src="/assets/js/nova.js"></script>
-<script src="/assets/js/user.js"></script>
+<script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
+<script src="/assets/js/user.js<?= $_v('/assets/js/user.js') ?>"></script>
 <script>
 (async () => {
   // Legacy inline login form fallback (user.js handles auth-check div)

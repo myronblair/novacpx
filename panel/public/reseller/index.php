@@ -1,5 +1,6 @@
 <?php
 // NovaCPX Reseller Panel — port 8881
+$_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -8,7 +9,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NovaCPX Reseller</title>
 <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-<link rel="stylesheet" href="/assets/css/nova.css">
+<link rel="stylesheet" href="/assets/css/nova.css<?= $_v('/assets/css/nova.css') ?>">
 </head>
 <body>
 
@@ -75,8 +76,8 @@
   </div>
 </div>
 
-<script src="/assets/js/nova.js"></script>
-<script src="/assets/js/reseller.js"></script>
+<script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
+<script src="/assets/js/reseller.js<?= $_v('/assets/js/reseller.js') ?>"></script>
 
 </body>
 </html>

@@ -109,15 +109,15 @@ match ($action) {
         Response::success(null, 'Account terminated');
     })(),
 
-    'change-password' => (function() use ($db, $body) {
-        $id   = (int)($body['id'] ?? 0);
+    'change-password' => (function() use ($db, $body, $user) {
+        Auth::getInstance()->require('admin');
+        $id   = (int)($body['account_id'] ?? $body['id'] ?? 0);
         $pass = $body['password'] ?? '';
         if (strlen($pass) < 8) Response::error("Password must be at least 8 characters");
-        $acct = $db->fetchOne("SELECT user_id FROM accounts WHERE id = ?", [$id]);
+        $acct = $db->fetchOne("SELECT a.user_id, a.username FROM accounts a WHERE a.id = ?", [$id]);
         if (!$acct) Response::error("Account not found", 404);
         $db->execute("UPDATE users SET password = ? WHERE id = ?", [password_hash($pass, PASSWORD_BCRYPT), $acct['user_id']]);
-        // Also update system user password
-        shell_exec("echo " . escapeshellarg("{$id}:{$pass}") . " | chpasswd 2>/dev/null");
+        shell_exec("echo " . escapeshellarg("{$acct['username']}:{$pass}") . " | sudo chpasswd 2>/dev/null");
         audit('account.change-password', "account:$id");
         Response::success(null, 'Password changed');
     })(),

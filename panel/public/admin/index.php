@@ -1,6 +1,6 @@
 <?php
 // NovaCPX Admin Panel — Datacenter/Server Manager
-// Equivalent to WHM (WebHost Manager)
+$_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -9,7 +9,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NovaCPX Admin</title>
 <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-<link rel="stylesheet" href="/assets/css/nova.css">
+<link rel="stylesheet" href="/assets/css/nova.css<?= $_v('/assets/css/nova.css') ?>">
 </head>
 <body>
 
@@ -194,7 +194,7 @@
   </div>
 </div>
 
-<script src="/assets/js/nova.js"></script>
-<script src="/assets/js/admin.js"></script>
+<script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
+<script src="/assets/js/admin.js<?= $_v('/assets/js/admin.js') ?>"></script>
 </body>
 </html>

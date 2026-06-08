@@ -1,11 +1,11 @@
 <?php
 /**
- * Webmail endpoint — Roundcube integration proxy
- * Redirects authenticated users to Roundcube with SSO token
+ * Webmail endpoint — Roundcube integration + SSO
  */
+require_once NOVACPX_LIB . '/EmailManager.php';
+
 $db   = DB::getInstance();
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
-
 $user = Auth::getInstance()->user();
 
 match ($action) {
@@ -16,37 +16,50 @@ match ($action) {
         $acct = $db->fetchOne("SELECT * FROM accounts WHERE id = ?", [$accountId]);
         if (!$acct) Response::error("Account not found");
 
-        $domain = $acct['domain'];
-        // Roundcube installed by default at /var/www/roundcube
-        $rcUrl  = "https://{$domain}/webmail/";
-        // Check if Roundcube is installed
-        $installed = file_exists('/var/www/roundcube/index.php');
+        $host      = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $hostname  = preg_replace('/:\d+$/', '', $host);
+        $rcUrl     = "https://{$hostname}:" . PORT_WEBMAIL . "/";
+        $installed = file_exists('/usr/share/roundcube/index.php');
         Response::success([
             'url'       => $rcUrl,
             'installed' => $installed,
-            'domain'    => $domain,
         ]);
     })(),
 
-    'install' => (function() use ($db) {
-        Auth::getInstance()->requireRole(['admin']);
-        // Background install
+    'install' => (function() {
+        Auth::getInstance()->require('admin');
         $logFile = '/var/log/novacpx/webmail-install.log';
-        $cmd = 'apt-get install -y roundcube roundcube-mysql php8.3-intl > ' . escapeshellarg($logFile) . ' 2>&1 && ' .
-               'ln -sf /usr/share/roundcube /var/www/roundcube >> ' . escapeshellarg($logFile) . ' 2>&1';
+        $cmd = 'apt-get install -y roundcube roundcube-mysql php8.3-intl > ' . escapeshellarg($logFile) . ' 2>&1';
         shell_exec("nohup bash -c " . escapeshellarg($cmd) . " &");
         Response::success(['log' => $logFile], 'Webmail install started');
     })(),
 
     'login-url' => (function() use ($db, $body, $user) {
-        // Generate a short-lived token for auto-login
-        $emailAccount = $db->fetchOne("SELECT * FROM email_accounts WHERE id = ?", [(int)($body['email_id'] ?? 0)]);
+        $emailAccount = $db->fetchOne(
+            "SELECT ea.*, a.user_id FROM email_accounts ea JOIN accounts a ON a.id = ea.account_id WHERE ea.id = ?",
+            [(int)($body['email_id'] ?? 0)]
+        );
         if (!$emailAccount) Response::error("Email account not found");
-        $token = bin2hex(random_bytes(16));
-        $db->execute("INSERT INTO api_tokens (user_id, token, purpose, expires_at) VALUES (?,?,?,DATE_ADD(NOW(), INTERVAL 30 SECOND))",
-            [$user['uid'], hash('sha256', $token), 'webmail_sso']);
-        $domain  = parse_url($emailAccount['email'], PHP_URL_HOST) ?: '';
-        Response::success(['url' => "https://{$domain}/webmail/?_token={$token}"]);
+        // Users can only SSO into their own email accounts
+        if ($user['role'] === 'user' && (int)$emailAccount['user_id'] !== (int)$user['uid']) {
+            Response::error('Forbidden', 403);
+        }
+        if (empty($emailAccount['enc_password'])) Response::error("SSO not available for this account — password must be reset");
+
+        // Create short-lived SSO token
+        $token = bin2hex(random_bytes(24));
+        $db->execute(
+            "DELETE FROM webmail_sso_tokens WHERE expires_at < NOW()"
+        );
+        $db->execute(
+            "INSERT INTO webmail_sso_tokens (token, email, enc_pass, expires_at) VALUES (?,?,?,DATE_ADD(NOW(), INTERVAL 60 SECOND))",
+            [hash('sha256', $token), $emailAccount['email'], $emailAccount['enc_password']]
+        );
+        $host     = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $hostname = preg_replace('/:\d+$/', '', $host);
+        Response::success([
+            'url' => "https://{$hostname}:" . PORT_WEBMAIL . "/novacpx-sso.php?t=" . urlencode($token),
+        ]);
     })(),
 
     default => Response::error("Unknown webmail action: $action", 404),
