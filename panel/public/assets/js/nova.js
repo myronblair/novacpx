@@ -3,11 +3,45 @@
  */
 
 window.Nova = (() => {
+  // ── Activity bar (thin top-of-page progress stripe for every API call) ────
+  let _barEl = null, _barPct = 0, _barTimer = null, _barActive = 0;
+  function _barShow() {
+    _barActive++;
+    if (!_barEl) {
+      _barEl = document.createElement('div');
+      _barEl.style.cssText = [
+        'position:fixed;top:0;left:0;z-index:999999',
+        'height:3px;width:0%;background:var(--primary,#6366f1)',
+        'transition:width .2s ease,opacity .3s ease',
+        'box-shadow:0 0 8px var(--primary,#6366f1)',
+        'pointer-events:none',
+      ].join(';');
+      document.body.appendChild(_barEl);
+    }
+    _barEl.style.opacity = '1';
+    _barPct = 10;
+    _barEl.style.width = _barPct + '%';
+    clearInterval(_barTimer);
+    _barTimer = setInterval(() => {
+      if (_barPct < 85) { _barPct += (_barPct < 50 ? 8 : _barPct < 70 ? 4 : 1); _barEl.style.width = _barPct + '%'; }
+    }, 200);
+  }
+  function _barDone() {
+    _barActive = Math.max(0, _barActive - 1);
+    if (_barActive > 0) return;
+    clearInterval(_barTimer);
+    if (_barEl) {
+      _barEl.style.width = '100%';
+      setTimeout(() => { if (_barEl) { _barEl.style.opacity = '0'; setTimeout(() => { _barEl?.remove(); _barEl = null; }, 300); } }, 200);
+    }
+  }
+
   // ── API ───────────────────────────────────────────────────────────────────
   async function api(endpoint, action, opts = {}) {
     const { method = 'GET', body, params } = opts;
     let url = `/api/${endpoint}/${action}`;
     if (params) url += '?' + new URLSearchParams(params);
+    _barShow();
     let res;
     try {
       res = await fetch(url, {
@@ -17,9 +51,11 @@ window.Nova = (() => {
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (e) {
+      _barDone();
       console.error(`Nova.api network error [${endpoint}/${action}]:`, e);
       return { success: false, message: 'Network error — check your connection' };
     }
+    _barDone();
     if (res.status === 401) { location.href = '/?redirect=' + encodeURIComponent(location.pathname); return null; }
     if (res.status === 429) {
       const reset = res.headers.get('X-RateLimit-Reset');
