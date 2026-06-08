@@ -23,8 +23,8 @@ match ($action) {
             [$k, $v] = preg_split('/\s+/', trim($line), 2);
             $ram[$k] = (int) $v;
         }
-        $ramPct = $ram['MemTotal_kB'] ?? 0
-            ? round(100 - ($ram['MemAvailable:'] / $ram['MemTotal:']) * 100, 1)
+        $ramPct = isset($ram['MemTotal:'], $ram['MemAvailable:']) && $ram['MemTotal:'] > 0
+            ? round((1 - $ram['MemAvailable:'] / $ram['MemTotal:']) * 100, 1)
             : 0;
 
         $disk    = [];
