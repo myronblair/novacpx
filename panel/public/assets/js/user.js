@@ -14,6 +14,8 @@ async function initUser() {
   }
   _user = res.data;
   document.getElementById('user-name').textContent = _user.username || 'User';
+  document.getElementById('auth-check').style.display = 'none';
+  document.getElementById('main-layout').style.display = '';
   return true;
 }
 
@@ -1008,6 +1010,11 @@ window.uDockerLaunchApp = async (preselect) => {
 document.addEventListener('DOMContentLoaded', async () => {
   const ok = await initUser();
   if (!ok) return;
+  document.getElementById('logout-btn')?.addEventListener('click', async e => {
+    e.preventDefault();
+    await Nova.api('auth', 'logout', { method: 'POST' });
+    location.href = '/';
+  });
   renderNav();
   window.userNav('dashboard');
 });
