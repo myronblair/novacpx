@@ -448,12 +448,13 @@ match ($action) {
             file_put_contents($configFile, $ini);
         }
 
-        // Inline service switching — stop all alternatives, start the chosen one
+        // Inline service switching
+        // NOTE: Apache is NEVER stopped — it always serves the panel on ports 8880-8883.
+        // The web_server switch only controls which server owns ports 80/443 for customer hosting.
         if ($key === 'web_server') {
-            $webSvcs = ['apache2','nginx','lighttpd','caddy'];
-            foreach ($webSvcs as $s) { shell_exec("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null"); }
-            $startSvc = match($value) { 'nginx' => 'nginx', 'apache' => 'apache2', default => 'apache2' };
-            shell_exec("sudo systemctl enable $startSvc 2>/dev/null && sudo systemctl start $startSvc 2>/dev/null");
+            $target = in_array($value, ['nginx']) ? 'nginx' : 'apache';
+            $out = shell_exec("sudo /usr/local/bin/novacpx-webserver-switch " . escapeshellarg($target) . " 2>&1");
+            novacpx_log('info', "web_server switched to $target: $out");
         } elseif ($key === 'ftp_server') {
             foreach (['proftpd','vsftpd','pure-ftpd'] as $s) { shell_exec("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null"); }
             $startSvc = match($value) { 'vsftpd' => 'vsftpd', 'pureftpd' => 'pure-ftpd', default => 'proftpd' };

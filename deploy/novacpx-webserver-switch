@@ -1,0 +1,59 @@
+#!/bin/bash
+# NovaCPX — switch customer hosting web server (port 80/443)
+# The panel ALWAYS stays on Apache (ports 8880-8883); only customer-facing ports are switched.
+set -e
+TARGET="${1:-apache}"
+PORTS_CONF="/etc/apache2/ports.conf"
+
+write_ports_apache() {
+    cat > "$PORTS_CONF" << 'EOF'
+# Managed by NovaCPX — do not edit manually
+
+# Panel ports (always active)
+Listen 8880
+Listen 8881
+Listen 8882
+Listen 8883
+
+# Customer hosting ports (Apache handles 80/443)
+Listen 80
+<IfModule ssl_module>
+    Listen 443
+</IfModule>
+EOF
+}
+
+write_ports_panel_only() {
+    cat > "$PORTS_CONF" << 'EOF'
+# Managed by NovaCPX — do not edit manually
+
+# Panel ports (always active)
+Listen 8880
+Listen 8881
+Listen 8882
+Listen 8883
+
+# Customer hosting on 80/443 is handled by nginx
+EOF
+}
+
+case "$TARGET" in
+  nginx)
+    write_ports_panel_only
+    systemctl reload apache2 2>/dev/null || systemctl restart apache2
+    systemctl enable nginx  2>/dev/null || true
+    systemctl start  nginx  2>/dev/null || systemctl restart nginx 2>/dev/null || true
+    echo "switched:nginx"
+    ;;
+  apache)
+    systemctl stop    nginx 2>/dev/null || true
+    systemctl disable nginx 2>/dev/null || true
+    write_ports_apache
+    systemctl reload apache2 2>/dev/null || systemctl restart apache2
+    echo "switched:apache"
+    ;;
+  *)
+    echo "Usage: $0 {apache|nginx}" >&2
+    exit 1
+    ;;
+esac

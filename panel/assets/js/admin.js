@@ -3085,11 +3085,12 @@ async function serverOptions() {
   <div class="card">
     <div class="card-header"><span class="card-title">Web Server</span>${Nova.badge(opts.web_server||'apache','green')}</div>
     <div class="card-body">
-      <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">Current web server for hosting accounts. Changing requires migration of all vhosts.</p>
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:.5rem">Controls which server handles customer sites on ports 80/443. The panel itself always runs on Apache (ports 8880–8883) regardless of this setting.</p>
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">Running status — Apache: ${opts.apache_active ? Nova.badge('active','green') : Nova.badge('inactive','red')} &nbsp; Nginx: ${opts.nginx_active ? Nova.badge('active','green') : Nova.badge('inactive','red')}</p>
       <div class="form-group">
-        <label>Active Web Server</label>
+        <label>Customer Hosting Web Server</label>
         <select id="so-web" class="form-control">
-          ${['apache','nginx','openlitespeed','caddy'].map(s=>`<option value="${s}" ${s===(opts.web_server||'apache')?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+          ${['apache','nginx'].map(s=>`<option value="${s}" ${s===(opts.web_server||'apache')?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
         </select>
       </div>
       <button class="btn btn-primary btn-sm" onclick="soSave('web_server','so-web','Web server')">Save & Switch</button>
