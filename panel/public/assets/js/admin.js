@@ -1558,11 +1558,11 @@ ${ips.length ? `
   async function backups() { return backupsFull(); }
 
   // ── Stubs for new pages — implementations in additions block below ─────────
-  async function wordpress() { return `<p class="text-muted" style="padding:2rem">Loading…</p>`; }
-  async function cloudflare() { return `<p class="text-muted" style="padding:2rem">Loading…</p>`; }
-  async function twofa() { return `<p class="text-muted" style="padding:2rem">Loading…</p>`; }
-  async function nginxProxy() { return `<p class="text-muted">Loading...</p>`; }
-  async function sessions() { return `<p class="text-muted">Loading...</p>`; }
+  async function wordpress() { return wordpressPage(); }
+  async function cloudflare() { return cloudflarePage(); }
+  async function twofa() { return twofaPage(); }
+  async function nginxProxy() { return nginxProxyPage(); }
+  async function sessions() { return sessionsPage(); }
 
   // ── Global action helpers ──────────────────────────────────────────────────
   window.adminPage = (page) => Nova.loadPage(page, pages);
@@ -1634,7 +1634,7 @@ ${ips.length ? `
 // ── ADDITIONS: appended by features #14-17 ────────────────────────────────
 
 // ── WordPress Manager (#14) ────────────────────────────────────────────────
-async function wordpress() {
+async function wordpressPage() {
   const [acctRes, wpRes] = await Promise.all([
     Nova.api('accounts','list',{params:{limit:500}}),
     Nova.api('wordpress','list'),
@@ -1936,7 +1936,7 @@ window.bkSaveScheduleFor = async (id) => {
 };
 
 // ── Cloudflare Integration (#16) ──────────────────────────────────────────
-async function cloudflare() {
+async function cloudflarePage() {
   const acctRes = await Nova.api('accounts','list',{params:{limit:500}});
   const accts = acctRes?.data?.accounts || [];
   window._adminAcctsCF = accts;
@@ -2085,7 +2085,7 @@ window.cfPurge = async (zoneId, acctId) => {
 };
 
 // ── TOTP / 2FA Admin (#17) ────────────────────────────────────────────────
-async function twofa() {
+async function twofaPage() {
   const res = await Nova.api('accounts','list',{params:{limit:500}});
   const users = res?.data?.accounts || [];
   return `
@@ -2143,7 +2143,7 @@ window.totpAdminDisable = (userId, username) => {
 };
 
 // ── Nginx Proxy Manager ───────────────────────────────────────────────────────
-async function nginxProxy() {
+async function nginxProxyPage() {
   const [statusR, hostsR] = await Promise.all([
     Nova.api('proxy', 'status'),
     Nova.api('proxy', 'hosts'),
@@ -2389,7 +2389,7 @@ window.proxySetupInstructions = async () => {
 };
 
 // ── #29 Session Manager ───────────────────────────────────────────────────────
-async function sessions() {
+async function sessionsPage() {
   const r = await Nova.api('sessions', 'list');
   const rows = r?.data || [];
   const fmt = d => new Date(d.replace(' ','T')+'Z').toLocaleString();
