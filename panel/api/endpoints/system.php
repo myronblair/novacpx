@@ -114,6 +114,7 @@ match ($action) {
     // ── Apply OS update ───────────────────────────────────────────────────────
     'apply-os-update' => (function() use ($db) {
         Auth::getInstance()->require('admin');
+        set_time_limit(300);
 
         $panelPorts = [PORT_USER, PORT_RESELLER, PORT_ADMIN];
         $webSvc = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
@@ -199,6 +200,7 @@ match ($action) {
     // ── Apply NovaCPX update ─────────────────────────────────────────────────
     'apply-novacpx-update' => (function() use ($db) {
         Auth::getInstance()->require('admin');
+        set_time_limit(180);
         $srcDir  = '/opt/novacpx-src';
         $webRoot = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
         $webSvc  = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
@@ -255,19 +257,22 @@ match ($action) {
             }
 
             // Reload PHP-FPM to pick up new code
-            shell_exec("systemctl reload php8.3-fpm 2>/dev/null || true");
+            shell_exec("systemctl reload php8.3-fpm 2>/dev/null || systemctl reload php8.2-fpm 2>/dev/null || true");
 
-            // Verify panel is still up
+            // Verify panel is still up using curl (handles both HTTP and HTTPS)
             sleep(2);
-            $panelOk = @fsockopen('127.0.0.1', PORT_ADMIN, $e, $es, 3);
+            $port    = defined('PORT_ADMIN') ? PORT_ADMIN : 8882;
+            $schemes = ['https','http'];
+            $panelOk = false;
+            foreach ($schemes as $scheme) {
+                $code = trim(shell_exec("curl -sk -o /dev/null -w '%{http_code}' {$scheme}://127.0.0.1:{$port}/api/system/version --max-time 5 2>/dev/null") ?: '');
+                if (in_array($code, ['200','401','302','301'])) { $panelOk = true; break; }
+            }
             if (!$panelOk) {
-                // Restore backup and reload
                 shell_exec("rsync -a --delete " . escapeshellarg("$backupDir/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
                 shell_exec("systemctl reload $webSvc 2>/dev/null");
                 novacpx_log('error', "NovaCPX update failed — panel down after deploy; restored from backup");
                 Response::error('Update deployed but panel went down — auto-restored from backup. Check logs.');
-            } else {
-                fclose($panelOk);
             }
 
             audit('system.novacpx-update', "novacpx:$before→$after");
@@ -329,6 +334,14 @@ match ($action) {
             'services'  => $services,
             'uptime'    => trim(shell_exec('uptime -p') ?: ''),
         ]);
+    })(),
+
+    // ── Single-service status check (lightweight) ─────────────────────────────
+    'svc-check' => (function() {
+        Auth::getInstance()->require('admin');
+        $svc    = preg_replace('/[^a-z0-9\-_.]/', '', $_GET['service'] ?? '');
+        $status = $svc ? trim(shell_exec("systemctl is-active " . escapeshellarg($svc) . " 2>/dev/null") ?: 'unknown') : 'unknown';
+        Response::success(['service' => $svc, 'status' => $status]);
     })(),
 
     // ── Service control (start/stop/restart) ──────────────────────────────────

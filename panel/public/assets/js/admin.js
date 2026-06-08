@@ -153,8 +153,8 @@
       <table><tbody>
         ${Object.entries(s.services || {}).map(([svc, status]) => `
           <tr>
-            <td>${Nova.serviceDot(status)} ${svc}</td>
-            <td>${Nova.badge(status, status === 'active' ? 'green' : 'red')}</td>
+            <td><span data-svc-dot="${svc}">${Nova.serviceDot(status)}</span> ${svc}</td>
+            <td><span data-svc-status="${svc}">${Nova.badge(status, status === 'active' ? 'green' : 'red')}</span></td>
             <td class="text-right">
               <button class="btn btn-ghost btn-sm" onclick="adminServiceAction('${svc}','restart')">Restart</button>
               <button class="btn btn-ghost btn-sm" onclick="adminServiceAction('${svc}','stop')">Stop</button>
@@ -483,7 +483,7 @@
         <div class="stat-card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
             <strong>PHP ${v.version}</strong>
-            ${v.installed ? Nova.badge(v.fpm_active ? 'active' : 'stopped', v.fpm_active ? 'green' : 'yellow') : Nova.badge('not installed','muted')}
+            <span data-svc-status="php${v.version}-fpm">${v.installed ? Nova.badge(v.fpm_active ? 'active' : 'stopped', v.fpm_active ? 'green' : 'yellow') : Nova.badge('not installed','muted')}</span>
           </div>
           ${v.is_default ? `<div class="text-xs text-muted mb-1">Panel default</div>` : ''}
           <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.5rem">
@@ -522,7 +522,7 @@
 
   window.phpFpmAction = async (ver, cmd) => {
     const r = await Nova.api('php', 'fpm-action', { method: 'POST', body: { version: ver, command: cmd } });
-    if (r?.success) { Nova.toast(r.message, 'success'); adminPage('php-manager'); }
+    if (r?.success) { Nova.toast(r.message, 'success'); refreshSvcStatus(`php${ver}-fpm`); }
     else Nova.toast(r?.message || 'Action failed', 'error');
   };
 
@@ -964,19 +964,20 @@
   window.adminEditZone = async (id, domain) => {
     const res = await Nova.api('dns', 'records', {params:{zone_id:id}});
     if (!res?.success) { Nova.toast('Failed to load records','error'); return; }
-    const rows = res.data.map(r => `<tr><td>${r.name}</td><td>${Nova.badge(r.type,'default')}</td><td><code>${r.value}</code></td><td>${r.ttl}</td>
-      <td><button class="btn btn-xs btn-danger" onclick="adminDelRecord(${r.id},${id},'${domain}')">Del</button></td></tr>`).join('');
+    const records = Array.isArray(res.data) ? res.data : [];
+    const rows = records.map(r => `<tr><td>${Nova.escHtml(r.name)}</td><td>${Nova.badge(r.type,'default')}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis"><code>${Nova.escHtml(r.content||r.value||'')}</code></td><td>${r.ttl||3600}</td>
+      <td><button class="btn btn-xs btn-danger" onclick="adminDelRecord(${r.id},${id},'${Nova.escHtml(domain)}')">Del</button></td></tr>`).join('');
     Nova.modal(`DNS: ${domain}`, `
       <button class="btn btn-sm btn-primary" style="margin-bottom:.75rem" onclick="adminAddRecord(${id},'${domain}')">+ Add Record</button>
-      <table class="table"><thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th></th></tr></thead><tbody>${rows}</tbody></table>`);
+      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>Type</th><th>Content</th><th>TTL</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="text-muted" style="text-align:center;padding:1rem">No records yet.</td></tr>'}</tbody></table></div>`);
   };
   window.adminAddRecord = (zoneId, domain) => {
     Nova.modal('Add Record', `
       <div class="form-group"><label class="form-label">Name</label><input id="ar2-name" class="form-control" value="@"></div>
-      <div class="form-group"><label class="form-label">Type</label><select id="ar2-type" class="form-control"><option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option><option>NS</option></select></div>
-      <div class="form-group"><label class="form-label">Value</label><input id="ar2-val" class="form-control"></div>
+      <div class="form-group"><label class="form-label">Type</label><select id="ar2-type" class="form-control"><option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option><option>NS</option><option>CAA</option></select></div>
+      <div class="form-group"><label class="form-label">Content</label><input id="ar2-val" class="form-control" placeholder="IP address, hostname, or value"></div>
       <div class="form-group"><label class="form-label">TTL</label><input id="ar2-ttl" type="number" class="form-control" value="3600"></div>`,
-      `<button class="btn btn-primary" onclick="Nova.api('dns','add-record',{method:'POST',body:{zone_id:${zoneId},name:document.getElementById('ar2-name').value,type:document.getElementById('ar2-type').value,value:document.getElementById('ar2-val').value,ttl:parseInt(document.getElementById('ar2-ttl').value)}}).then(r=>{if(r?.success){Nova.toast('Added','success');document.querySelector('.modal-overlay').remove();adminEditZone(${zoneId},'${domain}');}else Nova.toast(r?.message,'error');})">Add</button>`);
+      `<button class="btn btn-primary" onclick="Nova.api('dns','add-record',{method:'POST',body:{zone_id:${zoneId},name:document.getElementById('ar2-name').value,type:document.getElementById('ar2-type').value,content:document.getElementById('ar2-val').value,ttl:parseInt(document.getElementById('ar2-ttl').value)||3600}}).then(r=>{if(r?.success){Nova.toast('Record added','success');document.querySelector('.modal-overlay').remove();adminEditZone(${zoneId},'${domain}');}else Nova.toast(r?.message||'Failed','error');})">Add Record</button>`);
   };
   window.adminDelRecord = async (id, zoneId, domain) => {
     Nova.confirm('Delete this record?', async () => {
@@ -1034,7 +1035,7 @@
     <div class="stats-grid" style="margin-bottom:1.5rem">
       ${Object.entries(svcs).map(([s,st]) => `<div class="stat-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
-          <strong style="word-break:break-all">${s}</strong>${Nova.badge(st,st==='active'?'green':'red')}
+          <strong style="word-break:break-all">${s}</strong><span data-svc-status="${s}">${Nova.badge(st,st==='active'?'green':'red')}</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:.35rem">
           <button class="btn btn-xs" onclick="adminServiceAction('${s}','restart')">Restart</button>
@@ -1052,34 +1053,47 @@
     const res = await Nova.api('ssl', 'list', {params:{account_id:0}});
     const certs = res?.data || [];
     return `
-<div class="card">
+<div class="page-header"><h2 class="page-title">SSL Certificate Manager</h2></div>
+
+<div class="card" style="margin-bottom:1.5rem">
   <div class="card-header">
-    <span class="card-title">SSL Certificate Manager</span>
-    <button class="btn btn-primary btn-sm" onclick="adminIssueBulkSSL()">Issue SSL for All Domains</button>
+    <span class="card-title">Certificates</span>
+    <div style="display:flex;gap:.5rem;margin-left:auto;flex-wrap:wrap">
+      <button class="btn btn-xs btn-ghost" onclick="adminGenerateCSR()">Generate CSR</button>
+      <button class="btn btn-xs btn-ghost" onclick="adminInstallCustomSSL()">Upload Custom SSL</button>
+      <button class="btn btn-xs btn-primary" onclick="adminIssueBulkSSL()">Issue LE for All Domains</button>
+    </div>
   </div>
-  ${certs.length ? `<table class="table"><thead><tr><th>Domain</th><th>Account</th><th>Type</th><th>Expires</th><th>Days</th><th>Actions</th></tr></thead><tbody>
+  ${certs.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Domain</th><th>Account</th><th>Type</th><th>Expires</th><th>Days</th><th>Actions</th></tr></thead><tbody>
     ${certs.map(c => {
       const days = c.days_remaining;
       const badge = days !== null ? Nova.badge(days+'d', days<7?'red':days<30?'yellow':'green') : Nova.badge('unknown','muted');
       return `<tr>
-        <td>${c.domain}</td>
-        <td>${c.username||'—'}</td>
-        <td>${Nova.badge(c.type,'default')}</td>
+        <td>${Nova.escHtml(c.domain)}</td>
+        <td>${Nova.escHtml(c.username||'—')}</td>
+        <td>${Nova.badge(c.type||'lets-encrypt','default')}</td>
         <td>${c.expires_at||'—'}</td>
         <td>${badge}</td>
         <td style="display:flex;gap:.25rem">
           <button class="btn btn-xs" onclick="adminRenewCert(${c.id})">Renew</button>
-          <button class="btn btn-xs btn-danger" onclick="adminDelCert(${c.id},'${c.domain}')">Del</button>
+          <button class="btn btn-xs btn-danger" onclick="adminDelCert(${c.id},'${Nova.escHtml(c.domain)}')">Del</button>
         </td>
       </tr>`;
     }).join('')}
-  </tbody></table>`
-  : '<div class="empty" style="padding:2rem">No SSL certificates issued yet.</div>'}
+  </tbody></table></div>`
+  : '<div class="empty" style="padding:2rem">No SSL certificates yet.</div>'}
+</div>
+
+<div class="card">
+  <div class="card-header"><span class="card-title">About SSL Options</span></div>
+  <div class="card-body" style="font-size:.85rem;color:var(--text-muted)">
+    <p><strong>Let's Encrypt</strong> — Free automatic SSL via Certbot. Requires a publicly reachable domain (port 80 open). Use "Issue LE for All Domains" to auto-issue for every account.</p>
+    <p style="margin-top:.5rem"><strong>Custom SSL</strong> — Upload a certificate from any CA (Comodo, DigiCert, GlobalSign, etc). Paste the certificate, private key, and CA chain. Use "Generate CSR" to create a signing request to send to your CA.</p>
+  </div>
 </div>`;
   }
   window.adminIssueBulkSSL = async () => {
     Nova.toast('Queuing SSL for all domains without certificates…','info',6000);
-    // Get all accounts, then issue SSL for each domain
     const accts = await Nova.api('accounts','list',{params:{limit:1000}});
     let count = 0;
     for (const a of (accts?.data?.accounts || [])) {
@@ -1101,6 +1115,60 @@
       if (r?.success) { Nova.toast('Deleted','success'); adminPage('ssl-manager'); }
       else Nova.toast(r?.message,'error');
     }, true);
+  };
+  window.adminGenerateCSR = () => {
+    Nova.modal('Generate CSR', `
+      <p class="text-muted" style="font-size:.83rem;margin-bottom:1rem">Fill in your details. Submit to CA, keep the private key safe.</p>
+      <div class="grid-2">
+        <div class="form-group"><label>Domain (CN)</label><input id="csr-domain" class="form-control" placeholder="example.com"></div>
+        <div class="form-group"><label>Country (2-letter)</label><input id="csr-country" class="form-control" value="US" maxlength="2"></div>
+        <div class="form-group"><label>State / Province</label><input id="csr-state" class="form-control" placeholder="California"></div>
+        <div class="form-group"><label>City / Locality</label><input id="csr-city" class="form-control" placeholder="San Francisco"></div>
+      </div>
+      <div class="form-group"><label>Organization</label><input id="csr-org" class="form-control" placeholder="My Company LLC"></div>`,
+      `<button class="btn btn-primary" onclick="adminDoGenerateCSR()">Generate CSR</button>`);
+  };
+  window.adminDoGenerateCSR = async () => {
+    const domain  = document.getElementById('csr-domain')?.value?.trim();
+    const country = document.getElementById('csr-country')?.value?.trim();
+    const state   = document.getElementById('csr-state')?.value?.trim();
+    const city    = document.getElementById('csr-city')?.value?.trim();
+    const org     = document.getElementById('csr-org')?.value?.trim();
+    if (!domain) { Nova.toast('Domain required','error'); return; }
+    Nova.toast('Generating CSR…','info');
+    const r = await Nova.api('ssl','generate-csr',{method:'POST',body:{domain,country,state,city,org}});
+    if (!r?.success) { Nova.toast(r?.message||'Failed','error'); return; }
+    document.querySelector('.modal-overlay')?.remove();
+    Nova.modal(`CSR for ${domain}`, `
+      <p class="text-muted" style="font-size:.82rem;margin-bottom:.75rem">Submit the CSR to your certificate authority. Store the private key securely — you'll need it when uploading the issued cert.</p>
+      <div class="form-group"><label>Certificate Signing Request (CSR)</label>
+        <textarea class="form-control" rows="8" readonly style="font-family:monospace;font-size:.75rem">${Nova.escHtml(r.data.csr)}</textarea></div>
+      <div class="form-group"><label>Private Key (keep secret)</label>
+        <textarea class="form-control" rows="8" readonly style="font-family:monospace;font-size:.75rem">${Nova.escHtml(r.data.private_key)}</textarea></div>
+      <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(document.querySelectorAll('.modal-overlay textarea')[0].value).then(()=>Nova.toast('CSR copied','success'))">Copy CSR</button>
+      <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(document.querySelectorAll('.modal-overlay textarea')[1].value).then(()=>Nova.toast('Key copied','success'))">Copy Key</button>`);
+  };
+  window.adminInstallCustomSSL = () => {
+    Nova.modal('Upload Custom SSL Certificate', `
+      <p class="text-muted" style="font-size:.82rem;margin-bottom:.75rem">Paste the certificate and key from your CA. Chain/CA bundle is optional but recommended.</p>
+      <div class="form-group"><label>Domain</label><input id="cssl-domain" class="form-control" placeholder="example.com"></div>
+      <div class="form-group"><label>Certificate (PEM)</label><textarea id="cssl-cert" class="form-control" rows="5" style="font-family:monospace;font-size:.75rem" placeholder="-----BEGIN CERTIFICATE-----"></textarea></div>
+      <div class="form-group"><label>Private Key (PEM)</label><textarea id="cssl-key" class="form-control" rows="5" style="font-family:monospace;font-size:.75rem" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></div>
+      <div class="form-group"><label>CA Chain / Bundle (optional)</label><textarea id="cssl-chain" class="form-control" rows="4" style="font-family:monospace;font-size:.75rem" placeholder="-----BEGIN CERTIFICATE----- (intermediate)"></textarea></div>`,
+      `<button class="btn btn-primary" onclick="adminDoInstallCustomSSL()">Install Certificate</button>`);
+  };
+  window.adminDoInstallCustomSSL = async () => {
+    const domain = document.getElementById('cssl-domain')?.value?.trim();
+    const cert   = document.getElementById('cssl-cert')?.value?.trim();
+    const key    = document.getElementById('cssl-key')?.value?.trim();
+    const chain  = document.getElementById('cssl-chain')?.value?.trim();
+    if (!domain || !cert || !key) { Nova.toast('Domain, certificate, and key are required','error'); return; }
+    const r = await Nova.api('ssl','install-custom',{method:'POST',body:{domain,cert,key,chain}});
+    if (r?.success) {
+      Nova.toast('Custom SSL installed','success');
+      document.querySelector('.modal-overlay')?.remove();
+      adminPage('ssl-manager');
+    } else { Nova.toast(r?.message||'Failed','error'); }
   };
 
   // ── Firewall ───────────────────────────────────────────────────────────────
@@ -1712,7 +1780,7 @@ ${dbs.map(d=>`<tr>
     <div style="padding:1.25rem">
       ${[['postfix',mailStatus],['dovecot',doveStatus]].map(([s,st]) => `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--border)">
-          <span>${s} ${Nova.badge(st,st==='active'?'green':'red')}</span>
+          <span>${s} <span data-svc-status="${s}">${Nova.badge(st,st==='active'?'green':'red')}</span></span>
           <div style="display:flex;gap:.5rem">
             <button class="btn btn-xs" onclick="adminServiceAction('${s}','restart')">Restart</button>
             <button class="btn btn-xs" onclick="adminServiceAction('${s}','reload')">Reload</button>
@@ -1749,7 +1817,7 @@ ${dbs.map(d=>`<tr>
 <div class="card">
   <div class="card-header">
     <span class="card-title">FTP Server (${label})</span>
-    ${Nova.badge(status, status==='active'?'green':'red')}
+    <span data-svc-status="${svcName}">${Nova.badge(status, status==='active'?'green':'red')}</span>
     <div style="display:flex;gap:.5rem;margin-left:auto">
       <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','restart')">Restart</button>
       <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','reload')">Reload</button>
@@ -1823,6 +1891,21 @@ ${dbs.map(d=>`<tr>
   window.adminServiceAction = async (svc, cmd) => {
     const res = await Nova.api('system', 'service', { method: 'POST', body: { service: svc, command: cmd } });
     Nova.toast(`${svc}: ${cmd} → ${res?.success ? 'OK' : res?.message}`, res?.success ? 'success' : 'error');
+    if (res?.success && cmd !== 'flush') refreshSvcStatus(svc);
+  };
+
+  // Polls is-active after a short delay and updates all [data-svc-status] / [data-svc-dot] in the DOM
+  window.refreshSvcStatus = async (svc, delay = 1500) => {
+    await new Promise(r => setTimeout(r, delay));
+    const r = await Nova.api('system', 'svc-check', { params: { service: svc } });
+    const status = r?.data?.status || 'unknown';
+    const color  = status === 'active' ? 'green' : 'red';
+    document.querySelectorAll(`[data-svc-status="${svc}"]`).forEach(el => {
+      el.innerHTML = Nova.badge(status, color);
+    });
+    document.querySelectorAll(`[data-svc-dot="${svc}"]`).forEach(el => {
+      el.innerHTML = Nova.serviceDot(status);
+    });
   };
   window.phpAction = async (ver, cmd) => {
     const svc = `php${ver}-fpm`;
@@ -2666,13 +2749,19 @@ window.sessionsRevokeAll = () => {
 };
 
 // ── #31-35 Docker Management ───────────────────────────────────────────────
-async function docker(el) {
-  el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading Docker status…</div>';
+async function docker() {
   const st = await Nova.api('docker', 'status');
   const status = st?.data || {};
 
+  window.dockerInstall = async (btn) => {
+    btn.disabled = true; btn.textContent = 'Installing… (this may take 2-3 minutes)';
+    const r = await Nova.api('docker', 'install', { method: 'POST', body: {} });
+    Nova.toast(r?.message || (r?.success ? 'Installed' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) Nova.loadPage('docker', window._novaPages);
+  };
+
   if (!status.installed) {
-    el.innerHTML = `
+    return `
 <div class="page-header"><h2 class="page-title">Docker</h2></div>
 <div class="card"><div class="card-body" style="text-align:center;padding:3rem">
   <div style="font-size:3rem;margin-bottom:1rem">🐳</div>
@@ -2680,19 +2769,27 @@ async function docker(el) {
   <p class="text-muted" style="margin:.5rem 0 1.5rem">Install Docker CE + Compose on this server to enable container management.</p>
   <button class="btn btn-primary" onclick="dockerInstall(this)">Install Docker CE</button>
 </div></div>`;
-    window.dockerInstall = async (btn) => {
-      btn.disabled = true; btn.textContent = 'Installing… (this may take 2-3 minutes)';
-      const r = await Nova.api('docker', 'install', { method: 'POST', body: {} });
-      Nova.toast(r?.message || (r?.success ? 'Installed' : 'Failed'), r?.success ? 'success' : 'error');
-      if (r?.success) Nova.loadPage('docker', window._novaPages);
-    };
-    return;
   }
 
-  const tab = (id, label) => `<button class="btn btn-sm ${id===_dockerTab?'btn-primary':'btn-ghost'}" onclick="dockerTab('${id}')">${label}</button>`;
   window._dockerTab = window._dockerTab || 'containers';
+  const tab = (id, label) => `<button class="btn btn-sm ${id===window._dockerTab?'btn-primary':'btn-ghost'}" onclick="dockerTab('${id}')">${label}</button>`;
 
-  el.innerHTML = `
+  window.dockerTab = async (id) => {
+    window._dockerTab = id;
+    document.querySelectorAll('[onclick^="dockerTab"]').forEach(b => {
+      b.className = 'btn btn-sm ' + (b.getAttribute('onclick').includes(`'${id}'`) ? 'btn-primary' : 'btn-ghost');
+    });
+    await dockerLoadTab(id);
+  };
+  window.dockerPrune = () => Nova.confirm('Remove all stopped containers, unused images, and build cache?', async () => {
+    const r = await Nova.api('docker', 'prune', { method: 'POST', body: { volumes: false } });
+    Nova.toast(r?.success ? 'Pruned' : 'Failed', r?.success ? 'success' : 'error');
+    if (r?.success) dockerLoadTab(window._dockerTab);
+  }, true);
+
+  setTimeout(() => dockerLoadTab(window._dockerTab), 100);
+
+  return `
 <div class="page-header"><h2 class="page-title">Docker</h2></div>
 <div class="stats-grid" style="margin-bottom:1.5rem">
   <div class="stat-card"><div class="stat-label">Engine</div><div class="stat-value stat-green">${Nova.escHtml(status.version || '—')}</div><div class="stat-sub">${status.running ? 'Running' : 'Stopped'}</div></div>
@@ -2703,22 +2800,6 @@ async function docker(el) {
   <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="dockerPrune()">System Prune</button>
 </div>
 <div id="docker-tab-content"><div class="loading">Loading…</div></div>`;
-
-  window.dockerTab = async (id) => {
-    window._dockerTab = id;
-    document.querySelectorAll('[onclick^="dockerTab"]').forEach(b => {
-      b.className = 'btn btn-sm ' + (b.getAttribute('onclick').includes(`'${id}'`) ? 'btn-primary' : 'btn-ghost');
-    });
-    await dockerLoadTab(id);
-  };
-
-  window.dockerPrune = () => Nova.confirm('Remove all stopped containers, unused images, and build cache?', async () => {
-    const r = await Nova.api('docker', 'prune', { method: 'POST', body: { volumes: false } });
-    Nova.toast(r?.success ? 'Pruned' : 'Failed', r?.success ? 'success' : 'error');
-    if (r?.success) dockerLoadTab(_dockerTab);
-  }, true);
-
-  await dockerLoadTab(window._dockerTab);
 }
 
 async function dockerLoadTab(tab) {

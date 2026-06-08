@@ -71,15 +71,19 @@ body {
 .form-group label { display: block; font-size: .85rem; font-weight: 500; margin-bottom: .4rem; color: var(--text-muted); }
 
 input[type="text"], input[type="password"], input[type="email"],
-input[type="number"], input[type="url"], select, textarea {
+input[type="number"], input[type="url"], input[type="search"],
+input[type="date"], input[type="time"], input[type="tel"],
+input:not([type]), .form-control, select, textarea {
   width: 100%; padding: .65rem .9rem;
   background: var(--bg3); border: 1px solid var(--border);
   border-radius: var(--radius); color: var(--text);
   font-family: var(--font); font-size: .9rem;
   transition: border-color .15s;
   outline: none;
+  box-sizing: border-box;
 }
-input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+input:focus, select:focus, textarea:focus, .form-control:focus { border-color: var(--primary); }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.5); }
 
 .input-with-icon { position: relative; }
 .input-with-icon input { padding-right: 2.5rem; }

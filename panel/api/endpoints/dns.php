@@ -24,11 +24,10 @@ match ($action) {
     })(),
 
     'records' => (function() use ($db, $body) {
-        $zoneId = (int)($_GET['zone_id'] ?? 0);
+        $zoneId = (int)($_GET['zone_id'] ?? $body['zone_id'] ?? 0);
         if (!$zoneId) Response::error("zone_id required");
         $records = $db->fetchAll("SELECT * FROM dns_records WHERE zone_id = ? ORDER BY type, name", [$zoneId]);
-        $zone    = $db->fetchOne("SELECT * FROM dns_zones WHERE id = ?", [$zoneId]);
-        Response::success(['zone' => $zone, 'records' => $records]);
+        Response::success($records);
     })(),
 
     'add-record' => (function() use ($db, $body, $accountId) {
@@ -68,10 +67,11 @@ match ($action) {
 
     'create-zone' => (function() use ($db, $body, $accountId, $user) {
         Auth::getInstance()->require('admin', 'reseller');
-        $domain    = strtolower(trim($body['domain'] ?? ''));
-        $acctId    = (int)($body['account_id'] ?? $accountId ?? 0);
+        $domain = strtolower(trim($body['domain'] ?? ''));
+        $acctId = (int)($body['account_id'] ?? $accountId ?? 0);
         if (!$domain) Response::error("Domain required");
-        if (!$acctId) Response::error("account_id required");
+        // Admins can create zones not tied to any account (acctId = 0)
+        if (!$acctId && $user['role'] !== 'admin') Response::error("account_id required");
         DNSManager::createZone($acctId, $domain);
         audit('dns.create-zone', $domain);
         Response::success(null, "DNS zone created for $domain");
@@ -80,6 +80,10 @@ match ($action) {
     'delete-zone' => (function() use ($db, $body, $user) {
         Auth::getInstance()->require('admin');
         $domain = trim($body['domain'] ?? '');
+        if (!$domain && isset($body['zone_id'])) {
+            $row = $db->fetchOne("SELECT domain FROM dns_zones WHERE id = ?", [(int)$body['zone_id']]);
+            $domain = $row['domain'] ?? '';
+        }
         if (!$domain) Response::error("Domain required");
         DNSManager::removeZone($domain);
         audit('dns.delete-zone', $domain);
