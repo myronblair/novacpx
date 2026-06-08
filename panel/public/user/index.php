@@ -158,6 +158,7 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
 
   <div class="main-content">
     <header class="topbar">
+      <button class="btn btn-ghost btn-icon" id="sidebar-toggle" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       <div class="topbar-title" id="page-title">My Hosting</div>
       <div class="topbar-actions">
         <span id="account-domain" class="text-muted text-sm"></span>

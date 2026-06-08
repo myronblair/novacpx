@@ -14,6 +14,7 @@
 <body>
 
 <div class="panel-layout" id="app" style="display:none">
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
 
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
@@ -125,6 +126,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
           2FA Manager
         </a>
+        <a href="#" class="sidebar-link" data-page="sessions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          Sessions
+        </a>
       </div>
 
       <div class="sidebar-section">
@@ -165,7 +170,8 @@
   <!-- Main Content -->
   <div class="main-content">
     <header class="topbar">
-      <button class="btn btn-ghost btn-icon" id="sidebar-toggle" style="display:none">☰</button>
+      <button class="btn btn-ghost btn-icon" id="sidebar-toggle" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+
       <div class="topbar-title" id="page-title">Dashboard</div>
       <div class="topbar-actions">
         <span id="server-ip" class="text-muted text-sm"></span>

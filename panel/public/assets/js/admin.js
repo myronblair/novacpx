@@ -88,6 +88,7 @@
     'mail-server': mailServer,
     'ftp-server': ftpServer,
     'nginx-proxy': nginxProxy,
+    sessions,
     wordpress,
     'ssl-manager': sslManager,
     firewall,
@@ -1343,7 +1344,8 @@ ${ips.length ? `
   async function wordpress() { return `<p class="text-muted" style="padding:2rem">Loading…</p>`; }
   async function cloudflare() { return `<p class="text-muted" style="padding:2rem">Loading…</p>`; }
   async function twofa() { return `<p class="text-muted" style="padding:2rem">Loading…</p>`; }
-  async function nginxProxy() { return `<p class="text-muted" style="padding:2rem">Loading…</p>`; }
+  async function nginxProxy() { return `<p class="text-muted">Loading...</p>`; }
+  async function sessions() { return `<p class="text-muted">Loading...</p>`; }
 
   // ── Global action helpers ──────────────────────────────────────────────────
   window.adminPage = (page) => Nova.loadPage(page, pages);
@@ -2167,4 +2169,70 @@ window.proxySetupInstructions = async () => {
   </ul>
 </div>
   `, null, { cancelLabel: 'Close', showConfirm: false });
+};
+
+// ── #29 Session Manager ───────────────────────────────────────────────────────
+async function sessions() {
+  const r = await Nova.api('sessions', 'list');
+  const rows = r?.data || [];
+  const fmt = d => new Date(d.replace(' ','T')+'Z').toLocaleString();
+  const ua = s => {
+    if (!s) return '—';
+    const m = s.match(/\(([^)]+)\)/);
+    return m ? m[1].split(';')[0].slice(0,50) : s.slice(0,50);
+  };
+  return `
+<div class="page-header">
+  <h1 class="page-title">Session Manager</h1>
+  <div class="page-actions">
+    <button class="btn btn-sm btn-danger" onclick="sessionsRevokeAll()">Revoke All Sessions</button>
+  </div>
+</div>
+<div class="stats-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card"><div class="stat-label">Active Sessions</div><div class="stat-value">${rows.length}</div></div>
+  <div class="stat-card"><div class="stat-label">Unique Users</div><div class="stat-value">${new Set(rows.map(r=>r.user_id)).size}</div></div>
+  <div class="stat-card"><div class="stat-label">Unique IPs</div><div class="stat-value">${new Set(rows.map(r=>r.ip_address)).size}</div></div>
+</div>
+<div class="panel">
+  <div class="panel-header"><h3 class="panel-title">Active Sessions</h3><span class="badge badge-blue">${rows.length} total</span></div>
+  ${rows.length === 0
+    ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No active sessions</div>'
+    : `<div style="overflow-x:auto"><table class="table"><thead><tr>
+    <th>User</th><th>Role</th><th>IP</th><th>Browser</th><th>Created</th><th>Expires</th><th>Actions</th>
+    </tr></thead><tbody>
+    ${rows.map(s=>`<tr>
+      <td><strong>${Nova.escHtml(s.username)}</strong><br><small class="text-muted">${Nova.escHtml(s.email)}</small></td>
+      <td>${Nova.badge(s.role, s.role==='admin'?'red':s.role==='reseller'?'yellow':'blue')}</td>
+      <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(s.ip_address)}</td>
+      <td style="font-size:.8rem;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Nova.escHtml(s.user_agent||'')}">${Nova.escHtml(ua(s.user_agent||''))}</td>
+      <td style="font-size:.82rem">${fmt(s.created_at)}</td>
+      <td style="font-size:.82rem">${fmt(s.expires_at)}</td>
+      <td>
+        <button class="btn btn-xs btn-danger" onclick="sessionsRevoke('${s.id}')">Revoke</button>
+        <button class="btn btn-xs btn-warning" onclick="sessionsRevokeUser(${s.user_id},'${Nova.escHtml(s.username)}')">All for User</button>
+      </td></tr>`).join('')}
+    </tbody></table></div>`}
+</div>`;
+}
+
+window.sessionsRevoke = async (id) => {
+  const r = await Nova.api('sessions','revoke',{method:'DELETE',body:{session_id:id}});
+  Nova.toast(r?.success?'Session revoked':'Failed',r?.success?'success':'error');
+  if (r?.success) Nova.loadPage('sessions',window._novaPages);
+};
+
+window.sessionsRevokeUser = (uid,name) => {
+  Nova.confirm(`Revoke all sessions for ${name}? They will be logged out everywhere.`,async()=>{
+    const r=await Nova.api('sessions','revoke-user',{method:'DELETE',body:{user_id:uid}});
+    Nova.toast(r?.success?`${r.data?.revoked??'?'} sessions revoked`:'Failed',r?.success?'success':'error');
+    if(r?.success) Nova.loadPage('sessions',window._novaPages);
+  },true);
+};
+
+window.sessionsRevokeAll = () => {
+  Nova.confirm('Revoke ALL sessions? Everyone including you will be logged out.',async()=>{
+    const r=await Nova.api('sessions','revoke-all',{method:'DELETE',body:{}});
+    Nova.toast(r?.success?'All sessions revoked — logging out...':'Failed',r?.success?'success':'error');
+    if(r?.success) setTimeout(()=>location.reload(),1500);
+  },true);
 };
