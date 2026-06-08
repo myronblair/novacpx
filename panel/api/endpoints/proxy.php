@@ -2,99 +2,107 @@
 /**
  * Proxy endpoint — manage Nginx reverse proxy
  * Routes:
- *  GET  proxy/status         — nginx status + mode
- *  POST proxy/install         — install nginx
- *  POST proxy/control         — {action: start|stop|restart|reload}
- *  GET  proxy/hosts           — list proxy hosts
- *  POST proxy/hosts           — add proxy host
- *  PUT  proxy/hosts/{id}      — update proxy host
- *  DELETE proxy/hosts/{id}    — delete proxy host
- *  POST proxy/hosts/{id}/toggle — {enabled: bool}
- *  POST proxy/sync            — sync hosts from accounts
- *  POST proxy/write-configs   — regenerate all nginx configs
- *  GET  proxy/setup-script    — return bash install script
+ *  GET  /api/proxy/status           — nginx status
+ *  POST /api/proxy/install           — install nginx
+ *  POST /api/proxy/control           — {action: start|stop|restart|reload}
+ *  GET  /api/proxy/hosts             — list proxy hosts
+ *  POST /api/proxy/hosts             — add proxy host
+ *  PUT  /api/proxy/host              — {id, ...fields}  update host
+ *  DELETE /api/proxy/host            — {id}  delete host
+ *  POST /api/proxy/toggle            — {id, enabled} toggle host
+ *  POST /api/proxy/sync              — sync hosts from accounts
+ *  POST /api/proxy/write-configs     — regenerate all nginx configs
+ *  GET  /api/proxy/setup-script      — return bash install script
  */
 
-Auth::getInstance()->requireRole('admin');
-require_once PANEL_ROOT . '/lib/ProxyManager.php';
+Auth::getInstance()->require('admin');
+$body = json_decode(file_get_contents('php://input'), true) ?? [];
 
-$method  = $_SERVER['REQUEST_METHOD'];
-$parts   = $routeParts ?? [];
-$subpath = implode('/', array_slice($parts, 1));
-
-// Numeric id extraction
-preg_match('|hosts/(\d+)(/.+)?|', $subpath, $m);
-$hostId  = isset($m[1]) ? (int)$m[1] : null;
-$hostSub = $m[2] ?? '';
+require_once NOVACPX_LIB . '/ProxyManager.php';
 
 try {
-    // GET proxy/status
-    if ($method === 'GET' && $subpath === 'status') {
-        json_ok(ProxyManager::status());
+    $method = $_SERVER['REQUEST_METHOD'];
 
-    // POST proxy/install
-    } elseif ($method === 'POST' && $subpath === 'install') {
-        $result = ProxyManager::install();
-        json_ok(['result' => $result]);
+    match (true) {
 
-    // POST proxy/control
-    } elseif ($method === 'POST' && $subpath === 'control') {
-        $action = $body['action'] ?? '';
-        if (!in_array($action, ['start','stop','restart','reload'])) json_error('Invalid action', 400);
-        $result = match($action) {
-            'start'   => ProxyManager::start(),
-            'stop'    => ProxyManager::stop(),
-            'restart' => ProxyManager::restart(),
-            'reload'  => ProxyManager::reload(),
-        };
-        json_ok(['result' => $result, 'running' => ProxyManager::isRunning()]);
+        // GET status
+        $action === 'status' && $method === 'GET' =>
+            Response::json(['success' => true, 'data' => ProxyManager::status()]),
 
-    // GET proxy/hosts
-    } elseif ($method === 'GET' && $subpath === 'hosts') {
-        json_ok(ProxyManager::listHosts());
+        // POST install
+        $action === 'install' && $method === 'POST' =>
+            Response::json(['success' => true, 'data' => ['result' => ProxyManager::install()]]),
 
-    // POST proxy/hosts — add
-    } elseif ($method === 'POST' && $subpath === 'hosts') {
-        if (empty($body['domain']))    json_error('domain required', 400);
-        if (empty($body['upstream']))  json_error('upstream required', 400);
-        $id = ProxyManager::addHost($body);
-        json_ok(['id' => $id]);
+        // POST control
+        $action === 'control' && $method === 'POST' => (function() use ($body) {
+            $act = $body['action'] ?? '';
+            if (!in_array($act, ['start','stop','restart','reload'])) Response::error('Invalid action', 400);
+            $result = match($act) {
+                'start'   => ProxyManager::start(),
+                'stop'    => ProxyManager::stop(),
+                'restart' => ProxyManager::restart(),
+                'reload'  => ProxyManager::reload(),
+            };
+            Response::json(['success' => true, 'data' => ['result' => $result, 'running' => ProxyManager::isRunning()]]);
+        })(),
 
-    // PUT proxy/hosts/{id}
-    } elseif ($method === 'PUT' && $hostId && !$hostSub) {
-        ProxyManager::updateHost($hostId, $body);
-        json_ok();
+        // GET hosts list
+        $action === 'hosts' && $method === 'GET' =>
+            Response::json(['success' => true, 'data' => ProxyManager::listHosts()]),
 
-    // DELETE proxy/hosts/{id}
-    } elseif ($method === 'DELETE' && $hostId && !$hostSub) {
-        ProxyManager::deleteHost($hostId);
-        json_ok();
+        // POST hosts — add
+        $action === 'hosts' && $method === 'POST' => (function() use ($body) {
+            if (empty($body['domain']))   Response::error('domain required', 400);
+            if (empty($body['upstream'])) Response::error('upstream required', 400);
+            $id = ProxyManager::addHost($body);
+            Response::json(['success' => true, 'data' => ['id' => $id]]);
+        })(),
 
-    // POST proxy/hosts/{id}/toggle
-    } elseif ($method === 'POST' && $hostId && $hostSub === '/toggle') {
-        ProxyManager::toggleHost($hostId, (bool)($body['enabled'] ?? true));
-        json_ok();
+        // PUT host — update (body has id)
+        $action === 'host' && $method === 'PUT' => (function() use ($body) {
+            if (empty($body['id'])) Response::error('id required', 400);
+            ProxyManager::updateHost((int)$body['id'], $body);
+            Response::json(['success' => true]);
+        })(),
 
-    // POST proxy/sync
-    } elseif ($method === 'POST' && $subpath === 'sync') {
-        $added = ProxyManager::syncFromAccounts();
-        json_ok(['added' => $added]);
+        // DELETE host (body has id)
+        $action === 'host' && $method === 'DELETE' => (function() use ($body) {
+            $id = (int)($body['id'] ?? $_GET['id'] ?? 0);
+            if (!$id) Response::error('id required', 400);
+            ProxyManager::deleteHost($id);
+            Response::json(['success' => true]);
+        })(),
 
-    // POST proxy/write-configs
-    } elseif ($method === 'POST' && $subpath === 'write-configs') {
-        ProxyManager::writeAllConfigs();
-        json_ok(['result' => 'configs written']);
+        // POST toggle
+        $action === 'toggle' && $method === 'POST' => (function() use ($body) {
+            if (empty($body['id'])) Response::error('id required', 400);
+            ProxyManager::toggleHost((int)$body['id'], (bool)($body['enabled'] ?? true));
+            Response::json(['success' => true]);
+        })(),
 
-    // GET proxy/setup-script
-    } elseif ($method === 'GET' && $subpath === 'setup-script') {
-        header('Content-Type: text/plain');
-        echo ProxyManager::setupScript();
-        exit;
+        // POST sync
+        $action === 'sync' && $method === 'POST' => (function() {
+            $added = ProxyManager::syncFromAccounts();
+            Response::json(['success' => true, 'data' => ['added' => $added]]);
+        })(),
 
-    } else {
-        json_error('Not found', 404);
-    }
+        // POST write-configs
+        ($action === 'write-configs' || $action === 'write_configs') && $method === 'POST' => (function() {
+            ProxyManager::writeAllConfigs();
+            Response::json(['success' => true, 'data' => ['result' => 'configs written']]);
+        })(),
+
+        // GET setup-script
+        ($action === 'setup-script' || $action === 'setup_script') && $method === 'GET' => (function() {
+            header('Content-Type: text/plain');
+            echo ProxyManager::setupScript();
+            exit;
+        })(),
+
+        default => Response::error('Not found', 404),
+    };
+
 } catch (Throwable $e) {
     novacpx_log('error', 'proxy endpoint: ' . $e->getMessage());
-    json_error($e->getMessage(), 500);
+    Response::error($e->getMessage(), 500);
 }

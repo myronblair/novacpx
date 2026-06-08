@@ -2093,9 +2093,9 @@ window.proxyEditHost = async (id) => {
       <textarea id="phe-custom" rows="6" class="form-control" style="font-family:monospace;font-size:0.78rem">${Nova.escHtml(h.custom_config || '')}</textarea>
       <small class="text-muted">Leave blank to use auto-generated config</small></div>
   `, async () => {
-    const r = await Nova.api('proxy', `hosts/${id}`, {
+    const r = await Nova.api('proxy', 'host', {
       method: 'PUT',
-      body: {
+      body: { id,
         domain:        document.getElementById('phe-domain')?.value?.trim(),
         upstream:      document.getElementById('phe-upstream')?.value?.trim(),
         ssl_enabled:   document.getElementById('phe-ssl')?.checked ? 1 : 0,
@@ -2108,14 +2108,14 @@ window.proxyEditHost = async (id) => {
 };
 
 window.proxyToggle = async (id, enable) => {
-  const r = await Nova.api('proxy', `hosts/${id}/toggle`, { method: 'POST', body: { enabled: enable } });
+  const r = await Nova.api('proxy', 'toggle', { method: 'POST', body: { id, enabled: enable } });
   Nova.toast(r?.success ? (enable ? 'Enabled' : 'Disabled') : 'Failed', r?.success ? 'success' : 'error');
   if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
 };
 
 window.proxyDeleteHost = (id, domain) => {
   Nova.confirm(`Delete proxy host for ${domain}?`, async () => {
-    const r = await Nova.api('proxy', `hosts/${id}`, { method: 'DELETE' });
+    const r = await Nova.api('proxy', 'host', { method: 'DELETE', body: { id } });
     Nova.toast(r?.success ? 'Deleted' : 'Failed', r?.success ? 'success' : 'error');
     if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
   }, true);
