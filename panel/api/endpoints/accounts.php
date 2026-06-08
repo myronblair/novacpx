@@ -12,6 +12,7 @@ require_once NOVACPX_LIB . '/AccountManager.php';
 require_once NOVACPX_LIB . '/VhostManager.php';
 require_once NOVACPX_LIB . '/DNSManager.php';
 require_once NOVACPX_LIB . '/PHPManager.php';
+require_once NOVACPX_LIB . '/Notifier.php';
 
 // Resellers can only see their own accounts
 $ownerId     = $user['role'] === 'reseller' ? $user['uid'] : null;
@@ -82,14 +83,21 @@ match ($action) {
 
         $result = AccountManager::create($body);
         audit('account.create', $body['domain'], $result);
+        // Send welcome email to user + admin notification
+        Notifier::accountCreated(array_merge($body, ['email' => $body['email']]), $body['password']);
         Response::success($result, 'Account created successfully');
     })(),
 
     'suspend' => (function() use ($db, $body, $ownerClause) {
         $id = (int)($body['id'] ?? 0);
-        $acct = $db->fetchOne("SELECT a.id FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.id = ? $ownerClause", [$id]);
+        $acct = $db->fetchOne(
+            "SELECT a.id, a.username, a.domain, u.email FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.id = ? $ownerClause",
+            [$id]
+        );
         if (!$acct) Response::error("Account not found", 404);
-        AccountManager::suspend($id, $body['reason'] ?? '');
+        $reason = $body['reason'] ?? '';
+        AccountManager::suspend($id, $reason);
+        Notifier::accountSuspended($acct, $reason);
         audit('account.suspend', "account:$id");
         Response::success(null, 'Account suspended');
     })(),

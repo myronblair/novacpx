@@ -403,5 +403,73 @@ match ($action) {
         Response::success(null, "Setting saved: {$key} = {$value}");
     })(),
 
+    // ── Notification settings (#25) ───────────────────────────────────────────
+    'notify-settings' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $keys = ['cybermail_api_key','notify_from_email','notify_from_name','notify_admin_email','notifications_enabled'];
+        $out  = [];
+        foreach ($db->fetchAll("SELECT `key`,`value` FROM settings WHERE `key` IN ('" . implode("','", $keys) . "')") as $r) {
+            $out[$r['key']] = $r['value'];
+        }
+        // Mask API key for display
+        if (!empty($out['cybermail_api_key'])) {
+            $k = $out['cybermail_api_key'];
+            $out['cybermail_api_key_masked'] = substr($k, 0, 10) . str_repeat('*', max(0, strlen($k) - 14)) . substr($k, -4);
+        }
+        Response::success($out);
+    })(),
+
+    'save-notify-settings' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $allowed = ['cybermail_api_key','notify_from_email','notify_from_name','notify_admin_email','notifications_enabled'];
+        $saved   = [];
+        foreach ($allowed as $key) {
+            if (!array_key_exists($key, $body)) continue;
+            $value = trim($body[$key]);
+            if ($key === 'cybermail_api_key' && str_contains($value, '***')) continue; // skip masked placeholder
+            $db->execute(
+                "INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)",
+                [$key, $value]
+            );
+            $saved[] = $key;
+        }
+        audit('settings.notify', implode(',', $saved));
+        Response::success(null, 'Notification settings saved');
+    })(),
+
+    'test-notify' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        require_once NOVACPX_LIB . '/Notifier.php';
+        $to = trim($body['to'] ?? '');
+        if (!$to || !filter_var($to, FILTER_VALIDATE_EMAIL)) Response::error("Valid email address required");
+        // Send a test email directly
+        $apiKey    = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'cybermail_api_key'")['value'] ?? '';
+        $fromEmail = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'notify_from_email'")['value'] ?: 'noreply@novacpx.local';
+        $fromName  = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'notify_from_name'")['value']  ?: 'NovaCPX Panel';
+        if (!$apiKey) Response::error("No CyberMail API key configured");
+
+        $payload = json_encode([
+            'from'    => "$fromName <$fromEmail>",
+            'to'      => $to,
+            'subject' => 'NovaCPX — test notification',
+            'html'    => '<h2>Test Notification</h2><p>Email notifications are working correctly from your NovaCPX panel.</p>',
+            'text'    => 'Test Notification: Email notifications are working correctly from your NovaCPX panel.',
+        ]);
+        $ch = curl_init('https://platform.cyberpersons.com/email/v1/send');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $apiKey, 'Content-Type: application/json'],
+            CURLOPT_TIMEOUT        => 15,
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code === 202) Response::success(null, "Test email sent to {$to}");
+        else Response::error("CyberMail returned HTTP {$code}: " . substr($resp, 0, 200));
+    })(),
+
     default => Response::error("Unknown system action: $action", 404),
 };

@@ -99,6 +99,7 @@
     backups,
     cloudflare,
     'server-options': serverOptions,
+    notifications,
     settings,
   };
 
@@ -479,6 +480,88 @@
   </div>
 </div>`;
   }
+
+  // ── Notifications (#25) ───────────────────────────────────────────────────
+  async function notifications() {
+    const res = await Nova.api('system', 'notify-settings');
+    const s   = res?.data || {};
+    return `
+<div class="page-header"><h2 class="page-title">Email Notifications</h2></div>
+
+<div class="card mb-2">
+  <div class="card-header"><span class="card-title">CyberMail Settings</span></div>
+  <div class="card-body">
+    <form id="notify-form">
+      <div class="grid-2">
+        <div class="form-group" style="grid-column:1/-1">
+          <label>CyberMail API Key</label>
+          <input type="password" id="nf-apikey" name="cybermail_api_key" class="form-control" placeholder="${s.cybermail_api_key_masked || 'sk_live_…'}" value="">
+          <span class="form-hint">Leave blank to keep existing key. Get your key from platform.cyberpersons.com</span>
+        </div>
+        <div class="form-group">
+          <label>From Email</label>
+          <input type="email" name="notify_from_email" class="form-control" value="${s.notify_from_email || ''}">
+        </div>
+        <div class="form-group">
+          <label>From Name</label>
+          <input type="text" name="notify_from_name" class="form-control" value="${s.notify_from_name || 'NovaCPX Panel'}">
+        </div>
+        <div class="form-group">
+          <label>Admin Alert Email</label>
+          <input type="email" name="notify_admin_email" class="form-control" value="${s.notify_admin_email || ''}">
+          <span class="form-hint">Receives alerts for new accounts, suspensions, disk warnings</span>
+        </div>
+        <div class="form-group">
+          <label>Notifications</label>
+          <select name="notifications_enabled" class="form-control">
+            <option value="1" ${(s.notifications_enabled ?? '1') !== '0' ? 'selected' : ''}>Enabled</option>
+            <option value="0" ${s.notifications_enabled === '0' ? 'selected' : ''}>Disabled</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+        <button type="button" class="btn btn-ghost" onclick="notifyTest()">Send Test Email</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><span class="card-title">Notification Triggers</span></div>
+  <div class="card-body">
+    <table class="table">
+      <thead><tr><th>Event</th><th>Recipient</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Account Created</td><td>New user + Admin</td><td>Sends welcome email with credentials</td></tr>
+        <tr><td>Account Suspended</td><td>Account holder + Admin</td><td>Includes suspension reason</td></tr>
+        <tr><td>Disk Quota ≥85%</td><td>Account holder + Admin</td><td>Once per day per account (cron)</td></tr>
+        <tr><td>SSL Expiry ≤14 days</td><td>Account holder + Admin</td><td>Once per threshold per domain (cron)</td></tr>
+      </tbody>
+    </table>
+    <p class="text-muted text-sm" style="margin-top:.5rem">Disk quota and SSL expiry checks run daily via cron.</p>
+  </div>
+</div>`;
+  }
+
+  document.addEventListener('submit', async e => {
+    if (!e.target.matches('#notify-form')) return;
+    e.preventDefault();
+    const fd   = new FormData(e.target);
+    const body = Object.fromEntries(fd.entries());
+    if (!body.cybermail_api_key) delete body.cybermail_api_key;
+    const res  = await Nova.api('system', 'save-notify-settings', { method: 'POST', body });
+    if (res?.success) Nova.toast('Notification settings saved', 'success');
+    else Nova.toast(res?.message || 'Save failed', 'error');
+  });
+
+  window.notifyTest = async () => {
+    const email = prompt('Send test email to:');
+    if (!email) return;
+    const res = await Nova.api('system', 'test-notify', { method: 'POST', body: { to: email } });
+    if (res?.success) Nova.toast(res.message, 'success');
+    else Nova.toast(res?.message || 'Send failed', 'error');
+  };
 
   // ── Settings ───────────────────────────────────────────────────────────────
   async function settings() {
