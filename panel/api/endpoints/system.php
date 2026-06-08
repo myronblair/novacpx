@@ -570,6 +570,16 @@ match ($action) {
         if (!in_array($engine, ['mysql','mariadb','postgresql'])) Response::error("Invalid engine");
         if (!in_array($action, ['install','remove','start','stop','restart','set-active'])) Response::error("Invalid action");
 
+        // Safety: never remove the engine that is currently hosting the NovaCPX panel DB
+        if ($action === 'remove') {
+            $activeConn = strtolower(DB_HOST === 'localhost' ? 'mysql' : '');
+            $isMariaDB  = str_contains(strtolower(shell_exec("mysql --version 2>/dev/null") ?: ''), 'mariadb');
+            $runningEngine = $isMariaDB ? 'mariadb' : 'mysql';
+            if ($engine === $runningEngine || ($engine === 'mysql' && $isMariaDB) || ($engine === 'mariadb' && !$isMariaDB)) {
+                Response::error("Cannot remove $engine — it is currently hosting the NovaCPX panel database. Migrate first.", 409);
+            }
+        }
+
         $out = '';
         if ($action === 'install') {
             $pkg = match($engine) {
