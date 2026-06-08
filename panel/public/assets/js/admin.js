@@ -350,28 +350,109 @@
   }
 
   // ── Audit Log ──────────────────────────────────────────────────────────────
-  async function auditLog() {
-    const res = await Nova.api('system', 'audit-log', { params: { per_page: 50 } });
-    const rows = res?.data || [];
-    return `
-<div class="card">
-  <div class="card-header"><span class="card-title">Audit Log</span></div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>IP</th></tr></thead>
-      <tbody>
-        ${rows.map(r => `
-          <tr>
-            <td class="text-muted text-sm">${Nova.relTime(r.created_at)}</td>
-            <td>${r.username || '—'}</td>
-            <td><code>${r.action}</code></td>
-            <td>${r.resource || '—'}</td>
-            <td class="text-muted text-sm">${r.ip_address || '—'}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
+  async function auditLog(opts = {}) {
+    const { page = 1, user = '', action = '', date_from = '', date_to = '' } = opts;
+    const params = { page, per_page: 50 };
+    if (user)      params.user      = user;
+    if (action)    params.action    = action;
+    if (date_from) params.date_from = date_from;
+    if (date_to)   params.date_to   = date_to;
+
+    const content = document.getElementById('page-content');
+    const filterBar = `
+<div class="card" style="margin-bottom:1rem">
+  <div class="card-body" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:flex-end">
+    <div class="form-group" style="margin:0;flex:1;min-width:140px">
+      <label style="font-size:.75rem;margin-bottom:.25rem">User</label>
+      <input id="al-user" class="form-control form-control-sm" value="${Nova.escHtml(user)}" placeholder="username…">
+    </div>
+    <div class="form-group" style="margin:0;flex:1;min-width:140px">
+      <label style="font-size:.75rem;margin-bottom:.25rem">Action</label>
+      <input id="al-action" class="form-control form-control-sm" value="${Nova.escHtml(action)}" placeholder="e.g. account.create">
+    </div>
+    <div class="form-group" style="margin:0;min-width:130px">
+      <label style="font-size:.75rem;margin-bottom:.25rem">From</label>
+      <input id="al-from" type="date" class="form-control form-control-sm" value="${Nova.escHtml(date_from)}">
+    </div>
+    <div class="form-group" style="margin:0;min-width:130px">
+      <label style="font-size:.75rem;margin-bottom:.25rem">To</label>
+      <input id="al-to" type="date" class="form-control form-control-sm" value="${Nova.escHtml(date_to)}">
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="alApplyFilter()">Filter</button>
+    <button class="btn btn-ghost btn-sm" onclick="auditLog()">Reset</button>
   </div>
 </div>`;
+
+    if (content) content.innerHTML = filterBar + '<div class="page-loader">Loading…</div>';
+
+    const res   = await Nova.api('system', 'audit-log', { params });
+    const rows  = res?.data   || [];
+    const meta  = res?.meta   || {};
+    const total = meta.total  || rows.length;
+    const pages = meta.pages  || 1;
+
+    const tableHtml = rows.length ? `
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>IP</th><th></th></tr></thead>
+    <tbody>
+      ${rows.map((r, i) => `
+        <tr style="cursor:pointer" onclick="alToggleDetail(${i})">
+          <td class="text-muted text-sm" style="white-space:nowrap">${Nova.relTime(r.created_at)}</td>
+          <td>${Nova.escHtml(r.username || '—')}</td>
+          <td><code style="font-size:.8rem">${Nova.escHtml(r.action)}</code></td>
+          <td class="text-muted text-sm">${Nova.escHtml(r.resource || '—')}</td>
+          <td class="text-muted text-sm" style="white-space:nowrap">${Nova.escHtml(r.ip_address || '—')}</td>
+          <td style="width:20px;color:var(--text-muted)">▾</td>
+        </tr>
+        <tr id="al-detail-${i}" style="display:none">
+          <td colspan="6" style="background:var(--bg3);padding:.75rem 1rem">
+            <pre style="margin:0;font-size:.78rem;white-space:pre-wrap;word-break:break-all">${
+              r.detail ? JSON.stringify(JSON.parse(r.detail || '{}'), null, 2) : '(no detail)'
+            }</pre>
+          </td>
+        </tr>`).join('')}
+    </tbody>
+  </table>
+</div>` : '<div class="empty-state"><p>No audit entries match the current filters.</p></div>';
+
+    const paginationHtml = pages > 1 ? `
+<div style="display:flex;gap:.5rem;justify-content:center;padding:1rem;flex-wrap:wrap">
+  ${Array.from({length: pages}, (_, i) => i + 1).map(p => `
+    <button class="btn btn-sm ${p === page ? 'btn-primary' : 'btn-ghost'}" onclick="alGoPage(${p})">${p}</button>
+  `).join('')}
+</div>` : '';
+
+    const tableCard = `
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Audit Log</span>
+    <span class="text-muted text-sm">${total} entr${total !== 1 ? 'ies' : 'y'}</span>
+  </div>
+  ${tableHtml}
+  ${paginationHtml}
+</div>`;
+
+    if (content) content.innerHTML = filterBar + tableCard;
+    else return filterBar + tableCard;
+
+    window._alOpts = opts;
+  }
+
+  window.alToggleDetail = (i) => {
+    const row = document.getElementById('al-detail-' + i);
+    if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
+  };
+  window.alApplyFilter = () => {
+    auditLog({
+      page:      1,
+      user:      document.getElementById('al-user')?.value   || '',
+      action:    document.getElementById('al-action')?.value || '',
+      date_from: document.getElementById('al-from')?.value   || '',
+      date_to:   document.getElementById('al-to')?.value     || '',
+    });
+  };
+  window.alGoPage = (p) => auditLog({ ...(window._alOpts || {}), page: p });
   }
 
   // ── PHP Manager ────────────────────────────────────────────────────────────

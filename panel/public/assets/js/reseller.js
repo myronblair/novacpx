@@ -298,8 +298,9 @@ const rNavItems = [
   { id:'packages',       label:'Packages',    icon:'ni-packages' },
   { id:'dns',            label:'DNS Zones',   icon:'ni-dns' },
   { id:'docker',         label:'Docker',      icon:'ni-docker' },
+  { id:'whitelabel',     label:'White Label', icon:'ni-settings' },
 ];
-const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker };
+const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker, whitelabel: rWhiteLabel };
 
 let _rActivePage = 'dashboard';
 
@@ -481,4 +482,153 @@ window.rDockerLaunchModal = async (appKey, appName) => {
     Nova.toast(r?.success?`${appName} deployed!`:(r?.message||'Deploy failed'), r?.success?'success':'error');
     if (r?.success) rDockerLoadTab('containers');
   };
+};
+
+// ── White Label / Branding (#18) ────────────────────────────────────────────
+async function rWhiteLabel(el) {
+  el.innerHTML = '<div class="page-loader">Loading…</div>';
+  const res = await Nova.api('branding', 'get');
+  const b   = res?.data || {};
+
+  el.innerHTML = `
+<div class="page-header"><h1 class="page-title">White Label Branding</h1></div>
+<div class="grid-2" style="gap:1.5rem;align-items:start">
+
+  <div class="card">
+    <div class="card-header"><span class="card-title">Panel Identity</span></div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:1rem">
+      <div class="form-group">
+        <label>Panel Name</label>
+        <input id="wl-name" class="form-control" value="${Nova.escHtml(b.panel_name||'NovaCPX')}" placeholder="NovaCPX">
+      </div>
+      <div class="form-group">
+        <label>Logo</label>
+        ${b.logo_url ? `<div style="margin-bottom:.5rem"><img src="${Nova.escHtml(b.logo_url)}" style="max-height:50px;max-width:200px;border-radius:6px;background:var(--bg2);padding:.5rem"></div>` : ''}
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+            Upload Logo <input type="file" id="wl-logo-file" accept="image/*" style="display:none" onchange="rWlUploadLogo()">
+          </label>
+          ${b.logo_url ? `<button class="btn btn-ghost btn-sm" onclick="rWlDeleteLogo()" style="color:var(--danger)">Remove</button>` : ''}
+          <span class="text-muted text-sm">PNG/SVG/JPG · max 512 KB</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Custom CSS <span class="text-muted text-sm">(advanced)</span></label>
+        <textarea id="wl-css" class="form-control" rows="4" style="font-family:monospace;font-size:.8rem" placeholder="/* e.g. .sidebar { background: #1a1a2e; } */">${Nova.escHtml(b.custom_css||'')}</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:1.5rem">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Colors</span></div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:1rem">
+        <div class="form-group">
+          <label>Primary Color</label>
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <input type="color" id="wl-primary" value="${Nova.escHtml(b.primary_color||'#6366f1')}" style="width:48px;height:36px;padding:2px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);cursor:pointer">
+            <input type="text"  id="wl-primary-hex" class="form-control" style="width:110px;font-family:monospace" value="${Nova.escHtml(b.primary_color||'#6366f1')}" maxlength="7">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Accent Color</label>
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <input type="color" id="wl-accent" value="${Nova.escHtml(b.accent_color||'#0ea5e9')}" style="width:48px;height:36px;padding:2px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);cursor:pointer">
+            <input type="text"  id="wl-accent-hex" class="form-control" style="width:110px;font-family:monospace" value="${Nova.escHtml(b.accent_color||'#0ea5e9')}" maxlength="7">
+          </div>
+        </div>
+        <div id="wl-color-preview" style="height:40px;border-radius:8px;background:linear-gradient(135deg,${Nova.escHtml(b.primary_color||'#6366f1')},${Nova.escHtml(b.accent_color||'#0ea5e9')});transition:background .3s"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Support</span></div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:1rem">
+        <div class="form-group">
+          <label>Support Email</label>
+          <input id="wl-email" class="form-control" type="email" value="${Nova.escHtml(b.support_email||'')}" placeholder="support@yourdomain.com">
+        </div>
+        <div class="form-group">
+          <label>Support URL</label>
+          <input id="wl-url" class="form-control" type="url" value="${Nova.escHtml(b.support_url||'')}" placeholder="https://support.yourdomain.com">
+        </div>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" id="wl-hide-powered" ${b.hide_powered_by ? 'checked' : ''}>
+          Hide "Powered by NovaCPX" in panel footer
+        </label>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="rWhiteLabel(document.getElementById('page-content'))">Reset</button>
+      <button class="btn btn-primary" onclick="rWlSave()">Save Branding</button>
+    </div>
+  </div>
+</div>`;
+
+  // Sync color pickers ↔ hex inputs ↔ preview
+  ['primary','accent'].forEach(k => {
+    const picker = document.getElementById('wl-'+k);
+    const hex    = document.getElementById('wl-'+k+'-hex');
+    const sync   = () => {
+      if (picker) hex.value = picker.value;
+      rWlUpdatePreview();
+    };
+    const syncBack = () => {
+      if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) { picker.value = hex.value; rWlUpdatePreview(); }
+    };
+    picker?.addEventListener('input', sync);
+    hex?.addEventListener('input', syncBack);
+  });
+}
+
+function rWlUpdatePreview() {
+  const p  = document.getElementById('wl-primary-hex')?.value || '#6366f1';
+  const a  = document.getElementById('wl-accent-hex')?.value  || '#0ea5e9';
+  const el = document.getElementById('wl-color-preview');
+  if (el) el.style.background = `linear-gradient(135deg,${p},${a})`;
+  // Live-preview CSS vars
+  const style = document.getElementById('reseller-branding') || (() => {
+    const s = document.createElement('style'); s.id = 'reseller-branding'; document.head.appendChild(s); return s;
+  })();
+  style.textContent = `:root { --primary: ${p}; --primary-dark: ${p}; --accent: ${a}; }`;
+}
+
+window.rWlUploadLogo = async () => {
+  const file = document.getElementById('wl-logo-file')?.files?.[0];
+  if (!file) return;
+  if (file.size > 512 * 1024) { Nova.toast('Logo must be under 512 KB', 'error'); return; }
+  const fd = new FormData();
+  fd.append('logo', file);
+  Nova.toast('Uploading…', 'info', 5000);
+  try {
+    const res = await fetch('/api/branding/upload-logo', {
+      method: 'POST', credentials: 'include', body: fd
+    });
+    const data = await res.json();
+    Nova.toast(data?.success ? 'Logo uploaded' : (data?.message || 'Upload failed'),
+               data?.success ? 'success' : 'error');
+    if (data?.success) rWhiteLabel(document.getElementById('page-content'));
+  } catch (e) { Nova.toast('Upload failed', 'error'); }
+};
+
+window.rWlDeleteLogo = async () => {
+  const r = await Nova.api('branding', 'delete-logo', { method: 'POST' });
+  Nova.toast(r?.success ? 'Logo removed' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
+  if (r?.success) rWhiteLabel(document.getElementById('page-content'));
+};
+
+window.rWlSave = async () => {
+  const body = {
+    panel_name:      document.getElementById('wl-name')?.value?.trim()        || 'NovaCPX',
+    primary_color:   document.getElementById('wl-primary-hex')?.value          || '#6366f1',
+    accent_color:    document.getElementById('wl-accent-hex')?.value           || '#0ea5e9',
+    support_email:   document.getElementById('wl-email')?.value?.trim()        || '',
+    support_url:     document.getElementById('wl-url')?.value?.trim()          || '',
+    hide_powered_by: document.getElementById('wl-hide-powered')?.checked ? 1 : 0,
+    custom_css:      document.getElementById('wl-css')?.value                  || '',
+  };
+  const r = await Nova.api('branding', 'save', { method: 'POST', body });
+  Nova.toast(r?.success ? 'Branding saved — reload to see changes' : (r?.message || 'Save failed'),
+             r?.success ? 'success' : 'error');
 };

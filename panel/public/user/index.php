@@ -1,15 +1,18 @@
 <?php
 // NovaCPX User Panel — End-user hosting dashboard
 $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
+require_once dirname(__DIR__) . '/_branding.php';
+$_pname = novacpx_panel_name('NovaCPX');
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NovaCPX — My Hosting</title>
+<title><?= $_pname ?> — My Hosting</title>
 <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
 <link rel="stylesheet" href="/assets/css/nova.css<?= $_v('/assets/css/nova.css') ?>">
+<?php novacpx_branding_head() ?>
 <style>
 /* ── User panel specific ─────────────────────────────── */
 .feature-grid {
@@ -180,8 +183,8 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
           <linearGradient id="ulg4" x1="12" y1="8" x2="28" y2="28"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient>
         </defs>
       </svg>
-      <div style="font-size:1.4rem;font-weight:300">Nova<strong style="font-weight:700;background:linear-gradient(135deg,#6366f1,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent">CPX</strong></div>
-      <div style="font-size:.78rem;color:var(--text-muted);margin-top:.25rem;text-transform:uppercase;letter-spacing:.1em">My Hosting · Port 8880</div>
+      <div style="font-size:1.4rem;font-weight:700"><?= $_pname ?></div>
+      <div style="font-size:.78rem;color:var(--text-muted);margin-top:.25rem;text-transform:uppercase;letter-spacing:.1em">My Hosting</div>
     </div>
     <div class="card">
       <div class="card-body">
@@ -196,6 +199,14 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
   </div>
 </div>
 
+<script>
+window.NOVACPX_BRANDING = <?= json_encode([
+    'panel_name'      => novacpx_panel_name('NovaCPX'),
+    'support_email'   => novacpx_get_branding()['support_email'] ?? null,
+    'support_url'     => novacpx_get_branding()['support_url']   ?? null,
+    'hide_powered_by' => !novacpx_powered_by(),
+]) ?>;
+</script>
 <script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
 <script src="/assets/js/user.js<?= $_v('/assets/js/user.js') ?>"></script>
 <script>

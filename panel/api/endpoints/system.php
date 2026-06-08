@@ -341,11 +341,27 @@ match ($action) {
     // ── Audit log ─────────────────────────────────────────────────────────────
     'audit-log' => (function() use ($db) {
         Auth::getInstance()->require('admin');
-        $page    = max(1, (int)($_GET['page'] ?? 1));
-        $perPage = min(100, max(10, (int)($_GET['per_page'] ?? 50)));
-        $offset  = ($page - 1) * $perPage;
-        $total   = $db->fetchOne("SELECT COUNT(*) as c FROM audit_log")['c'] ?? 0;
-        $rows    = $db->fetchAll("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?", [$perPage, $offset]);
+        $page      = max(1, (int)($_GET['page'] ?? 1));
+        $perPage   = min(100, max(10, (int)($_GET['per_page'] ?? 50)));
+        $offset    = ($page - 1) * $perPage;
+        $user      = trim($_GET['user']      ?? '');
+        $action    = trim($_GET['action']    ?? '');
+        $dateFrom  = trim($_GET['date_from'] ?? '');
+        $dateTo    = trim($_GET['date_to']   ?? '');
+
+        $where  = 'WHERE 1=1';
+        $params = [];
+        if ($user)     { $where .= ' AND username LIKE ?';      $params[] = "%$user%"; }
+        if ($action)   { $where .= ' AND action LIKE ?';        $params[] = "%$action%"; }
+        if ($dateFrom) { $where .= ' AND created_at >= ?';      $params[] = $dateFrom . ' 00:00:00'; }
+        if ($dateTo)   { $where .= ' AND created_at <= ?';      $params[] = $dateTo   . ' 23:59:59'; }
+
+        $total = $db->fetchOne("SELECT COUNT(*) as c FROM audit_log $where", $params)['c'] ?? 0;
+        $rows  = $db->fetchAll(
+            "SELECT id, user_id, username, action, resource, ip_address, detail, created_at
+             FROM audit_log $where ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            [...$params, $perPage, $offset]
+        );
         Response::paginate($rows, (int)$total, $page, $perPage);
     })(),
 
