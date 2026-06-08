@@ -743,16 +743,16 @@
 
   function renderAccountTable(accts) {
     if (!accts.length) return '<div class="empty" style="padding:2rem">No accounts found.</div>';
-    return `<table class="table"><thead><tr><th>Username</th><th>Domain</th><th>Reseller</th><th>Package</th><th>Disk</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+    return `<table class="table"><thead><tr><th>Username</th><th>Domain</th><th>Package</th><th>PHP</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
       ${accts.map(a => `<tr>
         <td><strong>${a.username}</strong></td>
         <td>${a.domain}</td>
-        <td>${a.reseller_username || '<span class="text-muted">admin</span>'}</td>
-        <td>${a.package_name || '—'}</td>
-        <td>${a.disk_usage_mb || 0} MB</td>
+        <td>${a.package_name || '<span class="text-muted">—</span>'}</td>
+        <td class="text-muted text-sm">${a.php_version || '—'}</td>
         <td>${Nova.badge(a.status, a.status==='active'?'green':a.status==='suspended'?'yellow':'red')}</td>
         <td class="text-muted text-sm">${Nova.relTime(a.created_at)}</td>
-        <td style="display:flex;gap:.25rem">
+        <td style="display:flex;gap:.25rem;flex-wrap:wrap">
+          <button class="btn btn-xs btn-primary" onclick="adminEditAccount(${a.id})">Edit</button>
           ${a.status==='active'
             ? `<button class="btn btn-xs btn-warning" onclick="adminSuspend(${a.id},'${a.username}')">Suspend</button>`
             : `<button class="btn btn-xs btn-success" onclick="adminUnsuspend(${a.id})">Unsuspend</button>`}
@@ -790,6 +790,54 @@
       if (res?.success) { Nova.toast('Terminated','success'); adminPage('accounts'); }
       else Nova.toast(res?.message,'error');
     }, true);
+  };
+
+  window.adminEditAccount = async (id) => {
+    const [acctRes, pkgRes] = await Promise.all([
+      Nova.api('accounts', 'get', { params: { id } }),
+      Nova.api('packages', 'list'),
+    ]);
+    if (!acctRes?.success) { Nova.toast(acctRes?.message || 'Failed to load account', 'error'); return; }
+    const a = acctRes.data;
+    const pkgs = pkgRes?.data || [];
+    const pkgOpts = `<option value="">— No package —</option>` +
+      pkgs.map(p => `<option value="${p.id}" ${a.package_id == p.id ? 'selected' : ''}>${Nova.escHtml(p.name)}</option>`).join('');
+    const phpOpts = ['8.3','8.2','8.1','7.4'].map(v =>
+      `<option value="${v}" ${a.php_version === v ? 'selected' : ''}>PHP ${v}</option>`).join('');
+
+    Nova.modal(`Edit Account — ${Nova.escHtml(a.username)}`,
+      `<div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+        <div class="form-group"><label class="form-label">Email</label>
+          <input id="ae-email" class="form-control" type="email" value="${Nova.escHtml(a.email || '')}"></div>
+        <div class="form-group"><label class="form-label">Domain</label>
+          <input class="form-control" value="${Nova.escHtml(a.domain)}" disabled title="Domain cannot be changed"></div>
+        <div class="form-group"><label class="form-label">Package</label>
+          <select id="ae-pkg" class="form-control">${pkgOpts}</select></div>
+        <div class="form-group"><label class="form-label">PHP Version</label>
+          <select id="ae-php" class="form-control">${phpOpts}</select></div>
+      </div>`,
+      `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+       <button class="btn btn-primary" onclick="adminEditAccountSave(${id})">Save Changes</button>`
+    );
+  };
+
+  window.adminEditAccountSave = async (id) => {
+    const body = {
+      id,
+      email:       document.getElementById('ae-email')?.value?.trim(),
+      package_id:  document.getElementById('ae-pkg')?.value || null,
+      php_version: document.getElementById('ae-php')?.value,
+    };
+    Nova.loading('Saving…');
+    const res = await Nova.api('accounts', 'update', { method: 'POST', body });
+    Nova.loadingDone();
+    if (res?.success) {
+      document.querySelector('.modal-overlay')?.remove();
+      Nova.toast('Account updated', 'success');
+      adminPage('accounts');
+    } else {
+      Nova.toast(res?.message || 'Update failed', 'error');
+    }
   };
 
   // ── Create Account ─────────────────────────────────────────────────────────

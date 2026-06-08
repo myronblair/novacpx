@@ -88,6 +88,46 @@ match ($action) {
         Response::success($result, 'Account created successfully');
     })(),
 
+    'update' => (function() use ($db, $body, $user, $ownerClause) {
+        $id   = (int)($body['id'] ?? 0);
+        $acct = $db->fetchOne(
+            "SELECT a.*, u.email FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.id=? $ownerClause",
+            [$id]
+        );
+        if (!$acct) Response::error("Account not found", 404);
+
+        $allowed = ['php_version', 'package_id', 'notes'];
+        $sets = []; $params = [];
+        foreach ($allowed as $col) {
+            if (array_key_exists($col, $body)) {
+                $sets[]   = "`$col` = ?";
+                $params[] = $body[$col] === '' ? null : $body[$col];
+            }
+        }
+        // Email lives on users table
+        if (array_key_exists('email', $body) && filter_var($body['email'], FILTER_VALIDATE_EMAIL)) {
+            $db->execute("UPDATE users SET email=? WHERE id=?", [$body['email'], $acct['user_id']]);
+        }
+        if ($sets) {
+            $params[] = $id;
+            $db->execute("UPDATE accounts SET " . implode(', ', $sets) . " WHERE id=?", $params);
+        }
+
+        // If PHP version changed, update the FPM pool
+        if (!empty($body['php_version']) && $body['php_version'] !== $acct['php_version']) {
+            require_once NOVACPX_LIB . '/PHPManager.php';
+            try {
+                PHPManager::removePool($acct['username']);
+                PHPManager::createPool($acct['username'], $body['php_version']);
+            } catch (Throwable $e) {
+                novacpx_log('warn', "PHP pool update failed for {$acct['username']}: " . $e->getMessage());
+            }
+        }
+
+        audit('account.update', "account:$id", array_intersect_key($body, array_flip([...$allowed, 'email'])));
+        Response::success(null, 'Account updated');
+    })(),
+
     'suspend' => (function() use ($db, $body, $ownerClause) {
         $id = (int)($body['id'] ?? 0);
         $acct = $db->fetchOne(
