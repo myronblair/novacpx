@@ -137,12 +137,45 @@ window.Nova = (() => {
     return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  // Inject global CSS animation
+  // ── Loading overlay ───────────────────────────────────────────────────────
+  let _loadingEl = null;
+  let _loadingCount = 0;
+  function loading(msg = 'Working…') {
+    _loadingCount++;
+    if (!_loadingEl) {
+      _loadingEl = document.createElement('div');
+      _loadingEl.id = 'nova-loading-overlay';
+      _loadingEl.style.cssText = [
+        'position:fixed;inset:0;z-index:99999',
+        'background:rgba(0,0,0,.55)',
+        'display:flex;flex-direction:column;align-items:center;justify-content:center',
+        'gap:1rem;animation:fadeIn .15s',
+      ].join(';');
+      _loadingEl.innerHTML = `
+        <div style="width:48px;height:48px;border:4px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:ncpxSpin 0.7s linear infinite"></div>
+        <div id="nova-loading-msg" style="color:#fff;font-size:1rem;font-weight:500;text-shadow:0 1px 3px rgba(0,0,0,.6)">${escHtml(msg)}</div>`;
+      document.body.appendChild(_loadingEl);
+    } else {
+      document.getElementById('nova-loading-msg').textContent = msg;
+    }
+  }
+  function loadingDone() {
+    _loadingCount = Math.max(0, _loadingCount - 1);
+    if (_loadingCount === 0 && _loadingEl) {
+      _loadingEl.remove();
+      _loadingEl = null;
+    }
+  }
+
+  // Inject global CSS animations
   const style = document.createElement('style');
-  style.textContent = '@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}';
+  style.textContent = [
+    '@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}',
+    '@keyframes ncpxSpin{to{transform:rotate(360deg)}}',
+  ].join('');
   document.head.appendChild(style);
 
-  return { api, toast, modal, confirm, initNav, loadPage, progressBar, bytes, relTime, badge, serviceDot, escHtml };
+  return { api, toast, modal, confirm, initNav, loadPage, progressBar, bytes, relTime, badge, serviceDot, escHtml, loading, loadingDone };
 })();
 
 // #26 Mobile sidebar toggle — shared across all panels

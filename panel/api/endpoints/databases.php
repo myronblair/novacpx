@@ -13,10 +13,18 @@ if ($user['role'] === 'user') {
 
 match ($action) {
 
-    'list' => (function() use ($db, $accountId) {
-        if (!$accountId) Response::error("account_id required");
-        $rows = $db->fetchAll("SELECT id, db_name, db_user, db_type, size_mb, created_at FROM `databases` WHERE account_id = ?", [$accountId]);
-        foreach ($rows as &$r) { $r['size_mb'] = DatabaseManager::getSize($r['db_name'], $r['db_type']); }
+    'list' => (function() use ($db, $accountId, $user) {
+        if (!$accountId && $user['role'] !== 'admin') Response::error("account_id required");
+        if ($accountId) {
+            $rows = $db->fetchAll(
+                "SELECT d.id, d.db_name, d.db_user, d.db_type, d.size_mb, d.created_at, a.username
+                 FROM `databases` d LEFT JOIN accounts a ON a.id=d.account_id WHERE d.account_id = ?", [$accountId]);
+        } else {
+            $rows = $db->fetchAll(
+                "SELECT d.id, d.db_name, d.db_user, d.db_type, d.size_mb, d.created_at, a.username
+                 FROM `databases` d LEFT JOIN accounts a ON a.id=d.account_id ORDER BY d.created_at DESC LIMIT 500");
+        }
+        foreach ($rows as &$r) { $r['size_mb'] = DatabaseManager::getSize($r['db_name'], $r['db_type'] ?? 'mysql'); }
         Response::success($rows);
     })(),
 
@@ -28,7 +36,9 @@ match ($action) {
             $count = (int)$db->fetchOne("SELECT COUNT(*) c FROM `databases` WHERE account_id=?", [$accountId])['c'];
             if ($count >= (int)$acctPkg['max_databases']) Response::error("Database limit ({$acctPkg['max_databases']}) reached for this package", 403);
         }
-        $type   = $body['type'] ?? 'mysql';
+        // Default to active DB engine from settings so autoinstallers use whatever the admin has selected
+        $activeEngine = $db->fetchOne("SELECT `value` FROM settings WHERE `key`='active_db_engine'")['value'] ?? 'mysql';
+        $type   = $body['type'] ?? ($activeEngine === 'postgresql' ? 'postgresql' : 'mysql');
         $dbName = trim($body['db_name'] ?? '');
         $dbUser = trim($body['db_user'] ?? $dbName . '_user');
         $dbPass = $body['db_pass'] ?? bin2hex(random_bytes(8));

@@ -505,8 +505,9 @@
 
   window.phpInstallVersion = (ver) => {
     Nova.confirm(`Install PHP ${ver}? This will run apt-get and may take a minute.`, async () => {
-      Nova.toast(`Installing PHP ${ver}…`, 'info', 15000);
+      Nova.loading(`Installing PHP ${ver}…`);
       const r = await Nova.api('php', 'install-version', { method: 'POST', body: { version: ver } });
+      Nova.loadingDone();
       if (r?.success) { Nova.toast(`PHP ${ver} installed`, 'success'); adminPage('php-manager'); }
       else Nova.toast(r?.message || 'Install failed', 'error');
     });
@@ -514,14 +515,18 @@
 
   window.phpRemoveVersion = (ver) => {
     Nova.confirm(`Remove PHP ${ver}? All FPM pools for this version will stop.`, async () => {
+      Nova.loading(`Removing PHP ${ver}…`);
       const r = await Nova.api('php', 'remove-version', { method: 'POST', body: { version: ver } });
+      Nova.loadingDone();
       if (r?.success) { Nova.toast(`PHP ${ver} removed`, 'success'); adminPage('php-manager'); }
       else Nova.toast(r?.message || 'Remove failed', 'error');
     }, true);
   };
 
   window.phpFpmAction = async (ver, cmd) => {
+    Nova.loading(`${cmd} php${ver}-fpm…`);
     const r = await Nova.api('php', 'fpm-action', { method: 'POST', body: { version: ver, command: cmd } });
+    Nova.loadingDone();
     if (r?.success) { Nova.toast(r.message, 'success'); refreshSvcStatus(`php${ver}-fpm`); }
     else Nova.toast(r?.message || 'Action failed', 'error');
   };
@@ -1748,10 +1753,11 @@ ${dbs.map(d=>`<tr>
     }, true);
   };
   window.dbEngineAction = (engine, action) => {
-    const labels = {install:`Installing ${engine}…`,remove:`Removing ${engine}…`,start:`Starting…`,stop:`Stopping…`,restart:`Restarting…`};
+    const labels = {install:`Installing ${engine}…`,remove:`Removing ${engine}…`,start:`Starting ${engine}…`,stop:`Stopping ${engine}…`,restart:`Restarting ${engine}…`};
     const doIt = async () => {
-      Nova.toast(labels[action]||'Working…','info');
+      Nova.loading(labels[action] || `Working on ${engine}…`);
       const r = await Nova.api('system','db-engine-action',{method:'POST',body:{engine,action}});
+      Nova.loadingDone();
       Nova.toast(r?.message||(r?.success?'Done':'Failed'), r?.success?'success':'error');
       if (r?.success) adminPage('mysql-manager');
     };
@@ -1848,29 +1854,25 @@ ${dbs.map(d=>`<tr>
 
   window.applyNovaCPXUpdate = async () => {
     Nova.confirm('Apply NovaCPX update? PHP syntax is checked first, and a backup is taken automatically. The panel will self-restore if anything breaks.', async () => {
-      const btn = document.getElementById('ncpx-update-btn');
-      if (btn) { btn.disabled = true; btn.textContent = 'Updating…'; }
-      Nova.toast('Pulling update from GitHub…', 'info', 12000);
+      Nova.loading('Pulling NovaCPX update from GitHub…');
       const res = await Nova.api('system', 'apply-novacpx-update', { method: 'POST' });
+      Nova.loadingDone();
       if (res?.data?.updated) {
         Nova.toast(`Updated to ${res.data.to_commit}`, 'success', 6000);
         setTimeout(() => Nova.loadPage('updates', pages), 2000);
       } else if (res?.error) {
         Nova.toast(res.error, 'error', 8000);
-        if (btn) { btn.disabled = false; btn.textContent = 'Update NovaCPX'; }
       } else {
         Nova.toast('Already up to date.', 'info');
-        if (btn) { btn.disabled = false; btn.textContent = 'Update NovaCPX'; }
       }
     });
   };
 
   window.applyOSUpdate = async () => {
     Nova.confirm('Apply OS package upgrades? Services will be automatically restarted if needed. The NovaCPX panel will self-restore from backup if any ports go down.', async () => {
-      const btn = document.getElementById('os-update-btn');
-      if (btn) { btn.disabled = true; btn.textContent = 'Upgrading…'; }
-      Nova.toast('Running apt-get upgrade — this may take a few minutes…', 'info', 20000);
+      Nova.loading('Running OS upgrade — this may take a few minutes…');
       const res = await Nova.api('system', 'apply-os-update', { method: 'POST', timeout: 120000 });
+      Nova.loadingDone();
       if (res?.data) {
         const d = res.data;
         const healed = Object.entries(d.services_healed || {}).map(([s,r]) => `${s}: ${r}`).join(', ');
@@ -1881,7 +1883,6 @@ ${dbs.map(d=>`<tr>
         Nova.loadPage('updates', pages);
       } else {
         Nova.toast(res?.error || 'Upgrade failed', 'error', 8000);
-        if (btn) { btn.disabled = false; btn.textContent = 'Apply OS Upgrade'; }
       }
     });
   };
@@ -1889,17 +1890,36 @@ ${dbs.map(d=>`<tr>
   // keep old alias for any lingering references
   window.applyUpdate = window.applyNovaCPXUpdate;
   window.adminServiceAction = async (svc, cmd) => {
+    const label = { start: 'Starting', stop: 'Stopping', restart: 'Restarting', reload: 'Reloading', flush: 'Flushing queue' }[cmd] || cmd;
+    Nova.loading(`${label} ${svc}…`);
+    // Optimistic immediate badge update
+    const optimistic = cmd === 'stop' ? 'inactive' : cmd === 'flush' ? null : 'activating';
+    if (optimistic) {
+      document.querySelectorAll(`[data-svc-status="${svc}"]`).forEach(el => {
+        el.innerHTML = Nova.badge(optimistic, optimistic === 'inactive' ? 'red' : 'yellow');
+      });
+      document.querySelectorAll(`[data-svc-dot="${svc}"]`).forEach(el => {
+        el.innerHTML = Nova.serviceDot(optimistic);
+      });
+    }
     const res = await Nova.api('system', 'service', { method: 'POST', body: { service: svc, command: cmd } });
-    Nova.toast(`${svc}: ${cmd} → ${res?.success ? 'OK' : res?.message}`, res?.success ? 'success' : 'error');
-    if (res?.success && cmd !== 'flush') refreshSvcStatus(svc);
+    Nova.loadingDone();
+    if (res?.success) {
+      const msg = cmd === 'flush' ? `Mail queue flushed` : `${svc} ${cmd} complete`;
+      Nova.toast(msg, 'success');
+      if (cmd !== 'flush') window.refreshSvcStatus(svc);
+    } else {
+      Nova.toast(res?.message || `${svc} ${cmd} failed`, 'error');
+      if (cmd !== 'flush') window.refreshSvcStatus(svc, 0);
+    }
   };
 
-  // Polls is-active after a short delay and updates all [data-svc-status] / [data-svc-dot] in the DOM
-  window.refreshSvcStatus = async (svc, delay = 1500) => {
-    await new Promise(r => setTimeout(r, delay));
+  // Polls is-active and updates all [data-svc-status] / [data-svc-dot] in the DOM
+  window.refreshSvcStatus = async (svc, delay = 2000) => {
+    if (delay > 0) await new Promise(r => setTimeout(r, delay));
     const r = await Nova.api('system', 'svc-check', { params: { service: svc } });
     const status = r?.data?.status || 'unknown';
-    const color  = status === 'active' ? 'green' : 'red';
+    const color  = status === 'active' ? 'green' : status === 'activating' ? 'yellow' : 'red';
     document.querySelectorAll(`[data-svc-status="${svc}"]`).forEach(el => {
       el.innerHTML = Nova.badge(status, color);
     });
@@ -2754,10 +2774,13 @@ async function docker() {
   const status = st?.data || {};
 
   window.dockerInstall = async (btn) => {
-    btn.disabled = true; btn.textContent = 'Installing… (this may take 2-3 minutes)';
+    btn.disabled = true;
+    Nova.loading('Installing Docker CE… (this may take 2–3 minutes)');
     const r = await Nova.api('docker', 'install', { method: 'POST', body: {} });
-    Nova.toast(r?.message || (r?.success ? 'Installed' : 'Failed'), r?.success ? 'success' : 'error');
+    Nova.loadingDone();
+    Nova.toast(r?.message || (r?.success ? 'Docker installed' : 'Install failed'), r?.success ? 'success' : 'error');
     if (r?.success) Nova.loadPage('docker', window._novaPages);
+    else btn.disabled = false;
   };
 
   if (!status.installed) {

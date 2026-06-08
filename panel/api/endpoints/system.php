@@ -143,7 +143,7 @@ match ($action) {
             if ($wasBefore !== 'active') continue;
             $nowState = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
             if ($nowState !== 'active') {
-                shell_exec("systemctl restart $svc 2>/dev/null");
+                shell_exec("sudo systemctl restart $svc 2>/dev/null");
                 sleep(2);
                 $afterHeal = trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: '');
                 $healed[$svc] = $afterHeal === 'active' ? 'restarted' : 'FAILED';
@@ -156,16 +156,19 @@ match ($action) {
         // Verify panel ports respond
         $panelOk = [];
         foreach ($panelPorts as $port) {
-            $resp = @fsockopen('127.0.0.1', $port, $errno, $errstr, 3);
-            $panelOk[$port] = (bool)$resp;
-            if ($resp) fclose($resp);
+            $proto = in_array($port, [PORT_ADMIN, PORT_RESELLER, PORT_USER]) ? 'https' : 'http';
+            $ch = curl_init("{$proto}://127.0.0.1:{$port}/");
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_TIMEOUT => 5]);
+            curl_exec($ch);
+            $panelOk[$port] = curl_getinfo($ch, CURLINFO_HTTP_CODE) > 0;
+            curl_close($ch);
         }
         $panelDown = array_keys(array_filter($panelOk, fn($ok) => !$ok));
 
         // If panel ports down, restore from backup and restart web server
         if ($panelDown) {
             shell_exec("cp -a " . escapeshellarg("$backupDir/public") . " " . escapeshellarg($webRoot) . " 2>&1");
-            shell_exec("systemctl restart $webSvc 2>/dev/null");
+            shell_exec("sudo systemctl restart $webSvc 2>/dev/null");
             novacpx_log('error', 'Panel ports down after OS upgrade — restored from backup');
         }
 
@@ -353,9 +356,13 @@ match ($action) {
                     'proftpd','vsftpd','pure-ftpd','named','bind9','pdns','nsd','fail2ban',
                     'php7.4-fpm','php8.1-fpm','php8.2-fpm','php8.3-fpm'];
         if (!in_array($svc, $allowed)) Response::error("Service not managed: $svc");
-        if (!in_array($cmd, ['start','stop','restart','reload','status'])) Response::error("Invalid command");
+        if (!in_array($cmd, ['start','stop','restart','reload','status','flush'])) Response::error("Invalid command");
 
-        $out = shell_exec("systemctl $cmd " . escapeshellarg($svc) . " 2>&1");
+        if ($cmd === 'flush' && $svc === 'postfix') {
+            $out = shell_exec("sudo postqueue -f 2>&1");
+        } else {
+            $out = shell_exec("sudo systemctl $cmd " . escapeshellarg($svc) . " 2>&1");
+        }
         audit("service.$cmd", $svc);
         Response::success(['output' => $out]);
     })(),
@@ -416,23 +423,33 @@ match ($action) {
         // Save before switching so the new value is in DB
         $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$key, $value]);
 
+        // Sync config.ini so PHP constants reflect the change immediately on next request
+        $configFile = '/etc/novacpx/config.ini';
+        if (in_array($key, ['web_server','ftp_server','dns_server']) && file_exists($configFile)) {
+            $ini = file_get_contents($configFile);
+            if ($key === 'web_server') {
+                $ini = preg_replace('/^server\s*=\s*.*/m', "server = $value", $ini);
+            }
+            file_put_contents($configFile, $ini);
+        }
+
         // Inline service switching — stop all alternatives, start the chosen one
         if ($key === 'web_server') {
             $webSvcs = ['apache2','nginx','lighttpd','caddy'];
-            foreach ($webSvcs as $s) { shell_exec("systemctl stop $s 2>/dev/null; systemctl disable $s 2>/dev/null"); }
+            foreach ($webSvcs as $s) { shell_exec("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null"); }
             $startSvc = match($value) { 'nginx' => 'nginx', 'apache' => 'apache2', default => 'apache2' };
-            shell_exec("systemctl enable $startSvc 2>/dev/null && systemctl start $startSvc 2>/dev/null");
+            shell_exec("sudo systemctl enable $startSvc 2>/dev/null && sudo systemctl start $startSvc 2>/dev/null");
         } elseif ($key === 'ftp_server') {
-            foreach (['proftpd','vsftpd','pure-ftpd'] as $s) { shell_exec("systemctl stop $s 2>/dev/null; systemctl disable $s 2>/dev/null"); }
+            foreach (['proftpd','vsftpd','pure-ftpd'] as $s) { shell_exec("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null"); }
             $startSvc = match($value) { 'vsftpd' => 'vsftpd', 'pureftpd' => 'pure-ftpd', default => 'proftpd' };
             if (trim(shell_exec("dpkg -l $startSvc 2>/dev/null | grep -c '^ii'") ?: '0') > 0) {
-                shell_exec("systemctl enable $startSvc 2>/dev/null && systemctl start $startSvc 2>/dev/null");
+                shell_exec("sudo systemctl enable $startSvc 2>/dev/null && sudo systemctl start $startSvc 2>/dev/null");
             }
         } elseif ($key === 'dns_server') {
-            foreach (['named','bind9','pdns','nsd'] as $s) { shell_exec("systemctl stop $s 2>/dev/null; systemctl disable $s 2>/dev/null"); }
+            foreach (['named','bind9','pdns','nsd'] as $s) { shell_exec("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null"); }
             if ($value !== 'none') {
                 $startSvc = match($value) { 'powerdns' => 'pdns', 'nsd' => 'nsd', default => 'named' };
-                shell_exec("systemctl enable $startSvc 2>/dev/null && systemctl start $startSvc 2>/dev/null");
+                shell_exec("sudo systemctl enable $startSvc 2>/dev/null && sudo systemctl start $startSvc 2>/dev/null");
             }
         }
         // mail_server: postfix + dovecot are always running; mail_server setting controls config template only
@@ -560,22 +577,22 @@ match ($action) {
                 'mariadb'    => 'mariadb-server',
                 'postgresql' => 'postgresql postgresql-contrib',
             };
-            $out = shell_exec("DEBIAN_FRONTEND=noninteractive apt-get install -y $pkg 2>&1");
-            shell_exec("systemctl enable $engine && systemctl start $engine 2>/dev/null");
+            $out = shell_exec("DEBIAN_FRONTEND=noninteractive sudo apt-get install -y $pkg 2>&1");
+            shell_exec("sudo systemctl enable $engine 2>/dev/null && sudo systemctl start $engine 2>/dev/null");
         } elseif ($action === 'remove') {
             $pkg = match($engine) {
                 'mysql'      => 'mysql-server mysql-client',
                 'mariadb'    => 'mariadb-server mariadb-client',
                 'postgresql' => 'postgresql postgresql-contrib',
             };
-            shell_exec("systemctl stop $engine 2>/dev/null || true");
-            $out = shell_exec("apt-get remove -y $pkg 2>&1");
+            shell_exec("sudo systemctl stop $engine 2>/dev/null || true");
+            $out = shell_exec("DEBIAN_FRONTEND=noninteractive sudo apt-get remove -y $pkg 2>&1");
         } elseif ($action === 'set-active') {
             $db->execute("INSERT INTO settings (`key`,`value`) VALUES ('active_db_engine',?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$engine]);
             audit('settings.active_db_engine', $engine);
             Response::success(null, "Active database engine set to $engine");
         } else {
-            shell_exec("systemctl $action $engine 2>/dev/null");
+            shell_exec("sudo systemctl $action $engine 2>/dev/null");
         }
         audit("db-engine.$action", $engine);
         Response::success(['output' => substr($out ?: '', -1000)], ucfirst($action) . " $engine done");
