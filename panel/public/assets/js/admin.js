@@ -1506,7 +1506,7 @@ ${ips.length ? `
   <div class="card">
     <div class="card-header"><span class="card-title">Mail Services</span></div>
     <div style="padding:1.25rem">
-      ${[['postfix',mailStatus],['dovecot',doveStatus],['spamassassin','unknown']].map(([s,st]) => `
+      ${[['postfix',mailStatus],['dovecot',doveStatus]].map(([s,st]) => `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--border)">
           <span>${s} ${Nova.badge(st,st==='active'?'green':'red')}</span>
           <div style="display:flex;gap:.5rem">

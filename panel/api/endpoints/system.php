@@ -311,8 +311,8 @@ match ($action) {
 
         // Persist to DB for history
         $db->execute(
-            "INSERT INTO server_stats (cpu_pct,ram_pct,disk_pct,load_1m,load_5m,load_15m) VALUES (?,?,?,?,?,?)",
-            [$cpuPct, $ramPct, $diskPct, $load[0], $load[1], $load[2]]
+            "INSERT INTO server_stats (cpu_usage,ram_usage,disk_usage,load_avg) VALUES (?,?,?,?)",
+            [$cpuPct, $ramPct, $diskPct, $load[0]]
         );
 
         Response::success([
