@@ -38,9 +38,10 @@ match ($action) {
         }
         // Default to active DB engine from settings so autoinstallers use whatever the admin has selected
         $activeEngine = $db->fetchOne("SELECT `value` FROM settings WHERE `key`='active_db_engine'")['value'] ?? 'mysql';
-        $type   = $body['type'] ?? ($activeEngine === 'postgresql' ? 'postgresql' : 'mysql');
-        $dbName = trim($body['db_name'] ?? '');
-        $dbUser = trim($body['db_user'] ?? $dbName . '_user');
+        $type   = $body['type'] ?? $body['db_type'] ?? ($activeEngine === 'postgresql' ? 'postgresql' : 'mysql');
+        $dbName = preg_replace('/[^a-zA-Z0-9_]/', '_', trim($body['db_name'] ?? ''));
+        $rawUser = trim($body['db_user'] ?? '');
+        $dbUser = $rawUser !== '' ? preg_replace('/[^a-zA-Z0-9_]/', '_', $rawUser) : '';
         $dbPass = $body['db_pass'] ?? bin2hex(random_bytes(8));
         if (!$dbName) Response::error("db_name required");
 
@@ -48,11 +49,20 @@ match ($action) {
         $acct   = $db->fetchOne("SELECT username FROM accounts WHERE id = ?", [$accountId]);
         $prefix = $acct['username'] . '_';
         if (!str_starts_with($dbName, $prefix)) $dbName = $prefix . $dbName;
+        // Default db_user from db_name if blank, then prefix
+        if ($dbUser === '') $dbUser = $dbName . '_user';
         if (!str_starts_with($dbUser, $prefix)) $dbUser = $prefix . $dbUser;
+        // Enforce max length (MySQL username limit is 32, db name 64)
+        $dbName = substr($dbName, 0, 64);
+        $dbUser = substr($dbUser, 0, 32);
 
-        $id = $type === 'postgresql'
-            ? DatabaseManager::createPostgres($accountId, $dbName, $dbUser, $dbPass)
-            : DatabaseManager::createMySQL($accountId, $dbName, $dbUser, $dbPass);
+        try {
+            $id = $type === 'postgresql'
+                ? DatabaseManager::createPostgres($accountId, $dbName, $dbUser, $dbPass)
+                : DatabaseManager::createMySQL($accountId, $dbName, $dbUser, $dbPass);
+        } catch (RuntimeException $e) {
+            Response::error($e->getMessage());
+        }
 
         audit('database.create', $dbName, ['type' => $type]);
         Response::success(['id' => $id, 'db_name' => $dbName, 'db_user' => $dbUser, 'db_pass' => $dbPass], 'Database created');
