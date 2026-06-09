@@ -1,0 +1,19 @@
+[Unit]
+Description=NovaCPX Panel Web Server (dedicated Nginx)
+After=network.target php8.3-fpm.service
+Wants=php8.3-fpm.service
+
+[Service]
+Type=forking
+PIDFile=/run/novacpx-nginx.pid
+ExecStartPre=/usr/sbin/nginx -t -c /etc/novacpx/nginx-panel.conf
+ExecStart=/usr/sbin/nginx -c /etc/novacpx/nginx-panel.conf
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s QUIT $MAINPID
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

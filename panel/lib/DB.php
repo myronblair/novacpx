@@ -117,5 +117,9 @@ class DB {
         return $this->pdo->lastInsertId();
     }
 
+    public function beginTransaction(): void  { $this->pdo->beginTransaction(); }
+    public function commit(): void            { $this->pdo->commit(); }
+    public function rollback(): void          { if ($this->pdo->inTransaction()) $this->pdo->rollBack(); }
+
     public function pdo(): PDO { return $this->pdo; }
 }

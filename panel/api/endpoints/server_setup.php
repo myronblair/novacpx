@@ -4,7 +4,7 @@
  */
 $db   = DB::getInstance();
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
-Auth::getInstance()->requireRole(['admin']);
+Auth::getInstance()->require('admin');
 
 function getSetting(string $key, $db): ?string {
     return $db->fetchOne("SELECT value FROM settings WHERE `key` = ?", [$key])['value'] ?? null;
