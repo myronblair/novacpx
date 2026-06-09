@@ -659,6 +659,7 @@
   async function notifications() {
     const res = await Nova.api('system', 'notify-settings');
     const s   = res?.data || {};
+    setTimeout(etLoadList, 80);
     return `
 <div class="page-header"><h2 class="page-title">Email Notifications</h2></div>
 
@@ -702,18 +703,12 @@
 </div>
 
 <div class="card">
-  <div class="card-header"><span class="card-title">Notification Triggers</span></div>
-  <div class="card-body">
-    <table class="table">
-      <thead><tr><th>Event</th><th>Recipient</th><th>Notes</th></tr></thead>
-      <tbody>
-        <tr><td>Account Created</td><td>New user + Admin</td><td>Sends welcome email with credentials</td></tr>
-        <tr><td>Account Suspended</td><td>Account holder + Admin</td><td>Includes suspension reason</td></tr>
-        <tr><td>Disk Quota ≥85%</td><td>Account holder + Admin</td><td>Once per day per account (cron)</td></tr>
-        <tr><td>SSL Expiry ≤14 days</td><td>Account holder + Admin</td><td>Once per threshold per domain (cron)</td></tr>
-      </tbody>
-    </table>
-    <p class="text-muted text-sm" style="margin-top:.5rem">Disk quota and SSL expiry checks run daily via cron.</p>
+  <div class="card-header">
+    <span class="card-title">Email Templates</span>
+    <button class="btn btn-sm btn-primary ml-auto" onclick="etNew()">+ New Template</button>
+  </div>
+  <div class="card-body" id="et-list-body">
+    <div class="loading">Loading templates…</div>
   </div>
 </div>`;
   }
@@ -735,6 +730,114 @@
     const res = await Nova.api('system', 'test-notify', { method: 'POST', body: { to: email } });
     if (res?.success) Nova.toast(res.message, 'success');
     else Nova.toast(res?.message || 'Send failed', 'error');
+  };
+
+  // ── Email Template Management ──────────────────────────────────────────────
+  window.etLoadList = async () => {
+    const body = document.getElementById('et-list-body');
+    if (!body) return;
+    body.innerHTML = '<div class="loading">Loading templates…</div>';
+    const r = await Nova.api('system', 'email-templates');
+    const tmpls = r?.data?.templates || [];
+    if (!tmpls.length) {
+      body.innerHTML = '<p class="text-muted">No templates found. <a href="#" onclick="etNew()">Create one</a>.</p>';
+      return;
+    }
+    body.innerHTML = `<div style="overflow-x:auto"><table class="table">
+      <thead><tr><th>Trigger</th><th>Label</th><th>Subject</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>${tmpls.map(t => `<tr>
+        <td><code style="font-size:.78rem">${Nova.escHtml(t.trigger_key)}</code></td>
+        <td>${Nova.escHtml(t.label)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Nova.escHtml(t.subject)}</td>
+        <td>${t.enabled ? Nova.badge('enabled','green') : Nova.badge('disabled','red')}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-xs btn-ghost" onclick="etEdit(${t.id})">Edit</button>
+          <button class="btn btn-xs btn-ghost" onclick="etSendTest(${t.id})">Test</button>
+          <button class="btn btn-xs" style="color:var(--red)" onclick="etDelete(${t.id},'${Nova.escHtml(t.label)}')">Delete</button>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  };
+
+  window.etEdit = async (id) => {
+    const r = await Nova.api('system', 'email-template-get', { method: 'POST', body: { id } });
+    if (!r?.success) { Nova.toast(r?.message || 'Load failed', 'error'); return; }
+    const t = r.data;
+    Nova.modal(id ? `Edit Template: ${t.label}` : 'New Template', `
+      <div class="form-group"><label>Subject</label>
+        <input id="et-subject" class="form-control" value="${Nova.escHtml(t.subject)}">
+      </div>
+      <div class="form-group"><label>HTML Body <span class="text-muted" style="font-size:.78rem">— use {{name}}, {{domain}}, {{username}}, etc.</span></label>
+        <textarea id="et-html" class="form-control" style="font-family:monospace;font-size:.8rem;height:220px">${Nova.escHtml(t.body_html)}</textarea>
+      </div>
+      <div class="form-group"><label>Plain Text Body <span class="text-muted" style="font-size:.78rem">(optional fallback)</span></label>
+        <textarea id="et-text" class="form-control" style="height:80px;font-size:.8rem">${Nova.escHtml(t.body_text || '')}</textarea>
+      </div>
+      <div class="form-group"><label>Status</label>
+        <select id="et-enabled" class="form-control" style="width:auto">
+          <option value="1" ${t.enabled ? 'selected' : ''}>Enabled</option>
+          <option value="0" ${!t.enabled ? 'selected' : ''}>Disabled</option>
+        </select>
+      </div>`,
+      `<button class="btn btn-primary" onclick="etSave(${id})">Save Template</button>
+       <button class="btn btn-ghost" onclick="document.querySelector('.modal-overlay')?.remove()">Cancel</button>`
+    );
+  };
+
+  window.etNew = () => {
+    Nova.modal('New Email Template', `
+      <div class="form-group"><label>Trigger Key <span class="text-muted" style="font-size:.78rem">(snake_case, unique)</span></label>
+        <input id="et-trigger" class="form-control" placeholder="e.g. account_upgraded">
+      </div>
+      <div class="form-group"><label>Label</label>
+        <input id="et-label" class="form-control" placeholder="Friendly name">
+      </div>
+      <div class="form-group"><label>Subject</label>
+        <input id="et-subject" class="form-control" placeholder="Email subject line">
+      </div>
+      <div class="form-group"><label>HTML Body</label>
+        <textarea id="et-html" class="form-control" style="font-family:monospace;font-size:.8rem;height:200px" placeholder="<h2>Hello {{name}}</h2><p>...</p>"></textarea>
+      </div>
+      <div class="form-group"><label>Plain Text Body <span class="text-muted" style="font-size:.78rem">(optional)</span></label>
+        <textarea id="et-text" class="form-control" style="height:70px;font-size:.8rem"></textarea>
+      </div>`,
+      `<button class="btn btn-primary" onclick="etSave(0)">Create Template</button>
+       <button class="btn btn-ghost" onclick="document.querySelector('.modal-overlay')?.remove()">Cancel</button>`
+    );
+  };
+
+  window.etSave = async (id) => {
+    const subject   = document.getElementById('et-subject')?.value?.trim();
+    const body_html = document.getElementById('et-html')?.value?.trim();
+    const body_text = document.getElementById('et-text')?.value?.trim();
+    const enabled   = document.getElementById('et-enabled')?.value ?? '1';
+    if (!subject || !body_html) { Nova.toast('Subject and HTML body required', 'error'); return; }
+    const extra = id ? {} : {
+      trigger_key: document.getElementById('et-trigger')?.value?.trim(),
+      label:       document.getElementById('et-label')?.value?.trim(),
+    };
+    const r = await Nova.api('system', 'email-template-save', { method: 'POST', body: { id, subject, body_html, body_text, enabled, ...extra } });
+    if (r?.success) {
+      Nova.toast('Template saved', 'success');
+      document.querySelector('.modal-overlay')?.remove();
+      etLoadList();
+    } else { Nova.toast(r?.message || 'Save failed', 'error'); }
+  };
+
+  window.etDelete = (id, label) => {
+    Nova.confirm(`Delete template "${label}"? This cannot be undone.`, async () => {
+      const r = await Nova.api('system', 'email-template-delete', { method: 'POST', body: { id } });
+      if (r?.success) { Nova.toast('Template deleted', 'success'); etLoadList(); }
+      else Nova.toast(r?.message || 'Delete failed', 'error');
+    }, true);
+  };
+
+  window.etSendTest = async (id) => {
+    const email = prompt('Send test email to:');
+    if (!email) return;
+    const r = await Nova.api('system', 'email-template-test', { method: 'POST', body: { id, to: email } });
+    if (r?.success) Nova.toast(r.message, 'success');
+    else Nova.toast(r?.message || 'Send failed', 'error');
   };
 
   // ── Settings ───────────────────────────────────────────────────────────────

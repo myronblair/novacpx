@@ -707,6 +707,96 @@ BASH;
         else Response::error("CyberMail returned HTTP {$code}: " . substr($resp, 0, 200));
     })(),
 
+    // ── Email template CRUD ───────────────────────────────────────────────────
+    'email-templates' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $templates = $db->fetchAll("SELECT id,trigger_key,label,subject,enabled,updated_at FROM email_templates ORDER BY trigger_key");
+        Response::success(['templates' => $templates]);
+    })(),
+
+    'email-template-get' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $id = (int)($body['id'] ?? $_GET['id'] ?? 0);
+        $row = $db->fetchOne("SELECT * FROM email_templates WHERE id = ?", [$id]);
+        if (!$row) Response::error("Template not found", 404);
+        Response::success($row);
+    })(),
+
+    'email-template-save' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $id       = (int)($body['id'] ?? 0);
+        $subject  = trim($body['subject'] ?? '');
+        $bodyHtml = trim($body['body_html'] ?? '');
+        $bodyText = trim($body['body_text'] ?? '');
+        $enabled  = isset($body['enabled']) ? (int)(bool)$body['enabled'] : 1;
+        if (!$subject || !$bodyHtml) Response::error("Subject and HTML body required");
+
+        if ($id) {
+            $db->execute("UPDATE email_templates SET subject=?,body_html=?,body_text=?,enabled=?,updated_at=datetime('now') WHERE id=?",
+                [$subject, $bodyHtml, $bodyText, $enabled, $id]);
+        } else {
+            $triggerKey = preg_replace('/[^a-z0-9_]/', '_', strtolower(trim($body['trigger_key'] ?? '')));
+            $label      = trim($body['label'] ?? $triggerKey);
+            if (!$triggerKey) Response::error("trigger_key required for new template");
+            $id = (int)$db->insert("INSERT INTO email_templates (trigger_key,label,subject,body_html,body_text,enabled) VALUES (?,?,?,?,?,?)",
+                [$triggerKey, $label, $subject, $bodyHtml, $bodyText, $enabled]);
+        }
+        audit("email_template.save", (string)$id);
+        Response::success(['id' => $id], 'Template saved');
+    })(),
+
+    'email-template-delete' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $id = (int)($body['id'] ?? 0);
+        $row = $db->fetchOne("SELECT trigger_key FROM email_templates WHERE id = ?", [$id]);
+        if (!$row) Response::error("Template not found", 404);
+        $db->execute("DELETE FROM email_templates WHERE id = ?", [$id]);
+        audit("email_template.delete", $row['trigger_key']);
+        Response::success(null, 'Template deleted');
+    })(),
+
+    'email-template-test' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $id = (int)($body['id'] ?? 0);
+        $to = trim($body['to'] ?? '');
+        if (!$to || !filter_var($to, FILTER_VALIDATE_EMAIL)) Response::error("Valid email address required");
+        $tmpl = $id ? $db->fetchOne("SELECT * FROM email_templates WHERE id = ?", [$id]) : null;
+        if (!$tmpl && $id) Response::error("Template not found", 404);
+
+        $apiKey    = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'cybermail_api_key'")['value'] ?? '';
+        $fromEmail = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'notify_from_email'")['value'] ?: 'noreply@novacpx.local';
+        $fromName  = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'notify_from_name'")['value']  ?: 'NovaCPX Panel';
+        if (!$apiKey) Response::error("No CyberMail API key configured");
+
+        // Replace placeholders with sample values for test
+        $samples = [
+            '{{name}}' => 'Test User', '{{domain}}' => 'example.com', '{{username}}' => 'testuser',
+            '{{password}}' => '••••••••', '{{panel_url}}' => 'https://panel.yourdomain.com',
+            '{{reason}}' => 'Non-payment', '{{support_email}}' => $fromEmail,
+            '{{days}}' => '14', '{{expiry_date}}' => date('Y-m-d', strtotime('+14 days')),
+            '{{usage}}' => '87', '{{used}}' => '8.7 GB', '{{quota}}' => '10 GB',
+            '{{package}}' => 'Basic', '{{created_by}}' => 'admin',
+            '{{reset_url}}' => 'https://panel.yourdomain.com/reset?token=EXAMPLE',
+        ];
+        $subject = $tmpl ? strtr($tmpl['subject'], $samples) : 'NovaCPX Test';
+        $html    = $tmpl ? strtr($tmpl['body_html'], $samples) : '<p>Test</p>';
+        $text    = $tmpl ? strtr($tmpl['body_text'] ?? '', $samples) : 'Test';
+
+        $payload = json_encode(['from' => $fromEmail, 'to' => $to, 'subject' => '[TEST] ' . $subject, 'html' => $html, 'text' => $text]);
+        $ch = curl_init('https://platform.cyberpersons.com/email/v1/send');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $apiKey, 'Content-Type: application/json'],
+            CURLOPT_TIMEOUT => 15,
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($code === 202) Response::success(null, "Test email sent to {$to}");
+        else Response::error("CyberMail returned HTTP {$code}: " . substr($resp, 0, 200));
+    })(),
+
     // ── Database engine management ────────────────────────────────────────────
     'db-engines' => (function() use ($db) {
         Auth::getInstance()->require('admin');
