@@ -63,3 +63,7 @@ $db->execute(
 
 // Prune rows older than 30 days
 $db->execute("DELETE FROM server_stats WHERE recorded_at < DATE_SUB(NOW(), INTERVAL 30 DAY)");
+
+// Proxy health check — restart nginx on remote proxy VM if it's stopped
+require_once NOVACPX_LIB . '/ProxyManager.php';
+ProxyManager::healthCheck();

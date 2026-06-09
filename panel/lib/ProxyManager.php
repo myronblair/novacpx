@@ -284,6 +284,74 @@ class ProxyManager {
         return ['ok' => true, 'message' => 'Connected — ' . trim($out)];
     }
 
+    // --- Remote setup & uninstall ---
+
+    public static function runSetupOnRemote(): \Generator {
+        $r = self::getRemote();
+        if (!$r['host']) { yield "ERROR: No remote host configured\n"; return; }
+
+        $steps = [
+            'Updating package lists'      => 'apt-get update -qq 2>&1',
+            'Installing nginx'            => 'apt-get install -y nginx 2>&1',
+            'Disabling default site'      => 'rm -f /etc/nginx/sites-enabled/default',
+            'Creating conf directories'   => 'mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled',
+            'Writing tune config'         => 'printf "client_max_body_size 256M;\nproxy_buffers 16 16k;\nproxy_buffer_size 16k;\n" > /etc/nginx/conf.d/novacpx-proxy.conf',
+            'Writing catch-all vhost'     => 'printf "server {\n    listen 80 default_server;\n    server_name _;\n    return 444;\n}\n" > /etc/nginx/sites-available/novacpx-default.conf && ln -sf /etc/nginx/sites-available/novacpx-default.conf /etc/nginx/sites-enabled/',
+            'Testing nginx config'        => 'nginx -t 2>&1',
+            'Enabling and starting nginx' => 'systemctl enable nginx 2>/dev/null && systemctl restart nginx 2>&1 && systemctl is-active nginx',
+        ];
+
+        foreach ($steps as $label => $cmd) {
+            yield "» {$label}...\n";
+            $out = self::remoteExec($cmd);
+            if ($out) yield trim($out) . "\n";
+            // Bail on critical failures
+            if (str_contains($label, 'install') && !str_contains($out ?? '', 'nginx')) {
+                $chk = self::remoteExec('which nginx 2>/dev/null');
+                if (!trim($chk)) { yield "ERROR: nginx install failed\n"; return; }
+            }
+        }
+        yield "✓ Nginx proxy setup complete on {$r['host']}\n";
+    }
+
+    public static function uninstall(bool $removeNginx = false): string {
+        if (self::isRemote()) {
+            // Remove all NovaCPX proxy configs from remote
+            self::remoteExec('rm -f /etc/nginx/sites-available/novacpx-proxy-*.conf /etc/nginx/sites-enabled/novacpx-proxy-*.conf /etc/nginx/conf.d/novacpx-proxy.conf');
+            self::remoteExec('rm -f /etc/nginx/sites-available/novacpx-default.conf /etc/nginx/sites-enabled/novacpx-default.conf');
+            if ($removeNginx) {
+                self::remoteExec('systemctl stop nginx 2>/dev/null; apt-get remove -y nginx nginx-common 2>/dev/null');
+                return 'nginx removed from remote VM';
+            }
+            // Just reload to apply config removal
+            self::remoteExec('nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true');
+            return 'proxy configs removed from remote VM';
+        }
+        // Local uninstall
+        foreach (glob(self::$confDir    . '/' . self::$confPrefix . '*.conf') ?: [] as $f) @unlink($f);
+        foreach (glob(self::$enabledDir . '/' . self::$confPrefix . '*.conf') ?: [] as $f) @unlink($f);
+        if ($removeNginx) {
+            shell_exec('systemctl stop nginx 2>/dev/null; apt-get remove -y nginx nginx-common 2>/dev/null');
+            return 'nginx removed';
+        }
+        shell_exec('systemctl reload nginx 2>/dev/null');
+        return 'proxy configs removed';
+    }
+
+    // --- Health check (called from cron / watchdog) ---
+
+    public static function healthCheck(): string {
+        $db   = DB::getInstance();
+        $mode = $db->fetchOne("SELECT value FROM settings WHERE `key`='proxy_mode'")['value'] ?? 'disabled';
+        if ($mode === 'disabled') return 'disabled';
+        if (!self::isRunning()) {
+            $result = self::sysctl('start');
+            novacpx_log('warn', "ProxyManager: nginx was stopped, attempted restart: $result");
+            return "restarted: $result";
+        }
+        return 'ok';
+    }
+
     // --- Setup Script ---
 
     public static function setupScript(): string {

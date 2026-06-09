@@ -141,6 +141,33 @@ try {
         $action === 'test-remote' && $method === 'POST' =>
             Response::json(['success' => true, 'data' => ProxyManager::testRemote()]),
 
+        // POST setup-remote — run nginx setup on remote VM, stream output via SSE
+        ($action === 'setup-remote') && $method === 'POST' => (function() {
+            header('Content-Type: text/event-stream');
+            header('Cache-Control: no-cache');
+            header('X-Accel-Buffering: no');
+            ob_implicit_flush(true);
+            while (ob_get_level() > 0) ob_end_flush();
+            foreach (ProxyManager::runSetupOnRemote() as $line) {
+                echo 'data: ' . json_encode(['line' => $line]) . "\n\n";
+                flush();
+            }
+            echo "data: " . json_encode(['done' => true]) . "\n\n";
+            flush();
+            exit;
+        })(),
+
+        // DELETE uninstall — remove proxy configs (and optionally nginx)
+        $action === 'uninstall' && $method === 'DELETE' => (function() use ($body) {
+            $removeNginx = !empty($body['remove_nginx']);
+            $result      = ProxyManager::uninstall($removeNginx);
+            if ($removeNginx) {
+                $db = DB::getInstance();
+                $db->execute("INSERT INTO settings (`key`, value) VALUES ('proxy_mode','disabled') ON DUPLICATE KEY UPDATE value='disabled'");
+            }
+            Response::json(['success' => true, 'data' => ['result' => $result]]);
+        })(),
+
         default => Response::error('Not found', 404),
     };
 

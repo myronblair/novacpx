@@ -2610,11 +2610,18 @@ async function nginxProxyPage() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
       Setup Guide
     </button>
+    ${isRemote && cfg.remote_host ? `
+      <button class="btn btn-ghost btn-sm" onclick="proxyRunSetup()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        ${inst ? 'Re-run Setup' : 'Run Setup on Remote VM'}
+      </button>
+    ` : ''}
     ${inst ? `
       <button class="btn btn-sm btn-secondary" onclick="proxySync()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         Sync Accounts
       </button>
+      <button class="btn btn-sm btn-danger btn-ghost" onclick="proxyUninstall()" style="margin-left:0.25rem">Uninstall</button>
       <button class="btn btn-sm btn-primary" onclick="proxyAddHost()">+ Add Host</button>
     ` : ''}
   </div>
@@ -2840,6 +2847,48 @@ window.proxySetupInstructions = async () => {
   </ul>
 </div>
   `, null, { cancelLabel: 'Close', showConfirm: false });
+};
+
+window.proxyRunSetup = () => {
+  const ov = Nova.modal('Setting Up Remote Nginx Proxy', `
+    <p style="color:var(--text-muted);margin-bottom:0.75rem">Running setup on the remote proxy VM — this takes about 30 seconds.</p>
+    <pre id="proxy-setup-log" style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-size:0.78rem;max-height:320px;overflow-y:auto;white-space:pre-wrap;font-family:monospace">Connecting…\n</pre>
+  `, null, { cancelLabel: 'Close', showConfirm: false });
+
+  const log  = document.getElementById('proxy-setup-log');
+  const es   = new EventSource('/api/proxy/setup-remote');
+  let done   = false;
+
+  es.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.line) { log.textContent += d.line; log.scrollTop = log.scrollHeight; }
+      if (d.done)  { done = true; es.close(); log.textContent += '\n— Done. Refreshing status…\n'; setTimeout(() => Nova.loadPage('nginx-proxy', window._novaPages), 1200); }
+    } catch {}
+  };
+  es.onerror = () => {
+    if (!done) {
+      es.close();
+      log.textContent += '\n— Connection lost. Check remote host settings and try again.\n';
+    }
+  };
+  // Close SSE when modal is dismissed
+  ov.querySelector('.modal-close')?.addEventListener('click', () => es.close());
+};
+
+window.proxyUninstall = () => {
+  Nova.modal('Uninstall Nginx Proxy', `
+    <p>Choose what to remove from the <strong>remote proxy VM</strong>:</p>
+    <div class="form-group" style="margin-top:1rem">
+      <label><input type="radio" name="uninst" value="configs" checked> Remove proxy host configs only <small class="text-muted">(keep nginx running)</small></label><br>
+      <label style="margin-top:0.5rem"><input type="radio" name="uninst" value="full"> Remove everything <small class="text-muted">(uninstall nginx, delete all configs, disable proxy mode)</small></label>
+    </div>
+  `, async () => {
+    const full = document.querySelector('input[name="uninst"]:checked')?.value === 'full';
+    const r = await Nova.api('proxy', 'uninstall', { method: 'DELETE', body: { remove_nginx: full } });
+    Nova.toast(r?.data?.result || r?.message || 'Done', r?.success ? 'success' : 'error');
+    if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
+  }, { confirmLabel: 'Uninstall', danger: true });
 };
 
 window.proxySettings = async () => {
