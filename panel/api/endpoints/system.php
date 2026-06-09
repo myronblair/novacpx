@@ -308,7 +308,7 @@ BASH;
             // Record new version in novacpx_version table and settings
             $newVersion = trim(shell_exec("sudo cat " . escapeshellarg("$srcDir/VERSION") . " 2>/dev/null") ?: '');
             if ($newVersion) {
-                $db->execute("INSERT INTO novacpx_version (version, installed_at, notes, commit_hash) VALUES (?,datetime('now'),?,?)",
+                $db->execute("INSERT INTO novacpx_version (version, installed_at, notes, git_commit) VALUES (?,datetime('now'),?,?)",
                     [$newVersion, "Updated via admin panel from {$before} (channel: {$channel})", $after]);
                 $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES ('panel_version',?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
                     [$newVersion]);

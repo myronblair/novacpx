@@ -91,7 +91,7 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
   # Record new version in DB
   NEW_VERSION=$(cat "$REPO_PATH/VERSION" 2>/dev/null | tr -d '[:space:]' || true)
   if [[ -n "$NEW_VERSION" && -f "$DB_PATH" ]]; then
-    sqlite3 "$DB_PATH" "INSERT INTO novacpx_version (version, installed_at, notes, commit_hash) VALUES ('$NEW_VERSION', datetime('now'), 'Auto-deployed via webhook ($CHANNEL channel)', '$AFTER')" 2>/dev/null || true
+    sqlite3 "$DB_PATH" "INSERT INTO novacpx_version (version, installed_at, notes, git_commit) VALUES ('$NEW_VERSION', datetime('now'), 'Auto-deployed via webhook ($CHANNEL channel)', '$AFTER')" 2>/dev/null || true
     sqlite3 "$DB_PATH" "INSERT INTO settings (key, value, updated_at) VALUES ('panel_version', '$NEW_VERSION', datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at" 2>/dev/null || true
     log "Version updated to $NEW_VERSION"
   fi
