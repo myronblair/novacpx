@@ -219,14 +219,17 @@ BASH;
             Response::success($data);
         }
 
-        $srcDir = '/opt/novacpx-src';
+        $srcDir  = '/opt/novacpx-src';
         if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
+        $channel = trim($db->fetchOne("SELECT value FROM settings WHERE `key`='update_channel'")['value'] ?? 'stable');
+        $remoteBranch = $channel === 'beta' ? 'origin/beta' : 'origin/main';
         shell_exec("sudo git -C " . escapeshellarg($srcDir) . " fetch origin 2>/dev/null");
-        $logOut  = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " log HEAD..origin/main --oneline 2>/dev/null") ?: '';
+        $logOut  = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " log HEAD..{$remoteBranch} --oneline 2>/dev/null") ?: '';
         $updates = array_values(array_filter(explode("\n", trim($logOut))));
         $branch  = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " branch --show-current 2>/dev/null") ?: 'main');
         $commit  = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse --short HEAD 2>/dev/null") ?: '');
-        $result  = ['updates_available' => count($updates), 'current_commit' => $commit, 'branch' => $branch, 'commits' => $updates];
+        $remoteVer = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " show {$remoteBranch}:VERSION 2>/dev/null") ?: '');
+        $result  = ['updates_available' => count($updates), 'current_commit' => $commit, 'branch' => $branch, 'channel' => $channel, 'remote_version' => $remoteVer, 'commits' => $updates];
         $db->execute("INSERT INTO settings(`key`,value,updated_at) VALUES('update_cache_novacpx',?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [json_encode($result)]);
         Response::success($result);
     })(),
@@ -237,22 +240,23 @@ BASH;
         set_time_limit(180);
         $srcDir  = '/opt/novacpx-src';
         $webRoot = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
-        $webSvc  = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
         $steps   = [];
 
         if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
 
-        $before = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
-        $steps[] = "Before: $before";
+        $channel      = trim($db->fetchOne("SELECT value FROM settings WHERE `key`='update_channel'")['value'] ?? 'stable');
+        $targetBranch = $channel === 'beta' ? 'beta' : 'main';
 
-        // Backup current web root
-        $backupDir = '/var/novacpx/backups/pre-novacpx-update-' . date('YmdHis');
-        shell_exec("mkdir -p " . escapeshellarg($backupDir));
-        shell_exec("cp -a " . escapeshellarg($webRoot) . " " . escapeshellarg("$backupDir/public") . " 2>&1");
+        $before = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
+        $steps[] = "Before: $before (channel: $channel)";
+
+        // Backup current web root to /tmp (writable, no sudo needed)
+        $backupDir = '/tmp/novacpx-backup-' . date('YmdHis');
+        shell_exec("cp -a " . escapeshellarg($webRoot) . " " . escapeshellarg($backupDir) . " 2>&1");
         $steps[] = "Backup: $backupDir";
 
-        // Pull new code (sudo so www-data can write root-owned repo)
-        $pull = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " pull origin main 2>&1");
+        // Pull new code from the channel branch (sudo so www-data can write root-owned repo)
+        $pull = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " pull origin " . escapeshellarg($targetBranch) . " 2>&1");
         $steps[] = "Pull: " . trim($pull ?: '(no output)');
 
         $after   = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
@@ -260,7 +264,7 @@ BASH;
         $steps[] = "After: $after" . ($changed ? " (changed)" : " (no change)");
 
         if ($changed) {
-            // Validate PHP syntax (use php8.3; find all .php files recursively)
+            // Validate PHP syntax
             $phpFiles = [];
             $found = shell_exec("find " . escapeshellarg("$srcDir/panel") . " -name '*.php' 2>/dev/null") ?: '';
             foreach (array_filter(explode("\n", trim($found))) as $f) { $phpFiles[] = trim($f); }
@@ -279,15 +283,15 @@ BASH;
                 Response::error('Update aborted — PHP syntax errors: ' . implode('; ', $syntaxErr));
             }
 
-            // Deploy files to web root (sudo rsync)
+            // Deploy files to web root
             shell_exec("sudo rsync -a --delete " . escapeshellarg("$srcDir/panel/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
             shell_exec("sudo rsync -a " . escapeshellarg("$srcDir/panel/lib/") . " " . escapeshellarg("$webRoot/lib/") . " 2>&1");
             shell_exec("sudo rsync -a " . escapeshellarg("$srcDir/panel/api/") . " " . escapeshellarg("$webRoot/api/") . " 2>&1");
-            shell_exec("cp " . escapeshellarg("$srcDir/VERSION") . " " . escapeshellarg("$webRoot/VERSION") . " 2>/dev/null");
+            shell_exec("sudo cp " . escapeshellarg("$srcDir/VERSION") . " " . escapeshellarg("$webRoot/../VERSION") . " 2>/dev/null");
             shell_exec("sudo chown -R www-data:www-data " . escapeshellarg($webRoot));
             $steps[] = "Deploy: rsync complete";
 
-            // Run pending DB migrations
+            // Run pending DB migrations (SQLite syntax)
             $migrDir = "$srcDir/db/migrations";
             if (is_dir($migrDir)) {
                 foreach (glob("$migrDir/*.sql") as $sql) {
@@ -295,13 +299,23 @@ BASH;
                     $already = $db->fetchOne("SELECT 1 FROM settings WHERE `key` = ?", ["migration_$migName"]);
                     if (!$already) {
                         try { $db->pdo()->exec(file_get_contents($sql)); } catch (\Throwable $e) { /* skip dupes */ }
-                        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,NOW()) ON DUPLICATE KEY UPDATE `value`=NOW()", ["migration_$migName"]);
+                        $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES (?,datetime('now'),datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", ["migration_$migName"]);
                         $steps[] = "Migration: $migName applied";
                     }
                 }
             }
 
-            // Reload PHP-FPM to pick up new code
+            // Record new version in novacpx_version table and settings
+            $newVersion = trim(shell_exec("sudo cat " . escapeshellarg("$srcDir/VERSION") . " 2>/dev/null") ?: '');
+            if ($newVersion) {
+                $db->execute("INSERT INTO novacpx_version (version, installed_at, notes, commit_hash) VALUES (?,datetime('now'),?,?)",
+                    [$newVersion, "Updated via admin panel from {$before} (channel: {$channel})", $after]);
+                $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES ('panel_version',?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                    [$newVersion]);
+                $steps[] = "Version: $newVersion recorded";
+            }
+
+            // Reload PHP-FPM
             shell_exec("sudo systemctl reload php8.3-fpm 2>/dev/null || sudo systemctl reload php8.2-fpm 2>/dev/null || true");
             $steps[] = "PHP-FPM reloaded";
 
@@ -314,20 +328,20 @@ BASH;
                 if (in_array($code, ['200','401','302','301'])) { $panelOk = true; break; }
             }
             if (!$panelOk) {
-                shell_exec("sudo rsync -a --delete " . escapeshellarg("$backupDir/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
-                shell_exec("sudo systemctl reload $webSvc 2>/dev/null");
+                shell_exec("sudo rsync -a --delete " . escapeshellarg("$backupDir/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
                 novacpx_log('error', "NovaCPX update failed — panel down after deploy; restored from backup");
                 Response::error('Update deployed but panel went down — auto-restored from backup. Check logs.');
             }
 
-            audit('system.novacpx-update', "novacpx:$before→$after");
-            novacpx_log('info', "NovaCPX updated $before → $after");
+            audit('system.novacpx-update', "novacpx:{$before}→{$after} (channel:{$channel})");
+            novacpx_log('info', "NovaCPX updated $before → $after via $channel channel");
         }
 
         Response::success([
             'updated'     => $changed,
             'from_commit' => $before,
             'to_commit'   => $after,
+            'channel'     => $channel,
             'pull_output' => trim($pull ?? ''),
             'backup_path' => $backupDir,
             'steps'       => $steps,
@@ -511,7 +525,8 @@ BASH;
     // ── Server Options (#22a-e) ───────────────────────────────────────────────
     'server-options' => (function() use ($db) {
         Auth::getInstance()->require('admin');
-        $keys = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname'];
+        $keys = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname',
+                 'panel_name','default_php','default_nameserver1','default_nameserver2','update_channel'];
         $opts = [];
         foreach ($db->fetchAll("SELECT `key`,`value` FROM settings WHERE `key` IN ('" . implode("','", $keys) . "')") as $r) {
             $opts[$r['key']] = $r['value'];
@@ -531,9 +546,10 @@ BASH;
         Auth::getInstance()->require('admin');
         $key   = $body['key']   ?? '';
         $value = $body['value'] ?? '';
-        $allowed = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname'];
+        $allowed = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname',
+                    'panel_name','default_php','default_nameserver1','default_nameserver2','update_channel'];
         if (!in_array($key, $allowed)) Response::error("Invalid setting key: $key");
-        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$key, $value]);
+        $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES (?,?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [$key, $value]);
         audit("settings.{$key}", $value);
         Response::success(null, "Setting saved: {$key} = {$value}");
     })(),

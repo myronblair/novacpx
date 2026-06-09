@@ -19,12 +19,18 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
   [[ -z "$REPO_PATH" ]] && continue
   log "--- Deploying commit $COMMIT ---"
 
+  # Read update channel from DB to know which branch to pull
+  DB_PATH=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c.get('database','path',fallback='/var/lib/novacpx/panel.db'))" 2>/dev/null || echo "/var/lib/novacpx/panel.db")
+  CHANNEL=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='update_channel'" 2>/dev/null || echo "stable")
+  TARGET_BRANCH="main"
+  [[ "$CHANNEL" == "beta" ]] && TARGET_BRANCH="beta"
+
   # Validate PHP syntax before applying
   cd "$REPO_PATH" || continue
   git fetch origin >> "$LOG" 2>&1
 
   # Check PHP syntax on changed .php files
-  CHANGED_PHP=$(git diff HEAD..origin/main --name-only 2>/dev/null | grep '\.php$' || true)
+  CHANGED_PHP=$(git diff HEAD..origin/${TARGET_BRANCH} --name-only 2>/dev/null | grep '\.php$' || true)
   SYNTAX_OK=true
   for f in $CHANGED_PHP; do
     [[ -f "$REPO_PATH/$f" ]] || continue
@@ -40,9 +46,9 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
     continue
   fi
 
-  # Pull
+  # Pull from channel branch
   BEFORE=$(git rev-parse HEAD)
-  git pull origin main >> "$LOG" 2>&1
+  git pull origin "${TARGET_BRANCH}" >> "$LOG" 2>&1
   AFTER=$(git rev-parse HEAD)
 
   if [[ "$BEFORE" == "$AFTER" ]]; then
@@ -69,7 +75,6 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
 
   # Run pending DB migrations (SQLite)
   MIGR_DIR="$REPO_PATH/db/migrations"
-  DB_PATH=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c.get('database','path',fallback='/var/lib/novacpx/panel.db'))" 2>/dev/null || echo "/var/lib/novacpx/panel.db")
   if [[ -d "$MIGR_DIR" && -f "$DB_PATH" ]]; then
     for SQL in "$MIGR_DIR"/*.sql; do
       [[ -f "$SQL" ]] || continue
@@ -81,6 +86,14 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
         sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (key,value,updated_at) VALUES ('migration_$MIGR_NAME','$(date)',datetime('now'))" 2>/dev/null
       fi
     done
+  fi
+
+  # Record new version in DB
+  NEW_VERSION=$(cat "$REPO_PATH/VERSION" 2>/dev/null | tr -d '[:space:]' || true)
+  if [[ -n "$NEW_VERSION" && -f "$DB_PATH" ]]; then
+    sqlite3 "$DB_PATH" "INSERT INTO novacpx_version (version, installed_at, notes, commit_hash) VALUES ('$NEW_VERSION', datetime('now'), 'Auto-deployed via webhook ($CHANNEL channel)', '$AFTER')" 2>/dev/null || true
+    sqlite3 "$DB_PATH" "INSERT INTO settings (key, value, updated_at) VALUES ('panel_version', '$NEW_VERSION', datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at" 2>/dev/null || true
+    log "Version updated to $NEW_VERSION"
   fi
 
   # Ensure deploy webhook is accessible from web root

@@ -37,8 +37,10 @@ if ($secret) {
 $payload = json_decode($rawBody, true);
 $pushedBranch = basename($payload['ref'] ?? '');
 
-if ($pushedBranch !== $branch) {
-    echo json_encode(['status' => 'skipped', 'reason' => "Not target branch ($branch)"]);
+// Accept pushes to main (stable) or beta — both can trigger deploys
+$allowedBranches = ['main', 'beta'];
+if (!in_array($pushedBranch, $allowedBranches)) {
+    echo json_encode(['status' => 'skipped', 'reason' => "Not a deployable branch ($pushedBranch)"]);
     exit;
 }
 
@@ -46,9 +48,9 @@ $commit  = $payload['after'] ?? 'unknown';
 $pusher  = $payload['pusher']['name'] ?? 'unknown';
 $message = $payload['head_commit']['message'] ?? '';
 
-log_deploy("Deploy triggered by $pusher | commit $commit | $message");
+log_deploy("Deploy triggered by $pusher | branch $pushedBranch | commit $commit | $message");
 
-// Queue the deploy (non-blocking)
+// Queue the deploy — include branch so runner knows what to pull
 $queueFile = '/tmp/novacpx-deploy-queue.txt';
 file_put_contents($queueFile, "$repoPath|$webRoot|$commit\n", FILE_APPEND | LOCK_EX);
 

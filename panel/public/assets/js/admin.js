@@ -300,8 +300,8 @@
   <div class="card-body">
     <div class="grid-4 mb-3">
       <div><p class="text-muted text-sm">Installed</p><p class="font-bold">${v.installed_version || '—'}</p></div>
-      <div><p class="text-muted text-sm">Commit</p><code>${ncpx.current_commit || v.git_commit || '—'}</code></div>
-      <div><p class="text-muted text-sm">Branch</p><code>${ncpx.branch || 'main'}</code></div>
+      <div><p class="text-muted text-sm">Latest (${ncpx.channel || 'stable'})</p><p class="font-bold">${ncpx.remote_version || (ncpxCount > 0 ? 'available' : v.installed_version || '—')}</p></div>
+      <div><p class="text-muted text-sm">Channel</p>${Nova.badge(ncpx.channel || 'stable', ncpx.channel === 'beta' ? 'yellow' : 'green')}</div>
       <div><p class="text-muted text-sm">PHP</p><code>${v.php_version || '—'}</code></div>
     </div>
 
@@ -896,22 +896,40 @@
 
   // ── Settings ───────────────────────────────────────────────────────────────
   async function settings() {
+    const r = await Nova.api('system', 'server-options');
+    const o = r?.data || {};
+    const cur = {
+      panel_name:   o.panel_name   || 'NovaCPX',
+      default_php:  o.default_php  || '8.3',
+      ns1:          o.default_nameserver1 || '',
+      ns2:          o.default_nameserver2 || '',
+      channel:      o.update_channel || 'stable',
+    };
+    const phpOpts = ['7.4','8.1','8.2','8.3'].map(v =>
+      `<option value="${v}" ${v === cur.default_php ? 'selected' : ''}>${v}</option>`).join('');
+    const chanOpts = [
+      ['stable', 'Stable — major releases (main branch)'],
+      ['beta',   'Beta — minor &amp; patch releases (beta branch)'],
+    ].map(([v, l]) => `<option value="${v}" ${v === cur.channel ? 'selected' : ''}>${l}</option>`).join('');
     return `
 <div class="card">
   <div class="card-header"><span class="card-title">Panel Settings</span></div>
   <div class="card-body">
-    <form id="settings-form">
+    <form id="settings-form" onsubmit="event.preventDefault();adminSaveSettings()">
       <div class="grid-2">
-        <div class="form-group"><label>Panel Name</label><input type="text" name="panel_name" value="NovaCPX"></div>
+        <div class="form-group"><label>Panel Name</label><input type="text" id="sf-panel-name" value="${Nova.escHtml(cur.panel_name)}"></div>
         <div class="form-group"><label>Default PHP Version</label>
-          <select name="default_php">
-            ${['7.4','8.1','8.2','8.3'].map(v => `<option value="${v}" ${v==='8.3'?'selected':''}>${v}</option>`).join('')}
-          </select>
+          <select id="sf-default-php">${phpOpts}</select>
         </div>
-        <div class="form-group"><label>Primary Nameserver</label><input type="text" name="default_nameserver1" value="ns1.example.com"></div>
-        <div class="form-group"><label>Secondary Nameserver</label><input type="text" name="default_nameserver2" value="ns2.example.com"></div>
-        <div class="form-group"><label>Update Channel</label>
-          <select name="update_channel"><option value="stable">Stable</option><option value="beta">Beta</option></select>
+        <div class="form-group"><label>Primary Nameserver</label><input type="text" id="sf-ns1" value="${Nova.escHtml(cur.ns1)}" placeholder="ns1.example.com"></div>
+        <div class="form-group"><label>Secondary Nameserver</label><input type="text" id="sf-ns2" value="${Nova.escHtml(cur.ns2)}" placeholder="ns2.example.com"></div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Update Channel</label>
+          <select id="sf-channel">${chanOpts}</select>
+          <div class="form-hint" style="margin-top:.35rem;font-size:.77rem;color:var(--text-muted)">
+            <strong>Stable</strong> receives major releases pushed to <code>main</code>.
+            <strong>Beta</strong> tracks the <code>beta</code> branch for minor &amp; patch releases.
+          </div>
         </div>
       </div>
       <button type="submit" class="btn btn-primary">Save Settings</button>
@@ -919,6 +937,25 @@
   </div>
 </div>`;
   }
+
+  window.adminSaveSettings = async () => {
+    const btn = document.querySelector('#settings-form button[type=submit]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    const saves = [
+      ['panel_name',         document.getElementById('sf-panel-name')?.value?.trim()],
+      ['default_php',        document.getElementById('sf-default-php')?.value],
+      ['default_nameserver1',document.getElementById('sf-ns1')?.value?.trim()],
+      ['default_nameserver2',document.getElementById('sf-ns2')?.value?.trim()],
+      ['update_channel',     document.getElementById('sf-channel')?.value],
+    ].filter(([, v]) => v != null);
+    let ok = true;
+    for (const [key, value] of saves) {
+      const res = await Nova.api('system', 'save-option', { method: 'POST', body: { key, value } });
+      if (!res?.success) { ok = false; Nova.toast(`Failed to save ${key}`, 'error'); break; }
+    }
+    if (ok) Nova.toast('Settings saved', 'success');
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Settings'; }
+  };
 
   // ── Accounts ───────────────────────────────────────────────────────────────
   async function accounts() {
