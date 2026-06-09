@@ -117,7 +117,7 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
           <linearGradient id="ulg4" x1="12" y1="8" x2="28" y2="28"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient>
         </defs>
       </svg>
-      <div style="font-size:1.4rem;font-weight:300">Nova<strong style="font-weight:700;background:linear-gradient(135deg,#6366f1,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent">CPX</strong></div>
+      <div style="font-size:1.4rem;font-weight:300"><?= htmlspecialchars($_pname, ENT_QUOTES, 'UTF-8') ?></div>
       <div style="font-size:.78rem;color:var(--text-muted);margin-top:.25rem;text-transform:uppercase;letter-spacing:.1em">My Hosting</div>
     </div>
     <div class="card">

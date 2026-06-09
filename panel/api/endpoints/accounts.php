@@ -97,6 +97,8 @@ match ($action) {
             [$id]
         );
         if (!$acct) Response::error("Account not found", 404);
+        $db->beginTransaction();
+        try {
 
         $allowed = ['php_version', 'package_id', 'notes'];
         $sets = []; $params = [];
@@ -203,8 +205,13 @@ match ($action) {
             }
         }
 
-        audit('account.update', "account:$id");
+        $db->commit();
+        audit('account.update', "account:$id", $body);
         Response::success(null, 'Account updated');
+        } catch (Throwable $e) {
+            $db->rollBack();
+            throw $e;
+        }
     })(),
 
     'suspend' => (function() use ($db, $body, $ownerClause) {

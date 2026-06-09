@@ -56,7 +56,37 @@ if (!file_exists($endpointFile)) {
     Response::error("Unknown endpoint: $endpoint", 404);
 }
 
-
+// Rate limiting — per-IP, per-endpoint bucket
+(function() use ($endpoint) {
+    $db     = DB::getInstance();
+    $ip     = $_SERVER["REMOTE_ADDR"] ?? "0.0.0.0";
+    $now    = time();
+    $window = 60;
+    $limit  = $endpoint === "auth" ? 10 : 120;
+    $bucket = $endpoint === "auth" ? "auth" : "api";
+    try {
+        $row = $db->fetchOne("SELECT hits, window_start FROM api_rate_limits WHERE ip=? AND endpoint=?", [$ip, $bucket]);
+        if ($row && ($now - (int)$row["window_start"]) < $window) {
+            $hits = (int)$row["hits"] + 1;
+            $db->execute("UPDATE api_rate_limits SET hits=? WHERE ip=? AND endpoint=?", [$hits, $ip, $bucket]);
+        } else {
+            $hits = 1;
+            $db->execute("INSERT INTO api_rate_limits (ip, endpoint, hits, window_start) VALUES (?,?,1,?) ON DUPLICATE KEY UPDATE hits=1, window_start=VALUES(window_start)", [$ip, $bucket, $now]);
+        }
+        $reset     = ($row ? (int)$row["window_start"] : $now) + $window;
+        $remaining = max(0, $limit - $hits);
+        header("X-RateLimit-Limit: {$limit}");
+        header("X-RateLimit-Remaining: {$remaining}");
+        header("X-RateLimit-Reset: {$reset}");
+        if ($hits > $limit) {
+            http_response_code(429);
+            echo json_encode(["success"=>false,"message"=>"Too many requests. Try again in " . ($reset - $now) . " seconds.","errors"=>[]]);
+            exit;
+        }
+    } catch (Throwable $e) {
+        novacpx_log("warn", "rate limit error: " . $e->getMessage());
+    }
+})();
 
 
 /**

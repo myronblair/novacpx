@@ -90,9 +90,6 @@ match ($action) {
             Response::error('Access denied', 403);
         }
 
-        // Save caller's current raw session token so we can restore it on unimpersonate
-        $callerRawToken = $_COOKIE['ncpx_session'] ?? '';
-
         // Create a short-lived impersonation session (2h)
         $token     = bin2hex(random_bytes(32));
         $sessionId = hash('sha256', $token);
@@ -106,7 +103,7 @@ match ($action) {
                 $_SERVER['REMOTE_ADDR'] ?? '',
                 $_SERVER['HTTP_USER_AGENT'] ?? '',
                 $callerId,
-                json_encode(['return_token' => $callerRawToken]),
+                json_encode([]),
             ]
         );
 
@@ -135,30 +132,37 @@ match ($action) {
         );
         if (!$sess || !$sess['impersonator_id']) Response::error('Not impersonating', 400);
 
-        $callerId    = (int)$sess['impersonator_id'];
-        $caller      = $db->fetchOne("SELECT role FROM users WHERE id = ?", [$callerId]);
-        $data        = json_decode($sess['data'] ?? '{}', true) ?? [];
-        $returnToken = $data['return_token'] ?? '';
+        $callerId = (int)$sess['impersonator_id'];
+        $caller   = $db->fetchOne("SELECT id, role FROM users WHERE id = ?", [$callerId]);
+        if (!$caller) Response::error('Caller account not found', 404);
 
         // Delete the impersonation session
         $db->execute("DELETE FROM sessions WHERE id = ?", [$sessionId]);
 
-        // Restore the caller's original session cookie so they land back in their panel logged in
-        if ($returnToken) {
-            setcookie('ncpx_session', $returnToken, [
-                'expires'  => time() + 28800,
-                'path'     => '/',
-                'secure'   => true,
-                'httponly' => true,
-                'samesite' => 'Strict',
-            ]);
-        } else {
-            setcookie('ncpx_session', '', time() - 3600, '/', '', true, true);
-        }
+        // Issue a fresh session for the caller — no raw token is ever stored at rest
+        $newToken     = bin2hex(random_bytes(32));
+        $newSessionId = hash('sha256', $newToken);
+        $db->execute(
+            "INSERT INTO sessions (id, user_id, ip_address, user_agent, expires_at, data)
+             VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 8 HOUR), ?)",
+            [
+                $newSessionId,
+                $callerId,
+                $_SERVER['REMOTE_ADDR'] ?? '',
+                $_SERVER['HTTP_USER_AGENT'] ?? '',
+                json_encode([]),
+            ]
+        );
+        setcookie('ncpx_session', $newToken, [
+            'expires'  => time() + 28800,
+            'path'     => '/',
+            'secure'   => true,
+            'httponly' => true,
+            'samesite' => 'Strict',
+        ]);
 
         audit('auth.unimpersonate', "returning:{$callerId}");
-        $role = $caller['role'] ?? 'admin';
-        Response::success(['portal_url' => Auth::portalUrl($role)], 'Returned to your account');
+        Response::success(['portal_url' => Auth::portalUrl($caller['role'])], 'Returned to your account');
     })(),
 
     'change-password' => (function() use ($body) {
