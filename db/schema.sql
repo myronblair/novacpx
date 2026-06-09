@@ -381,4 +381,25 @@ CREATE TABLE IF NOT EXISTS dkim_keys (
   CONSTRAINT fk_dkim_acct FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS api_rate_limits (
+  ip           VARCHAR(45)  NOT NULL,
+  endpoint     VARCHAR(32)  NOT NULL,
+  hits         INT UNSIGNED NOT NULL DEFAULT 1,
+  window_start INT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (ip, endpoint)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS proxy_hosts (
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id    INT UNSIGNED,
+  domain        VARCHAR(253) NOT NULL,
+  upstream      VARCHAR(255) NOT NULL,
+  ssl_enabled   TINYINT(1)   NOT NULL DEFAULT 0,
+  enabled       TINYINT(1)   NOT NULL DEFAULT 1,
+  custom_config TEXT,
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_domain (domain),
+  CONSTRAINT fk_proxy_acct FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET foreign_key_checks = 1;

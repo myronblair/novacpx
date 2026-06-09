@@ -134,7 +134,7 @@ apt-get update -qq >> "$LOG" 2>&1
 apt-get upgrade -y -qq >> "$LOG" 2>&1
 apt-get install -y -qq curl wget gnupg2 lsb-release ca-certificates \
   software-properties-common apt-transport-https unzip git \
-  sudo cron logrotate ufw fail2ban >> "$LOG" 2>&1
+  sudo cron logrotate ufw fail2ban sshpass >> "$LOG" 2>&1
 log "System packages updated"
 
 # ── PHP multi-version setup ───────────────────────────────────────────────────
@@ -232,8 +232,8 @@ else
   systemctl enable apache2 >> "$LOG" 2>&1
   log "Apache2 installed"
 
-  # Tell Apache to listen on all three panel ports
-  for PORT in $PORT_USER $PORT_RESELLER $PORT_ADMIN; do
+  # Tell Apache to listen on all four panel ports
+  for PORT in $PORT_USER $PORT_RESELLER $PORT_ADMIN $PORT_WEBMAIL; do
     grep -q "Listen $PORT" /etc/apache2/ports.conf 2>/dev/null || echo "Listen $PORT" >> /etc/apache2/ports.conf
   done
 
@@ -512,6 +512,8 @@ if [[ -f /opt/novacpx-src/db/schema.sql ]]; then
   # Create admin user
   ADMIN_HASH=$(php -r "echo password_hash('${ADMIN_PASS}', PASSWORD_BCRYPT);")
   mysql "$DB_NAME" -e "INSERT INTO users (username,password,email,role,status) VALUES ('admin','$ADMIN_HASH','root@localhost','admin','active') ON DUPLICATE KEY UPDATE password='$ADMIN_HASH';" >> "$LOG" 2>&1
+  # Seed proxy defaults
+  mysql "$DB_NAME" -e "INSERT INTO settings (\`key\`, value) VALUES ('proxy_mode','disabled'),('proxy_apache_port','80') ON DUPLICATE KEY UPDATE value=VALUES(value);" >> "$LOG" 2>&1
   log "Database schema imported and admin user created"
 fi
 
@@ -631,6 +633,13 @@ www-data ALL=(root) NOPASSWD: /bin/systemctl restart fail2ban
 www-data ALL=(root) NOPASSWD: /bin/systemctl reload fail2ban
 www-data ALL=(root) NOPASSWD: /bin/systemctl start fail2ban
 www-data ALL=(root) NOPASSWD: /bin/systemctl stop fail2ban
+www-data ALL=(root) NOPASSWD: /bin/systemctl start nginx
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop nginx
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart nginx
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload nginx
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart apache2
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload apache2
+www-data ALL=(root) NOPASSWD: /usr/sbin/nginx *
 SUDOERS
 chmod 440 /etc/sudoers.d/novacpx-firewall
 log "Sudoers rules installed"
@@ -639,7 +648,8 @@ log "Sudoers rules installed"
 step "Setting Up Cron Jobs"
 cat > /etc/cron.d/novacpx <<CRON
 # NovaCPX system cron jobs
-*/5  * * * * www-data /usr/local/bin/php${PHP_DEFAULT} ${WEB_ROOT}/api/cron/monitor.php >> /var/log/novacpx/cron.log 2>&1
+*/5  * * * * www-data /usr/bin/php${PHP_DEFAULT} ${WEB_ROOT}/bin/collect-stats.php >> /var/log/novacpx/cron.log 2>&1
+0    0 * * * www-data /usr/bin/php${PHP_DEFAULT} ${WEB_ROOT}/bin/notify-checks.php >> /var/log/novacpx/cron.log 2>&1
 0    * * * * root     /usr/local/bin/novacpx-ssl-renew >> /var/log/novacpx/ssl.log 2>&1
 0    2 * * * root     /usr/local/bin/novacpx-backup >> /var/log/novacpx/backup.log 2>&1
 */1  * * * * root     /usr/local/bin/novacpx-dns-sync >> /var/log/novacpx/dns.log 2>&1
