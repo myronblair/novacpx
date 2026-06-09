@@ -2917,11 +2917,8 @@ window.proxySwitchLocal = () => {
     `, null, { cancelLabel: 'Close', showConfirm: false });
 
     const log = document.getElementById('proxy-local-log');
-    const es  = new EventSource('/api/proxy/switch-local');
     let done  = false;
 
-    // POST with port — can't use native EventSource for POST, so use fetch+ReadableStream
-    es.close();
     fetch('/api/proxy/switch-local', {
       method: 'POST',
       credentials: 'include',
@@ -2986,27 +2983,37 @@ window.proxyRunSetup = () => {
   const ov = Nova.modal('Setting Up Remote Nginx Proxy', `
     <p style="color:var(--text-muted);margin-bottom:0.75rem">Running setup on the remote proxy VM — this takes about 30 seconds.</p>
     <pre id="proxy-setup-log" style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-size:0.78rem;max-height:320px;overflow-y:auto;white-space:pre-wrap;font-family:monospace">Connecting…\n</pre>
-  `, null, { cancelLabel: 'Close', showConfirm: false });
+  `);
 
-  const log  = document.getElementById('proxy-setup-log');
-  const es   = new EventSource('/api/proxy/setup-remote');
-  let done   = false;
+  const log = document.getElementById('proxy-setup-log');
+  let done  = false;
 
-  es.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      if (d.line) { log.textContent += d.line; log.scrollTop = log.scrollHeight; }
-      if (d.done)  { done = true; es.close(); log.textContent += '\n— Done. Refreshing status…\n'; setTimeout(() => Nova.loadPage('nginx-proxy', window._novaPages), 1200); }
-    } catch {}
-  };
-  es.onerror = () => {
-    if (!done) {
-      es.close();
-      log.textContent += '\n— Connection lost. Check remote host settings and try again.\n';
-    }
-  };
-  // Close SSE when modal is dismissed
-  ov.querySelector('.modal-close')?.addEventListener('click', () => es.close());
+  fetch('/api/proxy/setup-remote', { method: 'POST', credentials: 'include' })
+    .then(async res => {
+      if (!res.ok) { log.textContent += '\n— Server error (' + res.status + '). Check remote host settings.\n'; return; }
+      const reader = res.body.getReader();
+      const dec    = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done: d } = await reader.read();
+        if (d) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = part.match(/^data: (.+)$/m);
+          if (!m) continue;
+          try {
+            const evt = JSON.parse(m[1]);
+            if (evt.line) { log.textContent += evt.line; log.scrollTop = log.scrollHeight; }
+            if (evt.done) { done = true; log.textContent += '\n— Done. Refreshing status…\n'; setTimeout(() => Nova.loadPage('nginx-proxy', window._novaPages), 1200); }
+          } catch {}
+        }
+      }
+    })
+    .catch(e => { log.textContent += '\n— Connection error: ' + e.message + '\n'; });
+
+  ov.querySelector('.modal-close')?.addEventListener('click', () => { done = true; });
 };
 
 window.proxyUninstall = () => {
