@@ -21,14 +21,55 @@ match ($action) {
         Response::success($rows);
     })(),
 
-    'issue' => (function() use ($body, $accountId) {
+    'issue' => (function() use ($body, $accountId, $db) {
         $domain = trim($body['domain'] ?? '');
         $email  = trim($body['email'] ?? '');
         if (!$domain) Response::error("domain required");
         if (!$accountId) Response::error("account_id required");
-        $result = SSLManager::issueLetsEncrypt($accountId, $domain, $email);
-        audit('ssl.issue', $domain);
-        Response::success($result, "SSL certificate issued for $domain");
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        while (ob_get_level()) ob_end_clean();
+        $sse = function(string $line) { echo 'data: ' . json_encode(['line' => $line]) . "\n\n"; flush(); };
+
+        $sse("▶ Requesting Let's Encrypt certificate for {$domain}…\n");
+        $sse("  (This may take 30–60 seconds)\n\n");
+
+        try {
+            $webRoot = $db->fetchOne("SELECT document_root FROM domains WHERE domain = ? AND account_id = ?", [$domain, $accountId]);
+            if (!$webRoot) { $sse("  ✗ Domain not found for this account\n"); echo 'data: '.json_encode(['done'=>true,'success'=>false])."\n\n"; flush(); exit; }
+
+            $docRoot = $webRoot['document_root'];
+            $mail    = $email ?: "ssl@{$domain}";
+            $cmd     = "certbot certonly --webroot -w " . escapeshellarg($docRoot)
+                     . " -d " . escapeshellarg($domain) . " -d " . escapeshellarg("www.{$domain}")
+                     . " --email " . escapeshellarg($mail)
+                     . " --agree-tos --non-interactive 2>&1";
+
+            $proc = proc_open($cmd, [1 => ['pipe','w'], 2 => ['pipe','w']], $pipes);
+            if ($proc) {
+                while (!feof($pipes[1])) { $l = fgets($pipes[1]); if ($l !== false && $l !== '') $sse($l); }
+                fclose($pipes[1]); fclose($pipes[2]);
+                proc_close($proc);
+            }
+
+            $certPath = "/etc/letsencrypt/live/{$domain}/fullchain.pem";
+            if (!file_exists($certPath)) {
+                $sse("\n  ✗ Certificate not created — check DNS is pointed to this server\n");
+                echo 'data: '.json_encode(['done'=>true,'success'=>false])."\n\n"; flush(); exit;
+            }
+
+            $sse("\n▶ Installing certificate on vhost…\n");
+            $result = SSLManager::issueLetsEncrypt($accountId, $domain, $email);
+            audit('ssl.issue', $domain);
+            $sse("  ✓ SSL certificate installed (expires {$result['expires']})\n");
+            echo 'data: '.json_encode(['done'=>true,'success'=>true,'cert_id'=>$result['cert_id']])."\n\n";
+        } catch (Exception $e) {
+            $sse("  ✗ Error: " . $e->getMessage() . "\n");
+            echo 'data: '.json_encode(['done'=>true,'success'=>false])."\n\n";
+        }
+        flush(); exit;
     })(),
 
     'generate-csr' => (function() use ($body, $accountId) {

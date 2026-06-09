@@ -636,22 +636,65 @@
     });
   };
 
-  window.phpExtInstall = async (ver) => {
+  const _phpExtStream = (ver, ext, action) => {
+    const termId = 'phpext-term-' + Date.now();
+    const verb   = action === 'install-extension' ? 'Installing' : 'Removing';
+    Nova.modal(`${verb} ${ext} (PHP ${ver})`, `
+      <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+           padding:1rem;border-radius:6px;height:240px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+        <span style="color:#7ec8e3">Starting…</span>\n
+      </div>`,
+      `<button class="btn btn-ghost" id="phpext-close" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+    const term   = document.getElementById(termId);
+    const append = t => { term.textContent += t; term.scrollTop = term.scrollHeight; };
+    fetch(`/api/php/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: ver, extension: ext }),
+      credentials: 'same-origin',
+    }).then(resp => {
+      if (!resp.ok) { append(`\nHTTP error ${resp.status}`); return; }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      const read = () => reader.read().then(({ done, value }) => {
+        if (done) { append('\n[done]'); return; }
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = part.match(/^data: (.+)$/m);
+          if (!m) continue;
+          try {
+            const obj = JSON.parse(m[1]);
+            if (obj.line) { append(obj.line); }
+            else if (obj.done) {
+              const btn = document.getElementById('phpext-close');
+              if (btn) {
+                btn.textContent = obj.success ? 'Done ✓' : 'Close';
+                btn.className   = obj.success ? 'btn btn-primary' : 'btn btn-ghost';
+                btn.onclick     = () => { document.querySelector('.modal-overlay')?.remove(); phpExtModal(ver); };
+              }
+            }
+          } catch(e) {}
+        }
+        read();
+      }).catch(err => append(`\n[error: ${err.message}]`));
+      read();
+    }).catch(err => append(`\nFetch error: ${err.message}`));
+  };
+
+  window.phpExtInstall = (ver) => {
     const sel    = document.getElementById('php-ext-add-sel')?.value;
     const custom = document.getElementById('php-ext-add-custom')?.value?.trim();
     const ext    = custom || sel;
     if (!ext) { Nova.toast('Choose or type an extension name', 'error'); return; }
-    Nova.toast(`Installing ${ext} for PHP ${ver}…`, 'info', 15000);
-    const r = await Nova.api('php', 'install-extension', { method: 'POST', body: { version: ver, extension: ext } });
-    if (r?.success) { Nova.toast(r.message, 'success'); phpExtModal(ver); }
-    else Nova.toast(r?.message || 'Install failed', 'error');
+    _phpExtStream(ver, ext, 'install-extension');
   };
 
   window.phpExtRemove = (ver, ext) => {
-    Nova.confirm(`Remove extension ${ext} from PHP ${ver}?`, async () => {
-      const r = await Nova.api('php', 'remove-extension', { method: 'POST', body: { version: ver, extension: ext } });
-      if (r?.success) { Nova.toast(r.message, 'success'); phpExtModal(ver); }
-      else Nova.toast(r?.message || 'Remove failed', 'error');
+    Nova.confirm(`Remove extension ${ext} from PHP ${ver}?`, () => {
+      _phpExtStream(ver, ext, 'remove-extension');
     }, true);
   };
 
@@ -1330,23 +1373,88 @@
   </div>
 </div>`;
   }
+  const _sslStream = (domain, accountId, label) => {
+    const termId = 'ssl-term-' + Date.now();
+    Nova.modal(`SSL: ${label || domain}`, `
+      <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+           padding:1rem;border-radius:6px;height:260px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+        <span style="color:#7ec8e3">Requesting certificate…</span>\n
+      </div>`,
+      `<button class="btn btn-ghost" id="ssl-term-close" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+    const term   = document.getElementById(termId);
+    const append = t => { term.textContent += t; term.scrollTop = term.scrollHeight; };
+    fetch('/api/ssl/issue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, account_id: accountId }),
+      credentials: 'same-origin',
+    }).then(resp => {
+      if (!resp.ok) { append(`\nHTTP error ${resp.status}`); return; }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      const read = () => reader.read().then(({ done, value }) => {
+        if (done) { append('\n[done]'); return; }
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = part.match(/^data: (.+)$/m);
+          if (!m) continue;
+          try {
+            const obj = JSON.parse(m[1]);
+            if (obj.line) { append(obj.line); }
+            else if (obj.done) {
+              const btn = document.getElementById('ssl-term-close');
+              if (btn) {
+                btn.textContent = obj.success ? 'Done ✓' : 'Close';
+                btn.className   = obj.success ? 'btn btn-primary' : 'btn btn-ghost';
+                btn.onclick     = () => { document.querySelector('.modal-overlay')?.remove(); adminPage('ssl-manager'); };
+              }
+            }
+          } catch(e) {}
+        }
+        read();
+      }).catch(err => append(`\n[error: ${err.message}]`));
+      read();
+    }).catch(err => append(`\nFetch error: ${err.message}`));
+  };
+
   window.adminIssueBulkSSL = async () => {
-    Nova.toast('Queuing SSL for all domains without certificates…','info',6000);
     const accts = await Nova.api('accounts','list',{params:{limit:1000}});
-    let count = 0;
-    for (const a of (accts?.data || [])) {
-      await Nova.api('ssl','issue',{method:'POST',body:{domain:a.domain}});
-      count++;
+    const domains = (accts?.data || []).map(a => ({domain: a.domain, id: a.id}));
+    if (!domains.length) { Nova.toast('No accounts found','error'); return; }
+    const termId = 'ssl-bulk-' + Date.now();
+    Nova.modal('Bulk SSL Issuance', `
+      <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+           padding:1rem;border-radius:6px;height:300px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+        <span style="color:#7ec8e3">Starting bulk SSL for ${domains.length} domains…</span>\n
+      </div>`,
+      `<button class="btn btn-ghost" id="ssl-bulk-close" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+    const term   = document.getElementById(termId);
+    const append = t => { term.textContent += t; term.scrollTop = term.scrollHeight; };
+    let done = 0;
+    for (const a of domains) {
+      append(`\n[${++done}/${domains.length}] ${a.domain}…\n`);
+      try {
+        const r = await Nova.api('ssl','issue',{method:'POST',body:{domain:a.domain,account_id:a.id}});
+        append(r?.success ? `  ✓ Issued\n` : `  ✗ ${r?.message || 'failed'}\n`);
+      } catch(e) { append(`  ✗ ${e.message}\n`); }
     }
-    Nova.toast(`SSL issued for ${count} domains`,'success');
-    adminPage('ssl-manager');
+    append(`\nDone. ${done} domains processed.\n`);
+    const btn = document.getElementById('ssl-bulk-close');
+    if (btn) { btn.textContent = 'Done'; btn.className = 'btn btn-primary'; btn.onclick = () => { document.querySelector('.modal-overlay')?.remove(); adminPage('ssl-manager'); }; }
   };
-  window.adminRenewCert = async (id) => {
-    Nova.toast('Renewing…','info');
-    const r = await Nova.api('ssl','renew',{method:'POST',body:{cert_id:id}});
-    if (r?.success) { Nova.toast('Renewed','success'); adminPage('ssl-manager'); }
-    else Nova.toast(r?.message,'error');
+
+  window.adminRenewCert = (id) => {
+    Nova.confirm('Renew this SSL certificate now?', async () => {
+      const r = await Nova.api('ssl','renew',{method:'POST',body:{cert_id:id}});
+      if (r?.success) { Nova.toast('Renewed','success'); adminPage('ssl-manager'); }
+      else Nova.toast(r?.message,'error');
+    });
   };
+
+  window.adminIssueSingleSSL = (domain, accountId) => _sslStream(domain, accountId, domain);
   window.adminDelCert = (id, domain) => {
     Nova.confirm(`Delete SSL cert for ${domain}?`, async () => {
       const r = await Nova.api('ssl','delete',{method:'POST',body:{cert_id:id}});
@@ -1425,6 +1533,7 @@
     const fwIgnoreips  = ignoreipRes?.data?.ignoreip || ignoreipRes?.data?.detected || [];
     const rules   = fw.rules || [];
     const active  = fw.active;
+    const curLogging = fw.logging || 'off';
 
     const totalBanned = jails.reduce((s,j) => s + (j.currently_banned||0), 0);
 
@@ -1654,7 +1763,7 @@
       <div class="form-group mb-0">
         <label class="form-label text-sm">Log Level</label>
         <select id="fw-log-level" class="form-control form-control-sm">
-          ${['off','on','low','medium','high','full'].map(l=>`<option value="${l}">${l.charAt(0).toUpperCase()+l.slice(1)}</option>`).join('')}
+          ${['off','on','low','medium','high','full'].map(l=>`<option value="${l}" ${l===curLogging?'selected':''}>${l.charAt(0).toUpperCase()+l.slice(1)}</option>`).join('')}
         </select>
       </div>
       <button class="btn btn-sm btn-primary" onclick="fwSetLogging()">Apply</button>
@@ -2079,7 +2188,12 @@ ${ips.length ? `
   window.fwSetLogging = async () => {
     const level = document.getElementById('fw-log-level')?.value;
     const r = await Nova.api('firewall','set-logging',{method:'POST',body:{level}});
-    Nova.toast(r?.message || 'Logging updated', r?.success ? 'success' : 'error');
+    if (r?.success) {
+      Nova.toast(`UFW logging set to ${level}`, 'success');
+      adminPage('firewall');
+    } else {
+      Nova.toast(r?.message || 'Logging update failed — UFW may need to be enabled first', 'error');
+    }
   };
 
   function fwIgnoreipChip(ip) {

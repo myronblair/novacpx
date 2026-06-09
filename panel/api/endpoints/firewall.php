@@ -100,10 +100,17 @@ function ufw_status(): array {
 
     // Default policy
     preg_match('/Default:\s+(\w+) \(incoming\),\s+(\w+) \(outgoing\)/', $raw, $pol);
+    // Logging level
+    preg_match('/Logging:\s+(\S+)/i', $raw, $logm);
+    $logging = strtolower($logm[1] ?? 'off');
+    if ($logging === 'on (low)') $logging = 'low';
+    // Normalise: strip parentheses if present e.g. "on (low)" → "low"
+    if (preg_match('/\((\w+)\)/', $logging, $lm)) $logging = $lm[1];
     return [
         'active'           => $active,
         'default_incoming' => $pol[1] ?? 'deny',
         'default_outgoing' => $pol[2] ?? 'allow',
+        'logging'          => $logging,
         'rules'            => $rules,
         'raw'              => $raw,
     ];

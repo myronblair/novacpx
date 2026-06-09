@@ -83,16 +83,40 @@ match ($action) {
         $ver = $body['version'] ?? '';
         $ext = preg_replace('/[^a-z0-9\-]/', '', strtolower($body['extension'] ?? ''));
         if (!preg_match('/^[78]\.\d$/', $ver) || !$ext) Response::error("Invalid input");
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        while (ob_get_level()) ob_end_clean();
+        $sse = function(string $line) { echo 'data: ' . json_encode(['line' => $line]) . "\n\n"; flush(); };
+        $run = function(string $cmd) use ($sse): int {
+            $proc = proc_open($cmd, [1 => ['pipe','w'], 2 => ['pipe','w']], $pipes);
+            if (!$proc) { $sse("  [failed to start]\n"); return 1; }
+            while (!feof($pipes[1])) { $l = fgets($pipes[1]); if ($l !== false && $l !== '') $sse($l); }
+            while (!feof($pipes[2])) { $l = fgets($pipes[2]); if ($l !== false && $l !== '') $sse("  " . $l); }
+            fclose($pipes[1]); fclose($pipes[2]);
+            return proc_close($proc);
+        };
+
         $pkg = "php{$ver}-{$ext}";
-        $out = shell_exec("apt-get install -y $pkg 2>&1");
-        if (str_contains($out ?: '', 'Unable to locate') || str_contains($out ?: '', 'E:')) {
-            // Try pecl fallback
-            $out2 = shell_exec("php{$ver} /usr/bin/pecl install {$ext} 2>&1");
-            $out .= "\n[pecl] " . $out2;
+        $sse("▶ Installing {$pkg}…\n");
+        $rc = $run("sudo apt-get install -y $pkg 2>&1");
+
+        if ($rc !== 0) {
+            // Try PECL fallback
+            $sse("\n  apt package not found — trying PECL…\n");
+            $rc2 = $run("sudo php{$ver} /usr/bin/pecl install {$ext} 2>&1");
+            if ($rc2 !== 0) {
+                $sse("  ✗ Could not install {$ext} via apt or PECL\n");
+                echo 'data: ' . json_encode(['done' => true, 'success' => false]) . "\n\n"; flush(); exit;
+            }
         }
-        shell_exec("systemctl reload php{$ver}-fpm 2>/dev/null || true");
+
+        $sse("\n▶ Reloading PHP {$ver} FPM…\n");
+        $run("sudo systemctl reload php{$ver}-fpm 2>&1 || sudo systemctl restart php{$ver}-fpm 2>&1");
+        $sse("  ✓ php{$ver}-{$ext} installed\n");
         audit('php.install-extension', "$ver/$ext");
-        Response::success(['output' => substr($out ?: '', -1000)], "Extension $ext installed for PHP $ver");
+        echo 'data: ' . json_encode(['done' => true, 'success' => true]) . "\n\n"; flush(); exit;
     })(),
 
     'remove-extension' => (function() use ($body) {
@@ -100,11 +124,29 @@ match ($action) {
         $ver = $body['version'] ?? '';
         $ext = preg_replace('/[^a-z0-9\-]/', '', strtolower($body['extension'] ?? ''));
         if (!preg_match('/^[78]\.\d$/', $ver) || !$ext) Response::error("Invalid input");
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        while (ob_get_level()) ob_end_clean();
+        $sse = function(string $line) { echo 'data: ' . json_encode(['line' => $line]) . "\n\n"; flush(); };
+        $run = function(string $cmd) use ($sse): int {
+            $proc = proc_open($cmd, [1 => ['pipe','w'], 2 => ['pipe','w']], $pipes);
+            if (!$proc) { $sse("  [failed to start]\n"); return 1; }
+            while (!feof($pipes[1])) { $l = fgets($pipes[1]); if ($l !== false && $l !== '') $sse($l); }
+            while (!feof($pipes[2])) { $l = fgets($pipes[2]); if ($l !== false && $l !== '') $sse("  " . $l); }
+            fclose($pipes[1]); fclose($pipes[2]);
+            return proc_close($proc);
+        };
+
         $pkg = "php{$ver}-{$ext}";
-        $out = shell_exec("apt-get remove -y $pkg 2>&1");
-        shell_exec("systemctl reload php{$ver}-fpm 2>/dev/null || true");
+        $sse("▶ Removing {$pkg}…\n");
+        $run("sudo apt-get remove -y $pkg 2>&1");
+        $sse("\n▶ Reloading PHP {$ver} FPM…\n");
+        $run("sudo systemctl reload php{$ver}-fpm 2>&1 || sudo systemctl restart php{$ver}-fpm 2>&1");
+        $sse("  ✓ php{$ver}-{$ext} removed\n");
         audit('php.remove-extension', "$ver/$ext");
-        Response::success(['output' => substr($out ?: '', -1000)], "Extension $ext removed from PHP $ver");
+        echo 'data: ' . json_encode(['done' => true, 'success' => true]) . "\n\n"; flush(); exit;
     })(),
 
     'fpm-action' => (function() use ($body) {
