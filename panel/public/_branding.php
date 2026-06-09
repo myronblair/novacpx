@@ -17,7 +17,7 @@ function novacpx_get_branding(): array {
         $token = $_COOKIE['ncpx_session'] ?? '';
         if (!$token || strlen($token) < 32) return $cache = [];
 
-        $stmt = $pdo->prepare("SELECT user_id FROM sessions WHERE token = ? AND expires_at > datetime('now') LIMIT 1");
+        $stmt = $pdo->prepare("SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime('now') LIMIT 1");
         $stmt->execute([substr($token, 0, 128)]);
         $uid = (int)($stmt->fetchColumn() ?: 0);
         if (!$uid) return $cache = [];
