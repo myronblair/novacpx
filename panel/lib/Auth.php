@@ -33,13 +33,24 @@ class Auth {
     private function loginBySession(string $sessionId): bool {
         $db  = DB::getInstance();
         $row = $db->fetchOne(
-            "SELECT s.*, u.id as uid, u.username, u.email, u.role, u.status, u.reseller_id, u.theme
+            "SELECT s.impersonator_id, s.expires_at, u.id as uid, u.username, u.email, u.role, u.status, u.reseller_id, u.theme
              FROM sessions s
              JOIN users u ON u.id = s.user_id
              WHERE s.id = ? AND s.expires_at > NOW() AND u.status = 'active'",
             [hash('sha256', $sessionId)]
         );
         if (!$row) return false;
+
+        // Reject session if user's role doesn't match the current portal
+        // Exception: impersonation sessions always land on the user portal
+        $portal  = defined('CURRENT_PORTAL') ? CURRENT_PORTAL : 'user';
+        $allowed = match($portal) {
+            'admin'    => ['admin'],
+            'reseller' => ['reseller'],
+            default    => ['user'],
+        };
+        if (!in_array($row['role'], $allowed, true)) return false;
+
         $this->user = $row;
         return true;
     }
@@ -69,6 +80,15 @@ class Auth {
             [$username, $username]
         );
         if (!$user || !password_verify($password, $user['password'])) return null;
+
+        // Portal role enforcement — each panel only accepts its own role
+        $portal  = defined('CURRENT_PORTAL') ? CURRENT_PORTAL : 'user';
+        $allowed = match($portal) {
+            'admin'    => ['admin'],
+            'reseller' => ['reseller'],
+            default    => ['user'],
+        };
+        if (!in_array($user['role'], $allowed, true)) return null;
 
         // TOTP check
         if (!empty($user['totp_enabled'])) {

@@ -34,14 +34,16 @@ match ($action) {
 
         $total = $db->fetchOne("SELECT COUNT(*) c FROM accounts a JOIN users u ON u.id = a.user_id $where", $params)['c'];
         $rows  = $db->fetchAll(
-            "SELECT a.*, u.email, u.role,
+            "SELECT a.*, u.email, u.role, u.reseller_id,
                     p.name as package_name,
+                    r.username as reseller_username,
                     (SELECT COUNT(*) FROM domains WHERE account_id = a.id) as domain_count,
                     (SELECT COUNT(*) FROM email_accounts WHERE account_id = a.id) as email_count,
                     (SELECT COUNT(*) FROM `databases` WHERE account_id = a.id) as db_count
              FROM accounts a
              JOIN users u ON u.id = a.user_id
              LEFT JOIN packages p ON p.id = a.package_id
+             LEFT JOIN users r ON r.id = u.reseller_id
              $where ORDER BY a.created_at DESC LIMIT ? OFFSET ?",
             [...$params, $perPage, $offset]
         );
@@ -91,7 +93,7 @@ match ($action) {
     'update' => (function() use ($db, $body, $user, $ownerClause) {
         $id   = (int)($body['id'] ?? 0);
         $acct = $db->fetchOne(
-            "SELECT a.*, u.email FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.id=? $ownerClause",
+            "SELECT a.*, u.email, u.reseller_id FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.id=? $ownerClause",
             [$id]
         );
         if (!$acct) Response::error("Account not found", 404);
@@ -104,10 +106,87 @@ match ($action) {
                 $params[] = $body[$col] === '' ? null : $body[$col];
             }
         }
+
         // Email lives on users table
         if (array_key_exists('email', $body) && filter_var($body['email'], FILTER_VALIDATE_EMAIL)) {
             $db->execute("UPDATE users SET email=? WHERE id=?", [$body['email'], $acct['user_id']]);
         }
+
+        // Ownership change — admin only; moves account + all related settings to new reseller
+        if ($user['role'] === 'admin' && array_key_exists('reseller_id', $body)) {
+            $newResellerId = $body['reseller_id'] === '' || $body['reseller_id'] === null ? null : (int)$body['reseller_id'];
+
+            // Validate target reseller exists (if not null)
+            if ($newResellerId !== null) {
+                $reseller = $db->fetchOne("SELECT id FROM users WHERE id=? AND role='reseller'", [$newResellerId]);
+                if (!$reseller) Response::error("Reseller not found", 404);
+            }
+
+            // Update the user's reseller_id — this is the ownership pivot
+            $db->execute("UPDATE users SET reseller_id=? WHERE id=?", [$newResellerId, $acct['user_id']]);
+
+            // Move package to the new owner's scope: if new owner has a default package, assign it;
+            // otherwise keep existing package if it's globally available (owner_id IS NULL), else clear it
+            if ($newResellerId !== null) {
+                $pkgOwned = $db->fetchOne(
+                    "SELECT id FROM packages WHERE id=? AND (owner_id=? OR owner_id IS NULL)",
+                    [$acct['package_id'], $newResellerId]
+                );
+                if (!$pkgOwned) {
+                    // Find a suitable package for the new owner
+                    $fallbackPkg = $db->fetchOne(
+                        "SELECT id FROM packages WHERE owner_id=? AND is_default=1 LIMIT 1",
+                        [$newResellerId]
+                    );
+                    if (!$fallbackPkg) $fallbackPkg = $db->fetchOne(
+                        "SELECT id FROM packages WHERE owner_id IS NULL AND is_default=1 LIMIT 1"
+                    );
+                    $sets[]   = '`package_id` = ?';
+                    $params[] = $fallbackPkg ? $fallbackPkg['id'] : null;
+                }
+            }
+
+            // Migrate DNS zone nameservers to new owner's default NS
+            $newNs1 = $newResellerId
+                ? ($db->fetchOne("SELECT value FROM settings WHERE `key`=?", ["reseller_{$newResellerId}_ns1"])['value'] ?? null)
+                : null;
+            $newNs1 = $newNs1 ?: $db->fetchOne("SELECT value FROM settings WHERE `key`='ns1_hostname'")['value'] ?? null;
+            $newNs2 = $newResellerId
+                ? ($db->fetchOne("SELECT value FROM settings WHERE `key`=?", ["reseller_{$newResellerId}_ns2"])['value'] ?? null)
+                : null;
+            $newNs2 = $newNs2 ?: $db->fetchOne("SELECT value FROM settings WHERE `key`='ns2_hostname'")['value'] ?? null;
+
+            if ($newNs1 || $newNs2) {
+                $zone = $db->fetchOne("SELECT id FROM dns_zones WHERE account_id=?", [$id]);
+                if ($zone) {
+                    $nsUpdates = [];
+                    if ($newNs1) { $nsUpdates[] = "primary_ns=?"; }
+                    if ($newNs2) { $nsUpdates[] = "secondary_ns=?"; }
+                    $nsParams = array_filter([$newNs1, $newNs2]);
+                    $nsParams[] = $zone['id'];
+                    $db->execute("UPDATE dns_zones SET " . implode(',', $nsUpdates) . " WHERE id=?", array_values($nsParams));
+                    try { require_once NOVACPX_LIB . '/DNSManager.php'; DNSManager::writeZoneFile($zone['id']); } catch (Throwable $e) {}
+                }
+            }
+
+            audit('account.ownership-change', "account:{$id} prev_reseller:{$acct['reseller_id']} new_reseller:{$newResellerId}");
+        }
+
+        // DNS nameservers — admin can update per-account
+        if ($user['role'] === 'admin' && (array_key_exists('ns1', $body) || array_key_exists('ns2', $body))) {
+            $zone = $db->fetchOne("SELECT id FROM dns_zones WHERE account_id=?", [$id]);
+            if ($zone) {
+                $nsSet = []; $nsP = [];
+                if (!empty($body['ns1'])) { $nsSet[] = "primary_ns=?";   $nsP[] = $body['ns1']; }
+                if (!empty($body['ns2'])) { $nsSet[] = "secondary_ns=?"; $nsP[] = $body['ns2']; }
+                if ($nsSet) {
+                    $nsP[] = $zone['id'];
+                    $db->execute("UPDATE dns_zones SET " . implode(',', $nsSet) . " WHERE id=?", $nsP);
+                    try { require_once NOVACPX_LIB . '/DNSManager.php'; DNSManager::writeZoneFile($zone['id']); } catch (Throwable $e) {}
+                }
+            }
+        }
+
         if ($sets) {
             $params[] = $id;
             $db->execute("UPDATE accounts SET " . implode(', ', $sets) . " WHERE id=?", $params);
@@ -124,7 +203,7 @@ match ($action) {
             }
         }
 
-        audit('account.update', "account:$id", array_intersect_key($body, array_flip([...$allowed, 'email'])));
+        audit('account.update', "account:$id");
         Response::success(null, 'Account updated');
     })(),
 

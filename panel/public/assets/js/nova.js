@@ -56,7 +56,7 @@ window.Nova = (() => {
       return { success: false, message: 'Network error — check your connection' };
     }
     _barDone();
-    if (res.status === 401) { location.href = '/?redirect=' + encodeURIComponent(location.pathname); return null; }
+    if (res.status === 401) { try { return await res.json(); } catch { return { success: false, message: 'Unauthorized' }; } }
     if (res.status === 429) {
       const reset = res.headers.get('X-RateLimit-Reset');
       const wait  = reset ? Math.max(0, Math.ceil(Number(reset) - Date.now() / 1000)) : 60;

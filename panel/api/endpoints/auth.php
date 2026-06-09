@@ -48,13 +48,117 @@ match ($action) {
         $auth = Auth::getInstance();
         if (!$auth->check()) Response::error('Unauthorized', 401);
         $u = $auth->user();
-        Response::success([
+        $data = [
             'id'       => $u['uid'] ?? $u['id'],
             'username' => $u['username'],
             'email'    => $u['email'],
             'role'     => $u['role'],
             'theme'    => $u['theme'],
+        ];
+        // Expose impersonation context so the UI can show a "return" banner
+        if (!empty($u['impersonator_id'])) {
+            $imp = DB::getInstance()->fetchOne(
+                "SELECT id, username, role FROM users WHERE id = ?", [$u['impersonator_id']]
+            );
+            if ($imp) $data['impersonated_by'] = ['id' => $imp['id'], 'username' => $imp['username'], 'role' => $imp['role']];
+        }
+        Response::success($data);
+    })(),
+
+    'impersonate' => (function() use ($body) {
+        $auth = Auth::getInstance();
+        if (!$auth->check()) Response::error('Unauthorized', 401);
+        $caller = $auth->user();
+
+        // Only admin or reseller can impersonate
+        if (!in_array($caller['role'], ['admin', 'reseller'], true)) {
+            Response::error('Forbidden', 403);
+        }
+
+        $targetUserId = (int)($body['user_id'] ?? 0);
+        if (!$targetUserId) Response::error('user_id required');
+
+        $db     = DB::getInstance();
+        $target = $db->fetchOne(
+            "SELECT * FROM users WHERE id = ? AND status = 'active' AND role = 'user'",
+            [$targetUserId]
+        );
+        if (!$target) Response::error('User not found', 404);
+
+        // Resellers can only impersonate their own end-users
+        if ($caller['role'] === 'reseller' && (int)$target['reseller_id'] !== (int)($caller['uid'] ?? $caller['id'])) {
+            Response::error('Access denied', 403);
+        }
+
+        // Save caller's current raw session token so we can restore it on unimpersonate
+        $callerRawToken = $_COOKIE['ncpx_session'] ?? '';
+
+        // Create a short-lived impersonation session (2h)
+        $token     = bin2hex(random_bytes(32));
+        $sessionId = hash('sha256', $token);
+        $callerId  = (int)($caller['uid'] ?? $caller['id']);
+        $db->execute(
+            "INSERT INTO sessions (id, user_id, ip_address, user_agent, expires_at, impersonator_id, data)
+             VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), ?, ?)",
+            [
+                $sessionId,
+                $target['id'],
+                $_SERVER['REMOTE_ADDR'] ?? '',
+                $_SERVER['HTTP_USER_AGENT'] ?? '',
+                $callerId,
+                json_encode(['return_token' => $callerRawToken]),
+            ]
+        );
+
+        // Set cookie to the impersonation token — domain-wide so it works across all ports
+        setcookie('ncpx_session', $token, [
+            'expires'  => time() + 7200,
+            'path'     => '/',
+            'secure'   => true,
+            'httponly' => true,
+            'samesite' => 'Strict',
         ]);
+
+        audit('auth.impersonate', "caller:{$callerId} target:{$target['id']}");
+        Response::success([
+            'portal_url' => Auth::portalUrl('user'),
+            'username'   => $target['username'],
+        ], "Impersonating {$target['username']}");
+    })(),
+
+    'unimpersonate' => (function() {
+        $sessionId = hash('sha256', $_COOKIE['ncpx_session'] ?? '');
+        $db        = DB::getInstance();
+        $sess      = $db->fetchOne(
+            "SELECT s.*, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?",
+            [$sessionId]
+        );
+        if (!$sess || !$sess['impersonator_id']) Response::error('Not impersonating', 400);
+
+        $callerId    = (int)$sess['impersonator_id'];
+        $caller      = $db->fetchOne("SELECT role FROM users WHERE id = ?", [$callerId]);
+        $data        = json_decode($sess['data'] ?? '{}', true) ?? [];
+        $returnToken = $data['return_token'] ?? '';
+
+        // Delete the impersonation session
+        $db->execute("DELETE FROM sessions WHERE id = ?", [$sessionId]);
+
+        // Restore the caller's original session cookie so they land back in their panel logged in
+        if ($returnToken) {
+            setcookie('ncpx_session', $returnToken, [
+                'expires'  => time() + 28800,
+                'path'     => '/',
+                'secure'   => true,
+                'httponly' => true,
+                'samesite' => 'Strict',
+            ]);
+        } else {
+            setcookie('ncpx_session', '', time() - 3600, '/', '', true, true);
+        }
+
+        audit('auth.unimpersonate', "returning:{$callerId}");
+        $role = $caller['role'] ?? 'admin';
+        Response::success(['portal_url' => Auth::portalUrl($role)], 'Returned to your account');
     })(),
 
     'change-password' => (function() use ($body) {

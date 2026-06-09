@@ -7,6 +7,13 @@ $body    = json_decode(file_get_contents('php://input'), true) ?? [];
 $dm      = new DockerManager();
 $isAdmin = $role === 'admin';
 
+// Resolve the hosting account_id for the current non-admin user
+$_userAccountId = 0;
+if (!$isAdmin) {
+    $acctRow = DB::getInstance()->fetchOne("SELECT id FROM accounts WHERE user_id = ? LIMIT 1", [$currentUser['uid']]);
+    $_userAccountId = $acctRow ? (int)$acctRow['id'] : 0;
+}
+
 match ($action) {
 
     // ── Engine ──────────────────────────────────────────────────────────────
@@ -30,21 +37,21 @@ match ($action) {
     })(),
 
     // ── Containers ──────────────────────────────────────────────────────────
-    'containers' => (function() use ($dm, $currentUser, $isAdmin, $role) {
+    'containers' => (function() use ($dm, $currentUser, $isAdmin, $role, $_userAccountId) {
         $accountId = $isAdmin ? (isset($_GET['account_id']) ? (int)$_GET['account_id'] : null)
-                              : ($currentUser['account_id'] ?? null);
+                              : ($_userAccountId ?? null);
         if ($role === 'reseller') $accountId = null; // resellers see their customers' containers below
         $list = $dm->listContainers($accountId);
         Response::success(['containers' => $list]);
     })(),
 
-    'container-action' => (function() use ($dm, $body, $currentUser, $isAdmin, $role) {
+    'container-action' => (function() use ($dm, $body, $currentUser, $isAdmin, $role, $_userAccountId) {
         $cid    = $body['container_id'] ?? '';
         $act    = $body['action'] ?? '';
         if (!$cid || !$act) Response::error('container_id and action required');
         // Access check for non-admins
         if (!$isAdmin) {
-            $acctId = $currentUser['account_id'] ?? 0;
+            $acctId = $_userAccountId ?? 0;
             $row = DB::getInstance()->fetchOne("SELECT id FROM docker_containers WHERE container_id=? AND account_id=?", [$cid, $acctId]);
             if (!$row) Response::error('Container not found', 404);
         }
@@ -53,12 +60,12 @@ match ($action) {
         Response::success(['output' => $out]);
     })(),
 
-    'container-remove' => (function() use ($dm, $body, $currentUser, $isAdmin) {
+    'container-remove' => (function() use ($dm, $body, $currentUser, $isAdmin, $_userAccountId) {
         $cid   = $body['container_id'] ?? '';
         $force = (bool)($body['force'] ?? false);
         if (!$cid) Response::error('container_id required');
         if (!$isAdmin) {
-            $acctId = $currentUser['account_id'] ?? 0;
+            $acctId = $_userAccountId ?? 0;
             $row = DB::getInstance()->fetchOne("SELECT id FROM docker_containers WHERE container_id=? AND account_id=?", [$cid, $acctId]);
             if (!$row) Response::error('Container not found', 404);
         }
@@ -67,12 +74,12 @@ match ($action) {
         Response::success(null, 'Container removed');
     })(),
 
-    'container-logs' => (function() use ($dm, $currentUser, $isAdmin) {
+    'container-logs' => (function() use ($dm, $currentUser, $isAdmin, $_userAccountId) {
         $cid   = $_GET['container_id'] ?? '';
         $lines = min((int)($_GET['lines'] ?? 100), 500);
         if (!$cid) Response::error('container_id required');
         if (!$isAdmin) {
-            $acctId = $currentUser['account_id'] ?? 0;
+            $acctId = $_userAccountId ?? 0;
             $row = DB::getInstance()->fetchOne("SELECT id FROM docker_containers WHERE container_id=? AND account_id=?", [$cid, $acctId]);
             if (!$row) Response::error('Container not found', 404);
         }
@@ -88,12 +95,12 @@ match ($action) {
         Response::success(['inspect' => $data]);
     })(),
 
-    'container-run' => (function() use ($dm, $body, $currentUser, $isAdmin, $role) {
+    'container-run' => (function() use ($dm, $body, $currentUser, $isAdmin, $role, $_userAccountId) {
         if ($isAdmin) {
             $accountId = (int)($body['account_id'] ?? 0);
             if (!$accountId) Response::error('account_id required');
         } else {
-            $accountId = $currentUser['account_id'] ?? 0;
+            $accountId = $_userAccountId ?? 0;
         }
         if (!$accountId) Response::error('No account context');
         $image = $body['image'] ?? '';
@@ -140,14 +147,14 @@ match ($action) {
     })(),
 
     // ── Compose Stacks ───────────────────────────────────────────────────────
-    'stacks' => (function() use ($dm, $currentUser, $isAdmin) {
+    'stacks' => (function() use ($dm, $currentUser, $isAdmin, $_userAccountId) {
         $accountId = $isAdmin ? (isset($_GET['account_id']) ? (int)$_GET['account_id'] : null)
-                              : ($currentUser['account_id'] ?? null);
+                              : ($_userAccountId ?? null);
         Response::success(['stacks' => $dm->listStacks($accountId)]);
     })(),
 
-    'stack-create' => (function() use ($dm, $body, $currentUser, $isAdmin) {
-        $accountId = $isAdmin ? ($body['account_id'] ?? null) : ($currentUser['account_id'] ?? null);
+    'stack-create' => (function() use ($dm, $body, $currentUser, $isAdmin, $_userAccountId) {
+        $accountId = $isAdmin ? ($body['account_id'] ?? null) : ($_userAccountId ?? null);
         $name      = $body['name']         ?? '';
         $yaml      = $body['compose_yaml'] ?? '';
         if (!$name || !$yaml) Response::error('name and compose_yaml required');
@@ -195,8 +202,8 @@ match ($action) {
         Response::success(['catalog' => DockerManager::getCatalog()]);
     })(),
 
-    'launch' => (function() use ($dm, $body, $currentUser, $isAdmin) {
-        $accountId = $isAdmin ? (int)($body['account_id'] ?? 0) : ($currentUser['account_id'] ?? 0);
+    'launch' => (function() use ($dm, $body, $currentUser, $isAdmin, $_userAccountId) {
+        $accountId = $isAdmin ? (int)($body['account_id'] ?? 0) : ($_userAccountId ?? 0);
         if (!$accountId) Response::error('account_id required');
         $appKey = $body['app_key'] ?? '';
         $params = $body['params'] ?? [];

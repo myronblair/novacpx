@@ -34,7 +34,9 @@ function renderLogin() {
 }
 
 async function doLogin() {
+  Nova.loading('Signing in…');
   const res = await Nova.api('auth', 'login', { method: 'POST', body: { username: document.getElementById('li-user')?.value, password: document.getElementById('li-pass')?.value }});
+  Nova.loadingDone();
   if (res?.success) {
     if (res.data?.portal_url && !res.data.portal_url.includes(':8881')) location.href = res.data.portal_url;
     else location.reload();
@@ -101,12 +103,13 @@ async function loadRAccounts(search = '') {
   if (!res?.success || !acctRows.length) { el.innerHTML = '<div class="empty">No accounts found.</div>'; return; }
   el.innerHTML = `<table class="table"><thead><tr><th>Username</th><th>Domain</th><th>Package</th><th>Disk</th><th>Status</th><th>Actions</th></tr></thead><tbody>
     ${acctRows.map(a => `<tr>
-      <td><strong>${a.username}</strong></td>
-      <td>${a.domain}</td>
-      <td>${a.package_name || '—'}</td>
+      <td><strong>${Nova.escHtml(a.username)}</strong></td>
+      <td>${Nova.escHtml(a.domain)}</td>
+      <td>${a.package_name ? Nova.escHtml(a.package_name) : '—'}</td>
       <td>${a.disk_usage_mb || 0} MB</td>
       <td>${Nova.badge(a.status, a.status==='active'?'green':a.status==='suspended'?'yellow':'red')}</td>
-      <td style="display:flex;gap:.25rem">
+      <td style="display:flex;gap:.25rem;flex-wrap:wrap">
+        <button class="btn btn-xs btn-primary" onclick="rLoginAs(${a.user_id},'${Nova.escHtml(a.username)}')">Login As</button>
         ${a.status === 'active'
           ? `<button class="btn btn-xs btn-warning" onclick="rSuspend(${a.id},'${a.username}')">Suspend</button>`
           : `<button class="btn btn-xs btn-success" onclick="rUnsuspend(${a.id},'${a.username}')">Unsuspend</button>`}
@@ -118,6 +121,19 @@ async function loadRAccounts(search = '') {
 }
 window.loadRAccounts = loadRAccounts;
 window.rSearchAccounts = (v) => loadRAccounts(v);
+
+window.rLoginAs = async (userId, username) => {
+  Nova.confirm(`Login as ${username}? You'll be taken to their panel. Use the banner to return.`, async () => {
+    Nova.loading(`Switching to ${username}…`);
+    const res = await Nova.api('auth', 'impersonate', { method: 'POST', body: { user_id: userId } });
+    Nova.loadingDone();
+    if (res?.success) {
+      window.location.href = res.data?.portal_url || 'https://' + location.hostname + ':8880/';
+    } else {
+      Nova.toast(res?.message || 'Impersonation failed', 'error');
+    }
+  });
+};
 
 window.rSuspend = async (id, user) => {
   Nova.confirm(`Suspend account ${user}? Their website will show a suspension page.`, async () => {
@@ -171,6 +187,7 @@ async function rCreateAccount(el) {
 window.submitCreateAccount = async () => {
   const btn = document.querySelector('#ca-result');
   if (btn) btn.textContent = '';
+  Nova.loading('Creating hosting account…');
   const res = await Nova.api('accounts', 'create', { method:'POST', body:{
     username:   document.getElementById('ca-user')?.value,
     password:   document.getElementById('ca-pass')?.value,
@@ -178,6 +195,7 @@ window.submitCreateAccount = async () => {
     domain:     document.getElementById('ca-domain')?.value,
     package_id: document.getElementById('ca-pkg')?.value,
   }});
+  Nova.loadingDone();
   if (res?.success) {
     Nova.toast('Account created successfully!','success');
     if (btn) btn.innerHTML = `<div class="alert alert-success">Account created! <a href="#" onclick="resellerNav('accounts')">View accounts →</a></div>`;
@@ -294,14 +312,29 @@ window.rDeleteRecord = async (id, zoneId, domain) => {
 };
 
 /* ── Nav ────────────────────────────────────────────────────────────────── */
-const rNavItems = [
-  { id:'dashboard',      label:'Dashboard',   icon:'ni-dashboard' },
-  { id:'accounts',       label:'Accounts',    icon:'ni-accounts' },
-  { id:'createAccount',  label:'New Account', icon:'ni-add' },
-  { id:'packages',       label:'Packages',    icon:'ni-packages' },
-  { id:'dns',            label:'DNS Zones',   icon:'ni-dns' },
-  { id:'docker',         label:'Docker',      icon:'ni-docker' },
-  { id:'whitelabel',     label:'White Label', icon:'ni-settings' },
+const rNavGroups = [
+  { label: 'Overview', items: [
+    { id: 'dashboard', label: 'Dashboard',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>' },
+  ]},
+  { label: 'Accounts', items: [
+    { id: 'accounts', label: 'All Accounts',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>' },
+    { id: 'createAccount', label: 'New Account',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="17" y1="11" x2="23" y2="11"/></svg>' },
+    { id: 'packages', label: 'Packages',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
+  ]},
+  { label: 'DNS', items: [
+    { id: 'dns', label: 'DNS Zones',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>' },
+  ]},
+  { label: 'Tools', items: [
+    { id: 'docker', label: 'Docker',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="4" height="4"/><rect x="7" y="9" width="4" height="4"/><rect x="12" y="9" width="4" height="4"/><rect x="7" y="4" width="4" height="4"/><path d="M22 11c0 5-3.9 9-10 9-8 0-10-7-10-7"/></svg>' },
+    { id: 'whitelabel', label: 'White Label',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>' },
+  ]},
 ];
 const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker, whitelabel: rWhiteLabel };
 
@@ -310,19 +343,39 @@ let _rActivePage = 'dashboard';
 function renderRNav() {
   const nav = document.getElementById('sidebar-nav');
   if (!nav) return;
-  nav.innerHTML = rNavItems.map(n => `
-    <a class="nav-item ${n.id === _rActivePage ? 'active' : ''}" href="#" onclick="resellerNav('${n.id}');return false">
-      <svg width="18" height="18"><use href="/assets/img/nova-icons.svg#${n.icon}"/></svg>
-      <span>${n.label}</span>
-    </a>`).join('');
+  nav.innerHTML = rNavGroups.map(g => `
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">${g.label}</div>
+      ${g.items.map(n => `
+        <a href="#" class="sidebar-link${n.id === _rActivePage ? ' active' : ''}" data-page="${n.id}">
+          ${n.svg}
+          ${n.label}
+        </a>`).join('')}
+    </div>`).join('');
+
+  nav.querySelectorAll('[data-page]').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      if (window.innerWidth <= 768) {
+        document.getElementById('sidebar')?.classList.remove('open');
+        document.getElementById('sidebar-overlay')?.classList.remove('open');
+        document.body.style.overflow = '';
+      }
+      resellerNav(link.dataset.page);
+    });
+  });
 }
 
 window.resellerNav = (page) => {
   _rActivePage = page;
   renderRNav();
+  const allItems = rNavGroups.flatMap(g => g.items);
+  const item = allItems.find(n => n.id === page);
+  const titleEl = document.getElementById('page-title');
+  if (titleEl && item) titleEl.textContent = item.label;
   const content = document.getElementById('page-content');
   if (!content) return;
-  content.innerHTML = '<div class="loading">Loading…</div>';
+  content.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">Loading…</div>';
   if (rPages[page]) rPages[page](content);
 };
 
@@ -435,7 +488,9 @@ ${Object.entries(catalog).map(([key,app])=>`
 }
 
 window.rDockerAct = async (cid, action) => {
+  Nova.loading(`${action.charAt(0).toUpperCase()+action.slice(1)}ing container…`);
   const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
+  Nova.loadingDone();
   Nova.toast(r?.success ? `Container ${action}ed` : (r?.message||'Failed'), r?.success?'success':'error');
   if (r?.success) rDockerLoadTab('containers');
 };
@@ -485,8 +540,9 @@ window.rDockerLaunchModal = async (appKey, appName) => {
     const params = {};
     (app.params||[]).forEach(p => { params[p.key] = document.getElementById('rl-'+p.key)?.value||''; });
     ov.remove();
-    Nova.toast('Deploying…', 'info', 10000);
+    Nova.loading(`Deploying ${appName}… this may take a minute`);
     const r = await Nova.api('docker', 'launch', { method:'POST', body:{ account_id: acctId, app_key: key, params }});
+    Nova.loadingDone();
     Nova.toast(r?.success?`${appName} deployed!`:(r?.message||'Deploy failed'), r?.success?'success':'error');
     if (r?.success) rDockerLoadTab('containers');
   };
@@ -636,7 +692,9 @@ window.rWlSave = async () => {
     hide_powered_by: document.getElementById('wl-hide-powered')?.checked ? 1 : 0,
     custom_css:      document.getElementById('wl-css')?.value                  || '',
   };
+  Nova.loading('Saving branding…');
   const r = await Nova.api('branding', 'save', { method: 'POST', body });
+  Nova.loadingDone();
   Nova.toast(r?.success ? 'Branding saved — reload to see changes' : (r?.message || 'Save failed'),
              r?.success ? 'success' : 'error');
 };

@@ -4,7 +4,7 @@ class BackupManager {
     private string $backupRoot = '/home/novacpx-backups';
 
     public function __construct() {
-        $this->db = Database::getInstance()->getPDO();
+        $this->db = DB::getInstance()->pdo();
         if (!is_dir($this->backupRoot)) mkdir($this->backupRoot, 0750, true);
     }
 
@@ -25,14 +25,14 @@ class BackupManager {
 
         try {
             if ($type === 'full' || $type === 'files') {
-                $docRoot = escapeshellarg($account['document_root']);
+                $docRoot = escapeshellarg($account['home_dir'] . '/public_html');
                 exec("tar -czf " . escapeshellarg($filepath) . " -C / " . ltrim($docRoot, '/') . " 2>&1", $out, $rc);
                 if ($rc !== 0) throw new RuntimeException("tar failed: " . implode("\n", $out));
             }
 
             if ($type === 'full' || $type === 'database') {
                 // Dump all databases belonging to this account
-                $dbs = $this->db->prepare("SELECT db_name FROM account_databases WHERE account_id=?");
+                $dbs = $this->db->prepare("SELECT db_name FROM `databases` WHERE account_id=?");
                 $dbs->execute([$accountId]);
                 foreach ($dbs->fetchAll(PDO::FETCH_COLUMN) as $dbName) {
                     $dumpFile = escapeshellarg("{$dir}/{$account['username']}_{$dbName}_{$ts}.sql.gz");
@@ -80,7 +80,7 @@ class BackupManager {
 
     // ── Restore ───────────────────────────────────────────────────────────────
     public function restore(int $backupId): bool {
-        $stmt = $this->db->prepare("SELECT b.*, a.document_root, a.username FROM backups b JOIN accounts a ON b.account_id=a.id WHERE b.id=?");
+        $stmt = $this->db->prepare("SELECT b.*, a.home_dir, a.username FROM backups b JOIN accounts a ON b.account_id=a.id WHERE b.id=?");
         $stmt->execute([$backupId]);
         $backup = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$backup) throw new RuntimeException("Backup not found");

@@ -743,16 +743,17 @@
 
   function renderAccountTable(accts) {
     if (!accts.length) return '<div class="empty" style="padding:2rem">No accounts found.</div>';
-    return `<table class="table"><thead><tr><th>Username</th><th>Domain</th><th>Package</th><th>PHP</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+    return `<table class="table"><thead><tr><th>Username</th><th>Domain</th><th>Owner</th><th>Package</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
       ${accts.map(a => `<tr>
-        <td><strong>${a.username}</strong></td>
-        <td>${a.domain}</td>
-        <td>${a.package_name || '<span class="text-muted">—</span>'}</td>
-        <td class="text-muted text-sm">${a.php_version || '—'}</td>
+        <td><strong>${Nova.escHtml(a.username)}</strong></td>
+        <td>${Nova.escHtml(a.domain)}</td>
+        <td class="text-sm">${a.reseller_username ? `<span class="badge badge-blue">${Nova.escHtml(a.reseller_username)}</span>` : '<span class="text-muted">Admin</span>'}</td>
+        <td>${a.package_name ? Nova.escHtml(a.package_name) : '<span class="text-muted">—</span>'}</td>
         <td>${Nova.badge(a.status, a.status==='active'?'green':a.status==='suspended'?'yellow':'red')}</td>
         <td class="text-muted text-sm">${Nova.relTime(a.created_at)}</td>
         <td style="display:flex;gap:.25rem;flex-wrap:wrap">
-          <button class="btn btn-xs btn-primary" onclick="adminEditAccount(${a.id})">Edit</button>
+          <button class="btn btn-xs btn-primary" onclick="adminLoginAs(${a.user_id},'${Nova.escHtml(a.username)}')">Login As</button>
+          <button class="btn btn-xs" onclick="adminEditAccount(${a.id})">Edit</button>
           ${a.status==='active'
             ? `<button class="btn btn-xs btn-warning" onclick="adminSuspend(${a.id},'${a.username}')">Suspend</button>`
             : `<button class="btn btn-xs btn-success" onclick="adminUnsuspend(${a.id})">Unsuspend</button>`}
@@ -762,6 +763,19 @@
       </tr>`).join('')}
     </tbody></table>`;
   }
+
+  window.adminLoginAs = async (userId, username) => {
+    Nova.confirm(`Login as ${username}? You'll be taken to their panel. Use the banner to return.`, async () => {
+      Nova.loading(`Switching to ${username}…`);
+      const res = await Nova.api('auth', 'impersonate', { method: 'POST', body: { user_id: userId } });
+      Nova.loadingDone();
+      if (res?.success) {
+        window.location.href = res.data?.portal_url || 'https://' + location.hostname + ':8880/';
+      } else {
+        Nova.toast(res?.message || 'Impersonation failed', 'error');
+      }
+    });
+  };
 
   window.adminSearchAccounts = async (q) => {
     const res = await Nova.api('accounts', 'list', { params: q ? { search: q } : {}});
@@ -793,28 +807,51 @@
   };
 
   window.adminEditAccount = async (id) => {
-    const [acctRes, pkgRes] = await Promise.all([
+    Nova.loading('Loading account…');
+    const [acctRes, pkgRes, usersRes, dnsRes] = await Promise.all([
       Nova.api('accounts', 'get', { params: { id } }),
       Nova.api('packages', 'list'),
+      Nova.api('users', 'list', { params: { role: 'reseller' } }),
+      Nova.api('dns', 'zones'),
     ]);
+    Nova.loadingDone();
     if (!acctRes?.success) { Nova.toast(acctRes?.message || 'Failed to load account', 'error'); return; }
     const a = acctRes.data;
     const pkgs = pkgRes?.data || [];
+    const resellers = (usersRes?.data || []).filter(u => u.role === 'reseller');
+    const zone = (dnsRes?.data || []).find(z => z.account_id == id || z.domain === a.domain);
+
     const pkgOpts = `<option value="">— No package —</option>` +
       pkgs.map(p => `<option value="${p.id}" ${a.package_id == p.id ? 'selected' : ''}>${Nova.escHtml(p.name)}</option>`).join('');
     const phpOpts = ['8.3','8.2','8.1','7.4'].map(v =>
       `<option value="${v}" ${a.php_version === v ? 'selected' : ''}>PHP ${v}</option>`).join('');
+    const ownerOpts = `<option value="">— Admin (no reseller) —</option>` +
+      resellers.map(r => `<option value="${r.id}" ${a.reseller_id == r.id ? 'selected' : ''}>${Nova.escHtml(r.username)}</option>`).join('');
 
     Nova.modal(`Edit Account — ${Nova.escHtml(a.username)}`,
       `<div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+        <div class="form-group"><label class="form-label">Username</label>
+          <input class="form-control" value="${Nova.escHtml(a.username)}" disabled></div>
+        <div class="form-group"><label class="form-label">Domain</label>
+          <input class="form-control" value="${Nova.escHtml(a.domain)}" disabled></div>
         <div class="form-group"><label class="form-label">Email</label>
           <input id="ae-email" class="form-control" type="email" value="${Nova.escHtml(a.email || '')}"></div>
-        <div class="form-group"><label class="form-label">Domain</label>
-          <input class="form-control" value="${Nova.escHtml(a.domain)}" disabled title="Domain cannot be changed"></div>
+        <div class="form-group"><label class="form-label">Owner (Reseller)</label>
+          <select id="ae-owner" class="form-control">${ownerOpts}</select></div>
         <div class="form-group"><label class="form-label">Package</label>
           <select id="ae-pkg" class="form-control">${pkgOpts}</select></div>
         <div class="form-group"><label class="form-label">PHP Version</label>
           <select id="ae-php" class="form-control">${phpOpts}</select></div>
+      </div>
+      <div style="margin-top:.75rem;padding:.75rem;background:var(--bg2);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:.78rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">DNS Zone — ${Nova.escHtml(a.domain)}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.78rem">Primary NS</label>
+            <input id="ae-ns1" class="form-control form-control-sm" value="${Nova.escHtml(zone?.primary_ns || '')}"></div>
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.78rem">Secondary NS</label>
+            <input id="ae-ns2" class="form-control form-control-sm" value="${Nova.escHtml(zone?.secondary_ns || '')}"></div>
+        </div>
+        ${zone ? `<div style="margin-top:.4rem;font-size:.72rem;color:var(--text-muted)">Zone ID: ${zone.id} &nbsp;·&nbsp; Serial: ${zone.serial}</div>` : '<div style="font-size:.72rem;color:var(--red);margin-top:.4rem">No DNS zone found for this account</div>'}
       </div>`,
       `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
        <button class="btn btn-primary" onclick="adminEditAccountSave(${id})">Save Changes</button>`
@@ -825,10 +862,13 @@
     const body = {
       id,
       email:       document.getElementById('ae-email')?.value?.trim(),
+      reseller_id: document.getElementById('ae-owner')?.value || null,
       package_id:  document.getElementById('ae-pkg')?.value || null,
       php_version: document.getElementById('ae-php')?.value,
+      ns1:         document.getElementById('ae-ns1')?.value?.trim(),
+      ns2:         document.getElementById('ae-ns2')?.value?.trim(),
     };
-    Nova.loading('Saving…');
+    Nova.loading('Saving account…');
     const res = await Nova.api('accounts', 'update', { method: 'POST', body });
     Nova.loadingDone();
     if (res?.success) {

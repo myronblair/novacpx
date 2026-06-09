@@ -16,8 +16,48 @@ async function initUser() {
   document.getElementById('user-name').textContent = _user.username || 'User';
   document.getElementById('auth-check').style.display = 'none';
   document.getElementById('main-layout').style.display = '';
+
+  // Show impersonation banner if an admin/reseller is acting as this user
+  if (_user.impersonated_by) {
+    const imp = _user.impersonated_by;
+    const returnUrl = imp.role === 'reseller'
+      ? location.href.replace(/:\d+/, ':8881')
+      : location.href.replace(/:\d+/, ':8882');
+    const banner = document.createElement('div');
+    banner.id = 'impersonation-banner';
+    banner.style.cssText = [
+      'position:fixed;top:0;left:0;right:0;z-index:99998',
+      'background:linear-gradient(135deg,#f59e0b,#d97706)',
+      'color:#fff;font-size:.82rem;font-weight:600',
+      'display:flex;align-items:center;justify-content:center;gap:1rem',
+      'padding:.45rem 1rem',
+      'box-shadow:0 2px 8px rgba(0,0,0,.25)',
+    ].join(';');
+    banner.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Acting as <strong>${Nova.escHtml(_user.username)}</strong> — logged in as ${Nova.escHtml(imp.username)} (${imp.role})
+      <button onclick="exitImpersonation()" style="background:rgba(0,0,0,.25);border:none;color:#fff;padding:.2rem .75rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.8rem">
+        ← Return to ${imp.role === 'reseller' ? 'Reseller' : 'Admin'} Panel
+      </button>`;
+    document.body.prepend(banner);
+    // Push content down so the fixed banner doesn't overlap
+    const layout = document.getElementById('main-layout');
+    if (layout) layout.style.marginTop = '36px';
+  }
+
   return true;
 }
+
+window.exitImpersonation = async () => {
+  Nova.loading('Returning…');
+  const res = await Nova.api('auth', 'unimpersonate', { method: 'POST' });
+  Nova.loadingDone();
+  if (res?.success && res.data?.portal_url) {
+    window.location.href = res.data.portal_url;
+  } else {
+    Nova.toast(res?.message || 'Could not return', 'error');
+  }
+};
 
 function renderLogin() {
   return `<div class="login-wrap">
@@ -44,7 +84,9 @@ async function doLogin() {
   const u = document.getElementById('li-user')?.value;
   const p = document.getElementById('li-pass')?.value;
   const err = document.getElementById('li-err');
+  Nova.loading('Signing in…');
   const res = await Nova.api('auth', 'login', { method: 'POST', body: { username: u, password: p } });
+  Nova.loadingDone();
   if (res?.success) {
     if (res.data?.portal_url && !res.data.portal_url.includes(':8880')) {
       location.href = res.data.portal_url;
@@ -76,27 +118,32 @@ const userPages = {
 };
 
 /* ── Dashboard ───────────────────────────────────────────────────────────── */
+const _quickIcons = {
+  domains:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  email:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+  databases: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+  ftp:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  ssl:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  php:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  cron:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  files:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>',
+};
+
 async function dashboard(el) {
   el.innerHTML = `<div class="page-header"><h2 class="page-title">Dashboard</h2></div>
     <div id="dash-rings" class="stats-grid">
-      ${['Disk','Bandwidth','Emails','Databases'].map(l => `<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-value">—</div></div>`).join('')}
+      ${['Disk','Databases','Email Accts','FTP Accts'].map(l => `<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-value">—</div></div>`).join('')}
     </div>
     <div class="card" style="margin-top:1.5rem">
       <div class="card-header"><span class="card-title">Quick Access</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:1rem;padding:1.25rem">
         ${[
-          ['ni-domains','Domains','domains'],
-          ['ni-email','Email','email'],
-          ['ni-databases','Databases','databases'],
-          ['ni-ftp','FTP','ftp'],
-          ['ni-ssl','SSL','ssl'],
-          ['ni-php','PHP','php'],
-          ['ni-cron','Cron Jobs','cron'],
-          ['ni-files','File Manager','files'],
-        ].map(([icon,label,page]) => `
-          <button class="btn" style="display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius)" onclick="userNav('${page}')">
-            <svg width="24" height="24" style="color:var(--primary)"><use href="/assets/img/nova-icons.svg#${icon}"/></svg>
-            <span style="font-size:.8rem">${label}</span>
+          ['domains','Domains'],['email','Email'],['databases','Databases'],['ftp','FTP'],
+          ['ssl','SSL'],['php','PHP'],['cron','Cron Jobs'],['files','File Manager'],
+        ].map(([page, label]) => `
+          <button class="btn" style="display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--primary)" onclick="userNav('${page}')">
+            ${_quickIcons[page] || ''}
+            <span style="font-size:.8rem;color:var(--text)">${label}</span>
           </button>`).join('')}
       </div>
     </div>`;
@@ -194,8 +241,9 @@ window.removeDomain = (id, domain) => {
 };
 
 window.issueSSL = async (domainId, domain) => {
-  Nova.toast(`Issuing Let's Encrypt SSL for ${domain}…`,'info',6000);
+  Nova.loading(`Issuing SSL for ${domain}…`);
   const res = await Nova.api('ssl', 'issue', { method: 'POST', body: { domain } });
+  Nova.loadingDone();
   if (res?.success) { Nova.toast('SSL issued successfully','success'); loadDomainsList(); }
   else Nova.toast(res?.message || 'SSL failed — check domain DNS','error',6000);
 };
@@ -468,9 +516,11 @@ window.issueNewSSL = () => {
 };
 window.submitIssueSSL = async () => {
   const domain = document.getElementById('ssl-dom')?.value;
-  Nova.toast(`Issuing SSL for ${domain}…`, 'info', 8000);
+  const email = document.getElementById('ssl-email')?.value;
   document.querySelector('.modal-overlay')?.remove();
-  const res = await Nova.api('ssl', 'issue', { method:'POST', body:{ domain, email: document.getElementById('ssl-email')?.value }});
+  Nova.loading(`Issuing SSL for ${domain}…`);
+  const res = await Nova.api('ssl', 'issue', { method:'POST', body:{ domain, email }});
+  Nova.loadingDone();
   if (res?.success) { Nova.toast('SSL issued!','success'); loadSSLList(); }
   else Nova.toast(res?.message || 'SSL issue failed','error',8000);
 };
@@ -507,7 +557,7 @@ async function phpPage(el) {
   ]);
 
   if (versRes?.success) {
-    document.getElementById('php-versions').innerHTML = versRes.data.map(v => `
+    document.getElementById('php-versions').innerHTML = (versRes.data?.versions || []).map(v => `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 0;border-bottom:1px solid var(--border)">
         <div>
           <strong>PHP ${v.version}</strong>
@@ -532,17 +582,21 @@ async function phpPage(el) {
 }
 
 window.switchPHP = async (ver) => {
+  Nova.loading(`Switching to PHP ${ver}…`);
   const res = await Nova.api('php', 'switch-version', { method:'POST', body:{ version: ver }});
+  Nova.loadingDone();
   if (res?.success) { Nova.toast(`Switched to PHP ${ver}`,'success'); phpPage(document.getElementById('page-content')); }
   else Nova.toast(res?.message,'error');
 };
 window.savePHPSettings = async () => {
+  Nova.loading('Saving PHP settings…');
   const res = await Nova.api('php', 'update-config', { method:'POST', body:{
     memory_limit: document.getElementById('php-mem')?.value,
     max_execution_time: document.getElementById('php-exec')?.value,
     upload_max_filesize: document.getElementById('php-upload')?.value,
     post_max_size: document.getElementById('php-post')?.value,
   }});
+  Nova.loadingDone();
   if (res?.success) Nova.toast('PHP settings saved','success');
   else Nova.toast(res?.message,'error');
 };
@@ -748,36 +802,119 @@ async function statsPage(el) {
 
 /* ── Backups ────────────────────────────────────────────────────────────── */
 async function backups(el) {
-  el.innerHTML = `<div class="page-header">
-    <h2 class="page-title">Backups</h2>
-    <button class="btn btn-primary btn-sm" onclick="createBackup()">+ Create Backup</button>
-  </div>
-  <div class="card"><div id="backup-list"><div class="loading">Loading…</div></div></div>`;
-
-  const res = await Nova.api('system', 'audit-log', { params:{ limit:5 }});
-  document.getElementById('backup-list').innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--muted)">
-    <svg width="48" height="48" style="opacity:.4"><use href="/assets/img/nova-icons.svg#ni-backups"/></svg>
-    <div style="margin-top:.75rem">Backup management is being configured by your hosting provider.</div>
-    <div style="font-size:.85rem;margin-top:.25rem">Contact support to request a manual backup.</div>
-  </div>`;
+  el.innerHTML = `
+<div class="page-header">
+  <h2 class="page-title">Backups</h2>
+  <button class="btn btn-primary btn-sm" onclick="createBackup()">+ Create Backup</button>
+</div>
+<div class="card">
+  <div id="backup-list"><div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading…</div></div>
+</div>`;
+  await loadBackupList();
 }
-window.createBackup = () => Nova.toast('Backup request submitted — you will be notified when ready.','info');
+
+async function loadBackupList() {
+  const el = document.getElementById('backup-list');
+  if (!el) return;
+  const res = await Nova.api('backup', 'list');
+  const list = res?.data?.backups || [];
+  if (!list.length) {
+    el.innerHTML = `<div style="padding:2.5rem;text-align:center;color:var(--text-muted)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="opacity:.35;margin-bottom:.75rem">
+        <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+      <div style="margin-bottom:.25rem">No backups yet.</div>
+      <div style="font-size:.82rem">Click <strong>+ Create Backup</strong> to create your first backup.</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `<div style="overflow-x:auto"><table class="table">
+    <thead><tr><th>Date</th><th>Type</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>
+      ${list.map(b => `<tr>
+        <td>${Nova.relTime(b.created_at)}</td>
+        <td>${Nova.badge(b.type, 'blue')}</td>
+        <td>${b.size ? Nova.bytes(parseInt(b.size)) : '—'}</td>
+        <td>${Nova.badge(b.status, b.status==='complete'?'green':b.status==='running'?'yellow':'red')}</td>
+        <td>
+          ${b.status === 'complete'
+            ? `<a href="/api/?endpoint=backup&action=download&id=${b.id}" class="btn btn-xs btn-ghost">Download</a>`
+            : ''}
+        </td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+
+window.createBackup = () => {
+  Nova.modal('Create Backup',
+    `<div class="form-group">
+      <label class="form-label">Backup Type</label>
+      <select id="bk-type" class="form-control">
+        <option value="full">Full backup — files + all databases</option>
+        <option value="files">Files only</option>
+        <option value="database">Databases only</option>
+      </select>
+    </div>
+    <p style="font-size:.82rem;color:var(--text-muted);margin-top:.5rem">Backups run on the server and may take a few minutes for large accounts.</p>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="submitCreateBackup()">Create Backup</button>`
+  );
+};
+
+window.submitCreateBackup = async () => {
+  const type = document.getElementById('bk-type')?.value || 'full';
+  document.querySelector('.modal-overlay')?.remove();
+  Nova.loading('Creating backup… this may take a few minutes');
+  const res = await Nova.api('backup', 'create', { method: 'POST', body: { type } });
+  Nova.loadingDone();
+  if (res?.success) {
+    Nova.toast('Backup created successfully', 'success');
+    loadBackupList();
+  } else {
+    Nova.toast(res?.message || 'Backup failed', 'error');
+  }
+};
 
 /* ── Navigation ─────────────────────────────────────────────────────────── */
-const navItems = [
-  { id: 'dashboard',       label: 'Dashboard',       icon: 'ni-dashboard' },
-  { id: 'domains',         label: 'Domains',         icon: 'ni-domains' },
-  { id: 'email',           label: 'Email',           icon: 'ni-email' },
-  { id: 'databases',       label: 'Databases',       icon: 'ni-databases' },
-  { id: 'ftp',             label: 'FTP',             icon: 'ni-ftp' },
-  { id: 'ssl',             label: 'SSL / TLS',       icon: 'ni-ssl' },
-  { id: 'php',             label: 'PHP',             icon: 'ni-php' },
-  { id: 'cron',            label: 'Cron Jobs',       icon: 'ni-cron' },
-  { id: 'files',           label: 'File Manager',    icon: 'ni-files' },
-  { id: 'stats',           label: 'Statistics',      icon: 'ni-stats' },
-  { id: 'backups',         label: 'Backups',         icon: 'ni-backups' },
-  { id: 'docker',          label: 'Docker',          icon: 'ni-docker' },
-  { id: 'change-password', label: 'Change Password', icon: 'ni-lock' },
+const navGroups = [
+  { label: 'Overview', items: [
+    { id: 'dashboard', label: 'Dashboard',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>' },
+  ]},
+  { label: 'Hosting', items: [
+    { id: 'domains', label: 'Domains',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>' },
+    { id: 'email', label: 'Email',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' },
+    { id: 'databases', label: 'Databases',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>' },
+    { id: 'ftp', label: 'FTP',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' },
+    { id: 'ssl', label: 'SSL / TLS',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
+  ]},
+  { label: 'Management', items: [
+    { id: 'php', label: 'PHP',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>' },
+    { id: 'cron', label: 'Cron Jobs',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' },
+    { id: 'files', label: 'File Manager',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>' },
+    { id: 'stats', label: 'Statistics',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>' },
+  ]},
+  { label: 'Tools', items: [
+    { id: 'backups', label: 'Backups',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>' },
+    { id: 'docker', label: 'Docker',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="4" height="4"/><rect x="7" y="9" width="4" height="4"/><rect x="12" y="9" width="4" height="4"/><rect x="7" y="4" width="4" height="4"/><path d="M22 11c0 5-3.9 9-10 9-8 0-10-7-10-7"/></svg>' },
+  ]},
+  { label: 'Account', items: [
+    { id: 'change-password', label: 'Change Password',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
+  ]},
 ];
 
 let _activePage = 'dashboard';
@@ -785,19 +922,39 @@ let _activePage = 'dashboard';
 function renderNav() {
   const nav = document.getElementById('sidebar-nav');
   if (!nav) return;
-  nav.innerHTML = navItems.map(n => `
-    <a class="nav-item ${n.id === _activePage ? 'active' : ''}" href="#" onclick="userNav('${n.id}');return false">
-      <svg width="18" height="18"><use href="/assets/img/nova-icons.svg#${n.icon}"/></svg>
-      <span>${n.label}</span>
-    </a>`).join('');
+  nav.innerHTML = navGroups.map(g => `
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">${g.label}</div>
+      ${g.items.map(n => `
+        <a href="#" class="sidebar-link${n.id === _activePage ? ' active' : ''}" data-page="${n.id}">
+          ${n.svg}
+          ${n.label}
+        </a>`).join('')}
+    </div>`).join('');
+
+  nav.querySelectorAll('[data-page]').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      if (window.innerWidth <= 768) {
+        document.getElementById('sidebar')?.classList.remove('open');
+        document.getElementById('sidebar-overlay')?.classList.remove('open');
+        document.body.style.overflow = '';
+      }
+      userNav(link.dataset.page);
+    });
+  });
 }
 
 window.userNav = (page) => {
   _activePage = page;
   renderNav();
+  const allItems = navGroups.flatMap(g => g.items);
+  const item = allItems.find(n => n.id === page);
+  const titleEl = document.getElementById('page-title');
+  if (titleEl && item) titleEl.textContent = item.label;
   const content = document.getElementById('page-content');
   if (!content) return;
-  content.innerHTML = '<div class="loading">Loading…</div>';
+  content.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">Loading…</div>';
   if (userPages[page]) userPages[page](content);
 };
 
@@ -944,7 +1101,9 @@ ${Object.entries(catalog).map(([key,app])=>`
 }
 
 window.uDockerAct = async (cid, action) => {
+  Nova.loading(`${action.charAt(0).toUpperCase()+action.slice(1)}ing container…`);
   const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
+  Nova.loadingDone();
   Nova.toast(r?.success ? `Container ${action}ed` : (r?.message||'Failed'), r?.success?'success':'error');
   if (r?.success) {
     const c = (window._uDockerContainers||[]).find(x=>x.container_id===cid);
@@ -965,6 +1124,16 @@ window.uDockerLaunchApp = async (preselect) => {
   const entries = Object.entries(catalog);
   const appOpts = entries.map(([k,a])=>`<option value="${k}" ${k===preselect?'selected':''}>${Nova.escHtml(a.name)}</option>`).join('');
 
+  window.uDockerUpdateParams = (key) => {
+    const app = catalog[key];
+    if (!app) return;
+    const tc = document.getElementById('ul-params');
+    if (!tc) return;
+    tc.innerHTML = (app.params||[]).map(p=>`
+      <div class="form-group"><label>${Nova.escHtml(p.label)}${p.required?' *':''}</label>
+      <input id="ul-${Nova.escHtml(p.key)}" type="${p.type||'text'}" class="form-control" ${p.placeholder?`placeholder="${Nova.escHtml(p.placeholder)}"`:''}></div>`).join('');
+  };
+
   const ov = Nova.modal('Launch App',
     `<div class="form-group"><label>App</label>
      <select id="ul-app" class="form-control" onchange="uDockerUpdateParams(this.value)">${appOpts}</select></div>
@@ -976,16 +1145,6 @@ window.uDockerLaunchApp = async (preselect) => {
   const initialKey = preselect || entries[0]?.[0];
   if (initialKey) uDockerUpdateParams(initialKey);
 
-  window.uDockerUpdateParams = (key) => {
-    const app = catalog[key];
-    if (!app) return;
-    const tc = document.getElementById('ul-params');
-    if (!tc) return;
-    tc.innerHTML = (app.params||[]).map(p=>`
-      <div class="form-group"><label>${Nova.escHtml(p.label)}${p.required?' *':''}</label>
-      <input id="ul-${Nova.escHtml(p.key)}" type="${p.type||'text'}" class="form-control" ${p.placeholder?`placeholder="${Nova.escHtml(p.placeholder)}"`:''}></div>`).join('');
-  };
-
   window.uDockerLaunchSubmit = async () => {
     const key = document.getElementById('ul-app')?.value;
     const app = catalog[key];
@@ -995,8 +1154,9 @@ window.uDockerLaunchApp = async (preselect) => {
     const missing = (app.params||[]).filter(p=>p.required && !params[p.key]);
     if (missing.length) { Nova.toast(`Required: ${missing.map(p=>p.label).join(', ')}`, 'error'); return; }
     ov.remove();
-    Nova.toast(`Launching ${app.name}… this may take a minute`, 'info', 15000);
+    Nova.loading(`Launching ${app.name}… this may take a minute`);
     const r = await Nova.api('docker', 'launch', { method: 'POST', body: { app_key: key, params } });
+    Nova.loadingDone();
     Nova.toast(r?.success ? `${app.name} launched!` : (r?.message||'Launch failed'), r?.success?'success':'error');
     if (r?.success) {
       const cr = await Nova.api('docker', 'containers');

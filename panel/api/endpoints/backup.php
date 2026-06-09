@@ -7,7 +7,7 @@ $body    = json_decode(file_get_contents('php://input'), true) ?? [];
 $isAdmin = $currentUser['role'] === 'admin';
 
 $accountId = (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
-if ($currentUser['role'] === 'user') $accountId = $currentUser['account_id'] ?? 0;
+if ($currentUser["role"] === "user") { $row = DB::getInstance()->fetchOne("SELECT id FROM accounts WHERE user_id=?", [$currentUser["uid"]]); $accountId = $row ? (int)$row["id"] : 0; }
 
 match ($action) {
     'list' => (function() use ($bm, $accountId, $isAdmin) {

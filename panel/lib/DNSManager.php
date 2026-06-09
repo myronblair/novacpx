@@ -10,8 +10,8 @@ class DNSManager {
     public static function createZone(int $accountId, string $domain): void {
         $db     = DB::getInstance();
         $serial = (int)date('Ymd') * 100 + 1;
-        $ns1    = self::getSetting('default_nameserver1', 'ns1.localhost');
-        $ns2    = self::getSetting('default_nameserver2', 'ns2.localhost');
+        $ns1    = self::getSetting('ns1_hostname', 'ns1.localhost');
+        $ns2    = self::getSetting('ns2_hostname', 'ns2.localhost');
         $email  = 'hostmaster.' . $domain;
         $ip     = self::serverIp();
 
