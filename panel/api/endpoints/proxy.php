@@ -40,13 +40,19 @@ try {
         $action === 'control' && $method === 'POST' => (function() use ($body) {
             $act = $body['action'] ?? '';
             if (!in_array($act, ['start','stop','restart','reload'])) Response::error('Invalid action', 400);
-            $result = match($act) {
+            $result  = match($act) {
                 'start'   => ProxyManager::start(),
                 'stop'    => ProxyManager::stop(),
                 'restart' => ProxyManager::restart(),
                 'reload'  => ProxyManager::reload(),
             };
-            Response::json(['success' => true, 'data' => ['result' => $result, 'running' => ProxyManager::isRunning()]]);
+            $running = ProxyManager::isRunning();
+            $success = match($act) {
+                'start', 'restart' => $running,
+                'stop'             => !$running,
+                'reload'           => !str_starts_with($result, 'Config test failed'),
+            };
+            Response::json(['success' => $success, 'data' => ['result' => $result, 'running' => $running]]);
         })(),
 
         // GET hosts list

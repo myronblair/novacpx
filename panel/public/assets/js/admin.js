@@ -2733,9 +2733,13 @@ window.proxyInstall = async () => {
 };
 
 window.proxyControl = async (action) => {
+  Nova.loading(action.charAt(0).toUpperCase() + action.slice(1) + 'ing nginx…');
   const r = await Nova.api('proxy', 'control', { method: 'POST', body: { action } });
-  Nova.toast(r?.data?.result || r?.message || action + ' done', 'success');
-  setTimeout(() => Nova.loadPage('nginx-proxy', window._novaPages), 800);
+  Nova.loadingDone();
+  const ok  = r?.success;
+  const msg = r?.data?.result || r?.message || (ok ? action + ' done' : action + ' failed');
+  Nova.toast(msg, ok ? 'success' : 'error');
+  Nova.loadPage('nginx-proxy', window._novaPages);
 };
 
 window.proxySync = async () => {

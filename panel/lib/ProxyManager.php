@@ -145,9 +145,9 @@ class ProxyManager {
             self::remoteExec('systemctl reload nginx');
             return 'reloaded';
         }
-        $test = shell_exec('nginx -t 2>&1');
+        $test = shell_exec('sudo nginx -t 2>&1');
         if (strpos($test ?? '', 'successful') === false) return 'Config test failed: ' . $test;
-        shell_exec('systemctl reload nginx 2>/dev/null');
+        shell_exec('sudo systemctl reload nginx 2>/dev/null');
         return 'reloaded';
     }
 
@@ -565,7 +565,7 @@ BASH;
             sleep(1);
             return self::isRunning() ? 'running' : 'stopped';
         }
-        shell_exec("systemctl {$action} nginx 2>/dev/null");
+        shell_exec("sudo systemctl {$action} nginx 2>/dev/null");
         sleep(1);
         return self::isRunning() ? 'running' : 'stopped';
     }
