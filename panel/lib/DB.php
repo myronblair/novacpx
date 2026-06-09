@@ -93,6 +93,9 @@ class DB {
             $sql
         );
 
+        // LAST_INSERT_ID() → last_insert_rowid()
+        $sql = preg_replace('/\bLAST_INSERT_ID\(\)/i', 'last_insert_rowid()', $sql);
+
         // IFNULL → COALESCE (SQLite supports both but be safe)
         $sql = preg_replace('/\bIFNULL\s*\(/i', 'COALESCE(', $sql);
 

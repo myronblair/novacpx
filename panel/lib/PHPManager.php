@@ -2,16 +2,25 @@
 /**
  * PHPManager — per-account PHP-FPM pools + version switching
  */
+if (!class_exists('VhostManager')) require_once __DIR__ . '/VhostManager.php';
+
 class PHPManager {
 
     private static string $poolDir = '/etc/php/{ver}/fpm/pool.d';
+
+    private static function writeFile(string $path, string $content): void {
+        $tmp = tempnam('/tmp', 'ncpx_pool_');
+        file_put_contents($tmp, $content);
+        shell_exec("sudo tee " . escapeshellarg($path) . " > /dev/null < " . escapeshellarg($tmp));
+        @unlink($tmp);
+    }
 
     public static function createPool(string $username, string $phpVer): void {
         $poolFile = str_replace('{ver}', $phpVer, self::$poolDir) . "/{$username}.conf";
         $homeDir  = "/home/{$username}";
         $sock     = "/run/php/php{$phpVer}-fpm-{$username}.sock";
 
-        file_put_contents($poolFile, "[{$username}]
+        self::writeFile($poolFile, "[{$username}]
 user  = {$username}
 group = www-data
 listen = {$sock}
@@ -39,7 +48,7 @@ php_value[max_execution_time]  = 30
     public static function removePool(string $username): void {
         foreach (['7.4','8.1','8.2','8.3'] as $ver) {
             $file = str_replace('{ver}', $ver, self::$poolDir) . "/{$username}.conf";
-            if (file_exists($file)) { unlink($file); self::reloadFPM($ver); }
+            if (file_exists($file)) { shell_exec("sudo rm -f " . escapeshellarg($file)); self::reloadFPM($ver); }
         }
     }
 
@@ -70,9 +79,9 @@ php_value[max_execution_time]  = 30
         if (!$acct) throw new RuntimeException("Account not found");
 
         $poolFile = str_replace('{ver}', $acct['php_version'], self::$poolDir) . "/{$acct['username']}.conf";
-        if (!file_exists($poolFile)) throw new RuntimeException("PHP-FPM pool not found");
+        if (!file_exists($poolFile)) self::createPool($acct['username'], $acct['php_version']);
 
-        $content = file_get_contents($poolFile);
+        $content = file_get_contents($poolFile) ?: '';
         $map = [
             'memory_limit'        => 'php_value[memory_limit]',
             'max_execution_time'  => 'php_value[max_execution_time]',
@@ -84,7 +93,7 @@ php_value[max_execution_time]  = 30
                 $content = preg_replace("/{$iniKey}\s*=.*/", "{$iniKey} = {$cfg[$key]}", $content);
             }
         }
-        file_put_contents($poolFile, $content);
+        self::writeFile($poolFile, $content);
         self::reloadFPM($acct['php_version']);
 
         $db->execute(

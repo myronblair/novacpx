@@ -183,9 +183,10 @@ CREATE INDEX IF NOT EXISTS idx_dns_records_type ON dns_records (type);
 CREATE TABLE IF NOT EXISTS email_accounts (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id INTEGER NOT NULL,
-  email      TEXT NOT NULL UNIQUE,
-  password   TEXT NOT NULL,
-  quota_mb   INTEGER DEFAULT 500,
+  email        TEXT NOT NULL UNIQUE,
+  password     TEXT NOT NULL,
+  enc_password TEXT,
+  quota_mb     INTEGER DEFAULT 500,
   used_mb    INTEGER DEFAULT 0,
   status     TEXT DEFAULT 'active' CHECK(status IN ('active','suspended')),
   created_at TEXT DEFAULT (datetime('now')),

@@ -4,10 +4,26 @@
  */
 class DatabaseManager {
 
+    private static function mysqlPdo(): PDO {
+        $cfg  = @parse_ini_file('/etc/novacpx/config.ini', true) ?: [];
+        $host = $cfg['mysql']['host']     ?? '127.0.0.1';
+        $port = $cfg['mysql']['port']     ?? '3306';
+        $user = $cfg['mysql']['root_user'] ?? 'root';
+        $pass = $cfg['mysql']['root_pass'] ?? '';
+        $opts = [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION];
+        if ($pass === '' && $host === '127.0.0.1') {
+            // Try socket auth (MariaDB/MySQL root with no password)
+            try {
+                return new PDO("mysql:unix_socket=/var/run/mysqld/mysqld.sock", $user, '', $opts);
+            } catch (PDOException $e) { /* fall through to TCP */ }
+        }
+        return new PDO("mysql:host={$host};port={$port}", $user, $pass, $opts);
+    }
+
     public static function createMySQL(int $accountId, string $dbName, string $dbUser, string $dbPass): int {
         self::validateName($dbName); self::validateName($dbUser);
         $db  = DB::getInstance();
-        $pdo = $db->pdo();
+        $pdo = self::mysqlPdo();
 
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         $pdo->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY " . $pdo->quote($dbPass));
@@ -35,7 +51,7 @@ class DatabaseManager {
 
     public static function drop(string $dbName, string $dbUser, string $type = 'mysql'): void {
         if ($type === 'mysql') {
-            $pdo = DB::getInstance()->pdo();
+            $pdo = self::mysqlPdo();
             $pdo->exec("DROP DATABASE IF EXISTS `{$dbName}`");
             $pdo->exec("DROP USER IF EXISTS '{$dbUser}'@'localhost'");
             $pdo->exec("FLUSH PRIVILEGES");
@@ -51,7 +67,7 @@ class DatabaseManager {
         $dbe = $db->fetchOne("SELECT * FROM `databases` WHERE id = ?", [$id]);
         if (!$dbe) throw new RuntimeException("Database not found");
         if ($dbe['db_type'] === 'mysql') {
-            $pdo = $db->pdo();
+            $pdo = self::mysqlPdo();
             $pdo->exec("ALTER USER '{$dbe['db_user']}'@'localhost' IDENTIFIED BY " . $pdo->quote($newPass));
         } else {
             shell_exec("sudo -u postgres psql -c \"ALTER USER {$dbe['db_user']} WITH PASSWORD " . escapeshellarg($newPass) . "\" 2>/dev/null");
@@ -61,11 +77,12 @@ class DatabaseManager {
 
     public static function getSize(string $dbName, string $type = 'mysql'): float {
         if ($type === 'mysql') {
-            $row = DB::getInstance()->fetchOne(
+            $stmt = self::mysqlPdo()->prepare(
                 "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size
-                 FROM information_schema.tables WHERE table_schema = ?",
-                [$dbName]
+                 FROM information_schema.tables WHERE table_schema = ?"
             );
+            $stmt->execute([$dbName]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
             return (float)($row['size'] ?? 0);
         }
         $out = shell_exec("sudo -u postgres psql -t -c \"SELECT pg_size_pretty(pg_database_size('{$dbName}'))\" 2>/dev/null");

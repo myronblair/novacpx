@@ -240,13 +240,54 @@ window.removeDomain = (id, domain) => {
   }, true);
 };
 
-window.issueSSL = async (domainId, domain) => {
-  Nova.loading(`Issuing SSL for ${domain}…`);
-  const res = await Nova.api('ssl', 'issue', { method: 'POST', body: { domain } });
-  Nova.loadingDone();
-  if (res?.success) { Nova.toast('SSL issued successfully','success'); loadDomainsList(); }
-  else Nova.toast(res?.message || 'SSL failed — check domain DNS','error',6000);
-};
+function _sslStream(params, onSuccess) {
+  const termId = 'ssl-term-' + Date.now();
+  Nova.modal(`SSL: ${params.domain}`, `
+    <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+         padding:1rem;border-radius:6px;height:260px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+      <span style="color:#7ec8e3">Requesting certificate…</span>\n
+    </div>`,
+    `<button class="btn btn-ghost" id="ssl-term-close" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+  const term   = document.getElementById(termId);
+  const append = t => { term.textContent += t; term.scrollTop = term.scrollHeight; };
+  fetch('/api/ssl/issue', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+    credentials: 'same-origin',
+  }).then(resp => {
+    if (!resp.ok) { append(`\nHTTP error ${resp.status}`); return; }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const read = () => reader.read().then(({ done, value }) => {
+      if (done) { append('\n[done]'); return; }
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const m = part.match(/^data: (.+)$/m);
+        if (!m) continue;
+        try {
+          const obj = JSON.parse(m[1]);
+          if (obj.line) { append(obj.line); }
+          else if (obj.done) {
+            const btn = document.getElementById('ssl-term-close');
+            if (btn) {
+              btn.textContent = obj.success ? 'Done ✓' : 'Close';
+              btn.className   = obj.success ? 'btn btn-primary' : 'btn btn-ghost';
+              if (obj.success) btn.onclick = () => { document.querySelector('.modal-overlay')?.remove(); if (onSuccess) onSuccess(); };
+            }
+          }
+        } catch(e) {}
+      }
+      read();
+    }).catch(err => append(`\n[error: ${err.message}]`));
+    read();
+  }).catch(err => append(`\n[error: ${err.message}]`));
+}
+
+window.issueSSL = (domainId, domain) => _sslStream({ domain }, () => loadDomainsList());
 window.issueSSL = window.issueSSL;
 
 /* ── Email ──────────────────────────────────────────────────────────────── */
@@ -514,15 +555,11 @@ window.issueNewSSL = () => {
       `<button class="btn btn-primary" onclick="submitIssueSSL()">Issue SSL</button>`);
   });
 };
-window.submitIssueSSL = async () => {
+window.submitIssueSSL = () => {
   const domain = document.getElementById('ssl-dom')?.value;
-  const email = document.getElementById('ssl-email')?.value;
+  const email  = document.getElementById('ssl-email')?.value;
   document.querySelector('.modal-overlay')?.remove();
-  Nova.loading(`Issuing SSL for ${domain}…`);
-  const res = await Nova.api('ssl', 'issue', { method:'POST', body:{ domain, email }});
-  Nova.loadingDone();
-  if (res?.success) { Nova.toast('SSL issued!','success'); loadSSLList(); }
-  else Nova.toast(res?.message || 'SSL issue failed','error',8000);
+  _sslStream({ domain, email }, () => loadSSLList());
 };
 window.renewCert = async (id) => {
   Nova.toast('Renewing…','info');

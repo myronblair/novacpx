@@ -41,13 +41,7 @@ match ($action) {
         @mkdir($docRoot, 0755, true);
         file_put_contents("$docRoot/index.html", "<html><body><h1>$domain is ready!</h1><p>Upload your website files.</p></body></html>");
 
-        VhostManager::create([
-            'domain'   => $domain,
-            'username' => $acct['username'],
-            'home_dir' => $acct['home_dir'],
-            'doc_root' => $docRoot,
-            'php_ver'  => $acct['php_version'] ?? PHP_DEFAULT,
-        ]);
+        VhostManager::create($acct['username'], $domain, $docRoot, $acct['php_version'] ?? PHP_DEFAULT);
         DNSManager::createZone($accountId, $domain);
         audit('domains.add-addon', $domain);
         Response::success(null, "Addon domain $domain added");
@@ -67,13 +61,7 @@ match ($action) {
             "INSERT INTO domains (account_id, domain, type, document_root, created_at) VALUES (?,?,?,?,NOW())",
             [$accountId, $full, 'subdomain', $docRoot]
         );
-        VhostManager::create([
-            'domain'   => $full,
-            'username' => $acct['username'],
-            'home_dir' => $acct['home_dir'],
-            'doc_root' => $docRoot,
-            'php_ver'  => $acct['php_version'] ?? PHP_DEFAULT,
-        ]);
+        VhostManager::create($acct['username'], $full, $docRoot, $acct['php_version'] ?? PHP_DEFAULT);
         $zone = DB::getInstance()->fetchOne("SELECT id FROM dns_zones WHERE domain = ? AND account_id = ?", [$parent, $accountId]);
         if ($zone) DNSManager::addRecord((int)$zone['id'], $sub, 'A', gethostbyname(gethostname()));
         audit('domains.add-subdomain', $full);
@@ -89,13 +77,7 @@ match ($action) {
             "INSERT INTO domains (account_id, domain, type, document_root, created_at) VALUES (?,?,?,?,NOW())",
             [$accountId, $alias, 'alias', $acct['home_dir'] . '/public_html']
         );
-        VhostManager::create([
-            'domain'   => $alias,
-            'username' => $acct['username'],
-            'home_dir' => $acct['home_dir'],
-            'doc_root' => $acct['home_dir'] . '/public_html',
-            'php_ver'  => $acct['php_version'] ?? PHP_DEFAULT,
-        ]);
+        VhostManager::create($acct['username'], $alias, $acct['home_dir'] . '/public_html', $acct['php_version'] ?? PHP_DEFAULT);
         DNSManager::createZone($accountId, $alias);
         audit('domains.add-alias', $alias);
         Response::success(null, "Domain alias $alias added");

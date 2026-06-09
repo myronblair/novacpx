@@ -46,9 +46,10 @@ class BackupManager {
                 }
             }
 
-            $size = file_exists($filepath) ? filesize($filepath) : 0;
-            $this->db->prepare("UPDATE backups SET status='complete', size=? WHERE id=?")->execute([$size, $backupId]);
-            return ['id' => $backupId, 'filename' => $filename, 'size' => $size];
+            $bytes  = file_exists($filepath) ? filesize($filepath) : 0;
+            $sizeMb = round($bytes / 1048576, 2);
+            $this->db->prepare("UPDATE backups SET status='complete', size_mb=? WHERE id=?")->execute([$sizeMb, $backupId]);
+            return ['id' => $backupId, 'filename' => $filename, 'size_mb' => $sizeMb];
 
         } catch (RuntimeException $e) {
             $this->db->prepare("UPDATE backups SET status='failed' WHERE id=?")->execute([$backupId]);
@@ -147,14 +148,14 @@ class BackupManager {
     }
 
     // ── Disk usage ────────────────────────────────────────────────────────────
-    public function diskUsage(int $accountId = 0): int {
+    public function diskUsage(int $accountId = 0): float {
         if ($accountId) {
-            $stmt = $this->db->prepare("SELECT COALESCE(SUM(size),0) FROM backups WHERE account_id=? AND status='complete'");
+            $stmt = $this->db->prepare("SELECT COALESCE(SUM(size_mb),0) FROM backups WHERE account_id=? AND status='complete'");
             $stmt->execute([$accountId]);
         } else {
-            $stmt = $this->db->query("SELECT COALESCE(SUM(size),0) FROM backups WHERE status='complete'");
+            $stmt = $this->db->query("SELECT COALESCE(SUM(size_mb),0) FROM backups WHERE status='complete'");
         }
-        return (int)$stmt->fetchColumn();
+        return (float)$stmt->fetchColumn();
     }
 
     private function getAccount(int $id): array {
