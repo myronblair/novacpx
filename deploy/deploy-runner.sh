@@ -67,26 +67,25 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
   rsync -av "$REPO_PATH/panel/bin/" /opt/novacpx/bin/ >> "$LOG" 2>&1
   chmod +x /opt/novacpx/bin/*.php 2>/dev/null || true
 
-  # Run pending DB migrations
+  # Run pending DB migrations (SQLite)
   MIGR_DIR="$REPO_PATH/db/migrations"
-  if [[ -d "$MIGR_DIR" ]]; then
-    DB_NAME=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c['database']['name'])" 2>/dev/null)
-    DB_USER=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c['database']['user'])" 2>/dev/null)
-    DB_PASS=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c['database']['pass'])" 2>/dev/null)
+  DB_PATH=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c.get('database','path',fallback='/var/lib/novacpx/panel.db'))" 2>/dev/null || echo "/var/lib/novacpx/panel.db")
+  if [[ -d "$MIGR_DIR" && -f "$DB_PATH" ]]; then
     for SQL in "$MIGR_DIR"/*.sql; do
       [[ -f "$SQL" ]] || continue
       MIGR_NAME=$(basename "$SQL" .sql)
-      ALREADY=$(mysql -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -se "SELECT value FROM settings WHERE \`key\`='migration_$MIGR_NAME'" 2>/dev/null)
+      ALREADY=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='migration_$MIGR_NAME'" 2>/dev/null)
       if [[ -z "$ALREADY" ]]; then
         log "Running migration: $MIGR_NAME"
-        mysql -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" < "$SQL" >> "$LOG" 2>&1
-        mysql -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "INSERT INTO settings (\`key\`,\`value\`) VALUES ('migration_$MIGR_NAME','$(date)') ON DUPLICATE KEY UPDATE \`value\`='$(date)'" 2>/dev/null
+        sqlite3 "$DB_PATH" < "$SQL" >> "$LOG" 2>&1
+        sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (key,value,updated_at) VALUES ('migration_$MIGR_NAME','$(date)',datetime('now'))" 2>/dev/null
       fi
     done
   fi
 
-  # Update VERSION
-  git describe --tags --abbrev=0 2>/dev/null > "$REPO_PATH/VERSION" || git rev-parse --short HEAD > "$REPO_PATH/VERSION"
+  # Ensure deploy webhook is accessible from web root
+  mkdir -p "$WEB_ROOT/deploy"
+  ln -sf "$REPO_PATH/deploy/webhook.php" "$WEB_ROOT/deploy/webhook.php"
 
   # Restart PHP-FPM to pick up code changes
   systemctl reload php8.3-fpm 2>/dev/null || true
