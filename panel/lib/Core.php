@@ -13,10 +13,9 @@ if (!$_cfg) {
     die(json_encode(['error' => 'NovaCPX not configured. Run the installer.']));
 }
 
-define('DB_HOST',        $_cfg['database']['host']        ?? 'localhost');
-define('DB_NAME',        $_cfg['database']['name']        ?? 'novacpx');
-define('DB_USER',        $_cfg['database']['user']        ?? '');
-define('DB_PASS',        $_cfg['database']['pass']        ?? '');
+define('DB_PATH',        $_cfg['database']['path']        ?? '/var/lib/novacpx/panel.db');
+define('DB_WP_USER',     $_cfg['database']['wp_user']     ?? '');
+define('DB_WP_PASS',     $_cfg['database']['wp_pass']     ?? '');
 define('SECRET_KEY',     $_cfg['panel']['secret']         ?? '');
 define('PANEL_VER',      $_cfg['panel']['version']        ?? NOVACPX_VERSION);
 define('PORT_USER',      (int)($_cfg['panel']['port_user']     ?? 8880));

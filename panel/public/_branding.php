@@ -9,15 +9,15 @@ function novacpx_get_branding(): array {
     $cfg = @parse_ini_file('/etc/novacpx/config.ini', true);
     if (!$cfg) return $cache = [];
     try {
+        $dbPath = $cfg['database']['path'] ?? '/var/lib/novacpx/panel.db';
         $pdo = new PDO(
-            "mysql:host={$cfg['database']['host']};dbname={$cfg['database']['name']};charset=utf8mb4",
-            $cfg['database']['user'], $cfg['database']['pass'],
+            "sqlite:{$dbPath}", null, null,
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
         );
         $token = $_COOKIE['ncpx_session'] ?? '';
         if (!$token || strlen($token) < 32) return $cache = [];
 
-        $stmt = $pdo->prepare("SELECT user_id FROM sessions WHERE token = ? AND expires_at > NOW() LIMIT 1");
+        $stmt = $pdo->prepare("SELECT user_id FROM sessions WHERE token = ? AND expires_at > datetime('now') LIMIT 1");
         $stmt->execute([substr($token, 0, 128)]);
         $uid = (int)($stmt->fetchColumn() ?: 0);
         if (!$uid) return $cache = [];
