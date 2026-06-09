@@ -1058,35 +1058,34 @@ window.submitChangePassword = async () => {
 /* ── Docker (#34) ────────────────────────────────────────────────────────── */
 async function dockerPage(el) {
   el.innerHTML = '<div class="loading">Loading Docker…</div>';
-  const [contRes, quotaRes, catRes] = await Promise.all([
-    Nova.api('docker', 'containers'),
+  const [stackRes, quotaRes, catRes] = await Promise.all([
+    Nova.api('docker', 'stacks'),
     Nova.api('docker', 'quota-get'),
     Nova.api('docker', 'catalog'),
   ]);
 
-  const containers = contRes?.data?.containers || [];
-  const quota      = quotaRes?.data?.quota || { max_containers: 2, max_memory_mb: 512, max_cpus: 1.0 };
-  const catalog    = catRes?.data?.catalog || {};
-  const used       = containers.length;
+  const stacks  = stackRes?.data?.stacks || [];
+  const quota   = quotaRes?.data?.quota || { max_containers: 2, max_memory_mb: 512, max_cpus: 1.0 };
+  const catalog = catRes?.data?.catalog || {};
 
   el.innerHTML = `
-<div class="page-header"><h2 class="page-title">Docker Containers</h2></div>
+<div class="page-header"><h2 class="page-title">Docker Apps</h2></div>
 <div class="stats-grid" style="margin-bottom:1.5rem">
-  <div class="stat-card"><div class="stat-label">Containers Used</div><div class="stat-value">${used} / ${quota.max_containers}</div><div class="mt-1">${Nova.progressBar(Math.round(used/Math.max(quota.max_containers,1)*100))}</div></div>
-  <div class="stat-card"><div class="stat-label">Max Memory / Container</div><div class="stat-value stat-blue">${quota.max_memory_mb} MB</div></div>
-  <div class="stat-card"><div class="stat-label">Max CPUs / Container</div><div class="stat-value stat-green">${quota.max_cpus}</div></div>
+  <div class="stat-card"><div class="stat-label">Apps Deployed</div><div class="stat-value">${stacks.length} / ${quota.max_containers}</div><div class="mt-1">${Nova.progressBar(Math.round(stacks.length/Math.max(quota.max_containers,1)*100))}</div></div>
+  <div class="stat-card"><div class="stat-label">Max Memory / App</div><div class="stat-value stat-blue">${quota.max_memory_mb} MB</div></div>
+  <div class="stat-card"><div class="stat-label">Max CPUs / App</div><div class="stat-value stat-green">${quota.max_cpus}</div></div>
 </div>
 
 <div style="display:flex;gap:.5rem;margin-bottom:1rem">
-  <button class="btn btn-sm ${_uDockerTab==='my-containers'?'btn-primary':'btn-ghost'}" onclick="uDockerTab('my-containers')">My Containers</button>
+  <button class="btn btn-sm ${_uDockerTab==='my-apps'?'btn-primary':'btn-ghost'}" onclick="uDockerTab('my-apps')">My Apps</button>
   <button class="btn btn-sm ${_uDockerTab==='catalog'?'btn-primary':'btn-ghost'}" onclick="uDockerTab('catalog')">App Catalog</button>
 </div>
 <div id="udocker-content"><div class="loading">Loading…</div></div>`;
 
-  window._uDockerContainers = containers;
-  window._uDockerQuota      = quota;
-  window._uDockerCatalog    = catalog;
-  window._uDockerTab        = window._uDockerTab || 'my-containers';
+  window._uDockerStacks  = stacks;
+  window._uDockerQuota   = quota;
+  window._uDockerCatalog = catalog;
+  window._uDockerTab     = window._uDockerTab || 'my-apps';
 
   window.uDockerTab = async (tab) => {
     window._uDockerTab = tab;
@@ -1094,44 +1093,56 @@ async function dockerPage(el) {
       const t = b.getAttribute('onclick').match(/'([^']+)'/)?.[1];
       b.className = 'btn btn-sm ' + (t === tab ? 'btn-primary' : 'btn-ghost');
     });
-    uDockerLoadTab(tab);
+    if (tab === 'my-apps') await uDockerReloadStacks();
+    else uDockerLoadTab(tab);
   };
 
-  uDockerLoadTab(window._uDockerTab);
+  if (window._uDockerTab === 'my-apps') await uDockerReloadStacks();
+  else uDockerLoadTab(window._uDockerTab);
 }
 
-window._uDockerTab = 'my-containers';
+window._uDockerTab = 'my-apps';
+
+async function uDockerReloadStacks() {
+  const r = await Nova.api('docker', 'stacks');
+  window._uDockerStacks = r?.data?.stacks || [];
+  uDockerLoadTab('my-apps');
+}
 
 function uDockerLoadTab(tab) {
   const tc = document.getElementById('udocker-content');
   if (!tc) return;
-  const containers = window._uDockerContainers || [];
-  const catalog    = window._uDockerCatalog || {};
-  const quota      = window._uDockerQuota || {};
+  const stacks  = window._uDockerStacks  || [];
+  const catalog = window._uDockerCatalog || {};
+  const quota   = window._uDockerQuota   || {};
 
-  if (tab === 'my-containers') {
+  if (tab === 'my-apps') {
+    const statusColor = s => s==='running'?'green':s==='starting'?'yellow':s==='stopped'?'red':'yellow';
     tc.innerHTML = `
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-  <strong>${containers.length} container${containers.length===1?'':'s'}</strong>
-  <button class="btn btn-sm btn-primary" onclick="uDockerLaunchModal()" ${containers.length>=quota.max_containers?'disabled title="Quota reached"':''}>+ Launch App</button>
+  <strong>${stacks.length} app${stacks.length===1?'':'s'}</strong>
+  <div style="display:flex;gap:.5rem">
+    <button class="btn btn-sm btn-ghost" onclick="uDockerReloadStacks()">↻ Refresh</button>
+    <button class="btn btn-sm btn-primary" onclick="uDockerLaunchModal()" ${stacks.length>=quota.max_containers?'disabled title="Quota reached"':''}>+ Launch App</button>
+  </div>
 </div>
-${containers.length === 0
+${stacks.length === 0
   ? `<div class="card"><div class="card-body" style="text-align:center;padding:3rem">
       <div style="font-size:2.5rem;margin-bottom:1rem">🐳</div>
-      <p class="text-muted">No containers yet. Launch an app from the catalog!</p>
+      <p class="text-muted">No apps yet. Launch one from the catalog!</p>
       <button class="btn btn-primary" onclick="uDockerTab('catalog')">Browse Catalog</button>
     </div></div>`
-  : `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>App</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-${containers.map(c=>`<tr>
-  <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(c.name)}</td>
-  <td>${Nova.escHtml(c.app_key||c.image||'—')}</td>
-  <td>${Nova.badge(c.status, c.status==='running'?'green':c.status==='stopped'?'red':'yellow')}</td>
+  : `<div style="overflow-x:auto"><table class="table"><thead><tr><th>App</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+${stacks.map(s=>`<tr>
+  <td style="font-weight:600">${Nova.escHtml(s.name)}</td>
+  <td>${Nova.badge(s.status, statusColor(s.status))}</td>
+  <td class="text-muted text-sm">${Nova.relTime(s.created_at)}</td>
   <td style="white-space:nowrap">
-    ${c.status==='running'
-      ? `<button class="btn btn-xs btn-warning" onclick="uDockerAct('${Nova.escHtml(c.container_id||'')}','stop')">Stop</button>
-         <button class="btn btn-xs btn-ghost" onclick="uDockerAct('${Nova.escHtml(c.container_id||'')}','restart')">Restart</button>`
-      : `<button class="btn btn-xs btn-success" onclick="uDockerAct('${Nova.escHtml(c.container_id||'')}','start')">Start</button>`}
-    <button class="btn btn-xs btn-ghost" onclick="uDockerLogs('${Nova.escHtml(c.container_id||'')}','${Nova.escHtml(c.name)}')">Logs</button>
+    ${s.status==='running'
+      ? `<button class="btn btn-xs btn-warning" onclick="uStackAct(${s.id},'down')">Stop</button>`
+      : `<button class="btn btn-xs btn-success" onclick="uStackAct(${s.id},'up')">Start</button>`}
+    <button class="btn btn-xs btn-ghost" onclick="uStackLogs(${s.id},'${Nova.escHtml(s.name)}')">Logs</button>
+    <button class="btn btn-xs btn-danger" onclick="uStackRemove(${s.id},'${Nova.escHtml(s.name)}')">Remove</button>
   </td>
 </tr>`).join('')}
 </tbody></table></div>`}`;
@@ -1153,21 +1164,29 @@ ${Object.entries(catalog).map(([key,app])=>`
   }
 }
 
-window.uDockerAct = async (cid, action) => {
-  Nova.loading(`${action.charAt(0).toUpperCase()+action.slice(1)}ing container…`);
-  const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
+window.uStackAct = async (stackId, action) => {
+  const label = action === 'up' ? 'Starting' : 'Stopping';
+  Nova.loading(`${label} app…`);
+  const r = await Nova.api('docker', 'stack-action', { method: 'POST', body: { stack_id: stackId, action } });
   Nova.loadingDone();
-  Nova.toast(r?.success ? `Container ${action}ed` : (r?.message||'Failed'), r?.success?'success':'error');
-  if (r?.success) {
-    const c = (window._uDockerContainers||[]).find(x=>x.container_id===cid);
-    if (c) c.status = action==='stop'?'stopped':'running';
-    uDockerLoadTab('my-containers');
-  }
+  Nova.toast(r?.success ? `App ${action==='up'?'started':'stopped'}` : (r?.message||'Failed'), r?.success?'success':'error');
+  if (r?.success) await uDockerReloadStacks();
 };
 
-window.uDockerLogs = async (cid, name) => {
-  const r = await Nova.api('docker', 'container-logs', { params: { container_id: cid, lines: 100 } });
-  Nova.modal(`Logs: ${name}`, `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(r?.data?.logs||'No logs available')}</pre>`);
+window.uStackLogs = async (stackId, name) => {
+  Nova.loading('Fetching logs…');
+  const r = await Nova.api('docker', 'stack-action', { method: 'POST', body: { stack_id: stackId, action: 'logs' } });
+  Nova.loadingDone();
+  Nova.modal(`Logs: ${name}`, `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(r?.data?.output||'No logs available')}</pre>`);
+};
+
+window.uStackRemove = async (stackId, name) => {
+  if (!confirm(`Remove app "${name}"? This will stop and delete its containers and data.`)) return;
+  Nova.loading('Removing app…');
+  const r = await Nova.api('docker', 'remove-stack', { method: 'POST', body: { stack_id: stackId } });
+  Nova.loadingDone();
+  Nova.toast(r?.success ? 'App removed' : (r?.message||'Failed'), r?.success?'success':'error');
+  if (r?.success) await uDockerReloadStacks();
 };
 
 window.uDockerLaunchModal = () => uDockerLaunchApp(null);
@@ -1210,11 +1229,9 @@ window.uDockerLaunchApp = async (preselect) => {
     Nova.loading(`Launching ${app.name}… this may take a minute`);
     const r = await Nova.api('docker', 'launch', { method: 'POST', body: { app_key: key, params } });
     Nova.loadingDone();
-    Nova.toast(r?.success ? `${app.name} launched!` : (r?.message||'Launch failed'), r?.success?'success':'error');
+    Nova.toast(r?.success ? `${app.name} launching — refresh in a moment to see status` : (r?.message||'Launch failed'), r?.success?'success':'error');
     if (r?.success) {
-      const cr = await Nova.api('docker', 'containers');
-      window._uDockerContainers = cr?.data?.containers || [];
-      uDockerTab('my-containers');
+      await uDockerTab('my-apps');
     }
   };
 };
