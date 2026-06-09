@@ -81,7 +81,9 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <?= novacpx_logo_html('<svg class="logo-icon" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18" stroke="url(#ulg1)" stroke-width="2"/><path d="M12 28 L20 8 L28 28" stroke="url(#ulg2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 22 H26" stroke="url(#ulg2)" stroke-width="2" stroke-linecap="round"/><defs><linearGradient id="ulg1" x1="2" y1="2" x2="38" y2="38"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient><linearGradient id="ulg2" x1="12" y1="8" x2="28" y2="28"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient></defs></svg>') ?>
-      <span class="logo-text"><?= $_pname ?> <small style="font-size:.65rem;color:var(--text-muted)">My Hosting</small></span>
+      <span class="logo-text"><?= $_pname ?> <small style="font-size:.65rem;color:var(--text-muted)">My Hosting</small>
+        <span style="display:block;font-size:.6rem;color:var(--text-muted);font-weight:400;line-height:1;margin-top:2px">v<?= NOVACPX_VERSION ?></span>
+      </span>
     </div>
     <nav id="sidebar-nav"></nav>
     <div class="sidebar-user">
