@@ -397,10 +397,15 @@ SH;
         $yaml = $this->generateComposeYaml($appKey, $domain, $params);
         $stack = $this->createStack($accountId, "{$appKey}-{$domain}", $yaml);
 
-        // Write stack and start it
-        $out = $this->composeAction((int)$stack['id'], 'up');
-        novacpx_log('info', "DockerManager: launched {$appKey} for account {$accountId} on {$domain}");
-        return ['stack_id' => $stack['id'], 'dir' => $stack['dir'], 'output' => $out];
+        // Pull images and start stack in background (image pulls can take minutes)
+        $dir    = $stack['dir'];
+        $stackId = (int)$stack['id'];
+        $logFile = escapeshellarg("/tmp/novacpx-stack-{$stackId}.log");
+        $compose = escapeshellarg("{$dir}/docker-compose.yml");
+        shell_exec("nohup sudo docker compose -f {$compose} up -d > {$logFile} 2>&1 &");
+        $this->db->execute("UPDATE docker_compose_stacks SET status='starting' WHERE id=?", [$stackId]);
+        novacpx_log('info', "DockerManager: launching {$appKey} for account {$accountId} on {$domain} (async)");
+        return ['stack_id' => $stackId, 'dir' => $dir, 'output' => 'Launching in background — refresh in a moment to see status'];
     }
 
     private function generateComposeYaml(string $appKey, string $domain, array $p): string {

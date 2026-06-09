@@ -87,8 +87,8 @@ class EmailManager {
             $user   = strstr($a['email'], '@', true);
             $mailboxes .= "{$a['email']}   {$a['username']}/{$domain}/{$user}/\n";
         }
-        file_put_contents('/etc/postfix/novacpx_mailboxes', $mailboxes);
-        shell_exec('postmap /etc/postfix/novacpx_mailboxes 2>/dev/null');
+        self::writePostfixFile('/etc/postfix/novacpx_mailboxes', $mailboxes);
+        shell_exec('sudo postmap /etc/postfix/novacpx_mailboxes 2>/dev/null');
 
         // Virtual alias map (forwarders)
         $forwarders = $db->fetchAll("SELECT source, destination FROM email_forwarders");
@@ -96,16 +96,23 @@ class EmailManager {
         foreach ($forwarders as $f) {
             $aliases .= "{$f['source']}   {$f['destination']}\n";
         }
-        file_put_contents('/etc/postfix/novacpx_aliases', $aliases);
-        shell_exec('postmap /etc/postfix/novacpx_aliases 2>/dev/null');
+        self::writePostfixFile('/etc/postfix/novacpx_aliases', $aliases);
+        shell_exec('sudo postmap /etc/postfix/novacpx_aliases 2>/dev/null');
 
-        // Virtual domains map
-        $domains = $db->fetchAll("SELECT DISTINCT SUBSTRING_INDEX(email,'@',-1) as domain FROM email_accounts WHERE status='active'");
+        // Virtual domains map — SQLite-compatible (no SUBSTRING_INDEX)
+        $domains = $db->fetchAll("SELECT DISTINCT SUBSTR(email, INSTR(email,'@') + 1) AS domain FROM email_accounts WHERE status='active'");
         $vdomains = '';
         foreach ($domains as $d) { $vdomains .= "{$d['domain']}   novacpx\n"; }
-        file_put_contents('/etc/postfix/novacpx_domains', $vdomains);
-        shell_exec('postmap /etc/postfix/novacpx_domains 2>/dev/null');
-        shell_exec('systemctl reload postfix 2>/dev/null || true');
+        self::writePostfixFile('/etc/postfix/novacpx_domains', $vdomains);
+        shell_exec('sudo postmap /etc/postfix/novacpx_domains 2>/dev/null');
+        shell_exec('sudo systemctl reload postfix 2>/dev/null || true');
+    }
+
+    private static function writePostfixFile(string $path, string $content): void {
+        $tmp = tempnam('/tmp', 'ncpx_pf_');
+        file_put_contents($tmp, $content);
+        shell_exec('sudo tee ' . escapeshellarg($path) . ' > /dev/null < ' . escapeshellarg($tmp));
+        @unlink($tmp);
     }
 
     private static function hashPassword(string $password): string {
