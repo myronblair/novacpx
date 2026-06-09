@@ -3054,7 +3054,13 @@ window.proxySettings = async () => {
         <span id="ps-test-result" style="margin-left:0.75rem;font-size:0.85rem"></span>
       </div>
     </div>
-  `, async () => {
+  `,
+  `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+   <button class="btn btn-primary" id="ps-save-btn">Save Settings</button>`
+  );
+  ov.querySelector('#ps-save-btn').addEventListener('click', async () => {
+    const btn  = ov.querySelector('#ps-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
     const mode = document.getElementById('ps-mode')?.value;
     const pass = document.getElementById('ps-pass')?.value;
     const body = {
@@ -3066,7 +3072,8 @@ window.proxySettings = async () => {
     };
     const r = await Nova.api('proxy', 'settings', { method: 'POST', body });
     Nova.toast(r?.success ? 'Settings saved' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-    if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
+    if (r?.success) { ov.remove(); Nova.loadPage('nginx-proxy', window._novaPages); }
+    else { btn.disabled = false; btn.textContent = 'Save Settings'; }
   });
 };
 
