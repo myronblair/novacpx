@@ -60,13 +60,14 @@ CREATE INDEX IF NOT EXISTS idx_users_reseller ON users (reseller_id);
 
 -- ── Sessions ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS sessions (
-  id         TEXT PRIMARY KEY,
-  user_id    INTEGER NOT NULL,
-  ip_address TEXT,
-  user_agent TEXT,
-  data       TEXT,
-  expires_at TEXT NOT NULL,
-  created_at TEXT DEFAULT (datetime('now')),
+  id              TEXT PRIMARY KEY,
+  user_id         INTEGER NOT NULL,
+  ip_address      TEXT,
+  user_agent      TEXT,
+  data            TEXT,
+  expires_at      TEXT NOT NULL,
+  impersonator_id INTEGER DEFAULT NULL,
+  created_at      TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires_at);
