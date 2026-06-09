@@ -62,8 +62,9 @@ if (!file_exists($endpointFile)) {
     $ip     = $_SERVER["REMOTE_ADDR"] ?? "0.0.0.0";
     $now    = time();
     $window = 60;
-    $limit  = $endpoint === "auth" ? 10 : 120;
-    $bucket = $endpoint === "auth" ? "auth" : "api";
+    $isLoginAttempt = $endpoint === "auth" && $_SERVER['REQUEST_METHOD'] === 'POST';
+    $limit  = $isLoginAttempt ? 10 : 120;
+    $bucket = $isLoginAttempt ? "auth" : "api";
     try {
         $row = $db->fetchOne("SELECT hits, window_start FROM api_rate_limits WHERE ip=? AND endpoint=?", [$ip, $bucket]);
         if ($row && ($now - (int)$row["window_start"]) < $window) {
