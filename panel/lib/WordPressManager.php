@@ -1,11 +1,36 @@
 <?php
 class WordPressManager {
     private \PDO $db;
+    private \PDO $provDb;
     private string $wpcli = '/usr/local/bin/wp';
 
     public function __construct() {
         $this->db = DB::getInstance()->pdo();
+        // Separate privileged connection for CREATE DATABASE / CREATE USER / GRANT
+        $this->provDb = $this->makeProvPdo();
         $this->ensureWpCli();
+    }
+
+    private function makeProvPdo(): \PDO {
+        $wpUser = DB_WP_USER;
+        $wpPass = DB_WP_PASS;
+        if ($wpUser) {
+            try {
+                return new \PDO(
+                    'mysql:host=' . DB_HOST . ';charset=utf8mb4',
+                    $wpUser, $wpPass,
+                    [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
+                );
+            } catch (\PDOException $e) {
+                // Fall through to root socket attempt
+            }
+        }
+        // Fallback: root via Unix socket (works on fresh installs where root has no password)
+        return new \PDO(
+            'mysql:host=localhost;unix_socket=/var/run/mysqld/mysqld.sock;charset=utf8mb4',
+            'root', '',
+            [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
+        );
     }
 
     // ── Install ───────────────────────────────────────────────────────────────
@@ -19,9 +44,9 @@ class WordPressManager {
         $dbUser  = substr($dbName, 0, 32);
 
         // Create DB
-        $this->db->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $this->db->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY '{$dbPass}'");
-        $this->db->exec("GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost'");
+        $this->provDb->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $this->provDb->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY '{$dbPass}'");
+        $this->provDb->exec("GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost'");
 
         // Download WP + install
         $sysUser = $account['system_user'] ?? 'www-data';
@@ -86,9 +111,9 @@ class WordPressManager {
         // Clone DB
         $stagingDb   = $install['db_name'] . '_staging';
         $stagingDbPw = bin2hex(random_bytes(8));
-        $this->db->exec("CREATE DATABASE IF NOT EXISTS `{$stagingDb}`");
-        $this->db->exec("CREATE USER IF NOT EXISTS '{$stagingDb}'@'localhost' IDENTIFIED BY '{$stagingDbPw}'");
-        $this->db->exec("GRANT ALL ON `{$stagingDb}`.* TO '{$stagingDb}'@'localhost'");
+        $this->provDb->exec("CREATE DATABASE IF NOT EXISTS `{$stagingDb}`");
+        $this->provDb->exec("CREATE USER IF NOT EXISTS '{$stagingDb}'@'localhost' IDENTIFIED BY '{$stagingDbPw}'");
+        $this->provDb->exec("GRANT ALL ON `{$stagingDb}`.* TO '{$stagingDb}'@'localhost'");
         $this->exec("mysqldump {$install['db_name']} | mysql {$stagingDb}");
 
         // Update staging wp-config
@@ -112,8 +137,8 @@ class WordPressManager {
     public function delete(int $id): bool {
         [$install, $sysUser, $docRoot] = $this->resolve($id);
         $this->exec("rm -rf {$docRoot}");
-        $this->db->exec("DROP DATABASE IF EXISTS `{$install['db_name']}`");
-        $this->db->exec("DROP USER IF EXISTS '{$install['db_user']}'@'localhost'");
+        $this->provDb->exec("DROP DATABASE IF EXISTS `{$install['db_name']}`");
+        $this->provDb->exec("DROP USER IF EXISTS '{$install['db_user']}'@'localhost'");
         $this->db->prepare("DELETE FROM wordpress_installs WHERE id=?")->execute([$id]);
         return true;
     }
@@ -162,6 +187,55 @@ class WordPressManager {
         $stmt = $this->db->prepare("SELECT * FROM accounts WHERE id=?");
         $stmt->execute([$id]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: throw new RuntimeException("Account #{$id} not found");
+    }
+
+    // ── Streaming install (yields progress lines for SSE) ─────────────────────
+    public function installStream(int $accountId, string $domain, string $path,
+                                  string $adminUser, string $adminEmail, string $adminPass,
+                                  string $siteTitle): \Generator {
+        yield "▶ Resolving account...\n";
+        $account = $this->getAccount($accountId);
+        $docRoot = $account['document_root'] . rtrim($path, '/');
+        $dbName  = 'wp_' . preg_replace('/[^a-z0-9]/', '_', strtolower($account['username'])) . '_' . substr(md5($domain), 0, 6);
+        $dbPass  = bin2hex(random_bytes(12));
+        $dbUser  = substr($dbName, 0, 32);
+        $sysUser = $account['system_user'] ?? 'www-data';
+
+        yield "▶ Creating MySQL database ({$dbName})...\n";
+        $this->provDb->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $this->provDb->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY '{$dbPass}'");
+        $this->provDb->exec("GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost'");
+        yield "  ✓ Database ready\n";
+
+        yield "▶ Downloading WordPress core (this takes 20-40 seconds)...\n";
+        $out = $this->wp($docRoot, "core download --locale=en_US", $sysUser);
+        yield $out ? "  " . trim($out) . "\n" : "  ✓ Core downloaded\n";
+
+        yield "▶ Creating wp-config.php...\n";
+        $out = $this->wp($docRoot, "config create --dbname={$dbName} --dbuser={$dbUser} --dbpass={$dbPass} --dbhost=localhost --skip-check", $sysUser);
+        yield $out ? "  " . trim($out) . "\n" : "  ✓ wp-config.php created\n";
+
+        yield "▶ Running WordPress installer...\n";
+        $out = $this->wp($docRoot, sprintf(
+            'core install --url=https://%s --title=%s --admin_user=%s --admin_password=%s --admin_email=%s --skip-email',
+            escapeshellarg($domain . $path),
+            escapeshellarg($siteTitle),
+            escapeshellarg($adminUser),
+            escapeshellarg($adminPass),
+            escapeshellarg($adminEmail)
+        ), $sysUser);
+        yield $out ? "  " . trim($out) . "\n" : "  ✓ WordPress installed\n";
+
+        yield "▶ Saving installation record...\n";
+        $stmt = $this->db->prepare("INSERT INTO wordpress_installs
+            (account_id, domain, path, db_name, db_user, db_pass, admin_user, admin_email, wp_version, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?)");
+        $stmt->execute([$accountId, $domain, $path, $dbName, $dbUser, $dbPass, $adminUser, $adminEmail,
+            $this->getVersion($docRoot, $sysUser), 'active']);
+        $id = (int)$this->db->lastInsertId();
+
+        yield "  ✓ Done — WordPress ID #{$id}\n";
+        yield '__DONE__' . json_encode(['id' => $id, 'admin_user' => $adminUser, 'admin_pass' => $adminPass, 'domain' => $domain]) . "\n";
     }
 
     private function ensureWpCli(): void {

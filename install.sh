@@ -10,8 +10,7 @@ NOVACPX_VERSION="1.0.0"
 PANEL_DIR="/opt/novacpx"
 WEB_ROOT="/srv/novacpx/public"
 LOG="/var/log/novacpx-install.log"
-DB_NAME="novacpx"
-DB_USER="novacpx_user"
+DB_PATH="/var/lib/novacpx/panel.db"
 PHP_DEFAULT="8.3"
 
 # ── Panel ports (each tier has its own port) ──────────────────────────────────
@@ -105,7 +104,8 @@ log "RAM: ${TOTAL_RAM}MB | Free disk: ${TOTAL_DISK}GB"
 # ── Generate secrets ──────────────────────────────────────────────────────────
 step "Generating Credentials"
 
-DB_PASS=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!@#$' | head -c 20)
+DB_WP_USER="novacpx_wp"
+DB_WP_PASS=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!@#$' | head -c 20)
 ADMIN_PASS=$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)
 SECRET_KEY=$(openssl rand -hex 32)
 mkdir -p /root/.novacpx
@@ -118,9 +118,9 @@ Admin Panel:    https://$(hostname -I | awk '{print $1}'):${PORT_ADMIN}
 Webmail:        https://$(hostname -I | awk '{print $1}'):${PORT_WEBMAIL}
 Admin User:     admin
 Admin Pass:     $ADMIN_PASS
-DB Name:        $DB_NAME
-DB User:        $DB_USER
-DB Pass:        $DB_PASS
+Panel DB:       ${DB_PATH}  (SQLite — no credentials needed)
+DB WP User:     $DB_WP_USER
+DB WP Pass:     $DB_WP_PASS
 ==========================================
 SAVE THIS FILE. It will not be shown again.
 CREDS
@@ -134,7 +134,7 @@ apt-get update -qq >> "$LOG" 2>&1
 apt-get upgrade -y -qq >> "$LOG" 2>&1
 apt-get install -y -qq curl wget gnupg2 lsb-release ca-certificates \
   software-properties-common apt-transport-https unzip git \
-  sudo cron logrotate ufw fail2ban sshpass >> "$LOG" 2>&1
+  sudo cron logrotate ufw fail2ban sshpass sqlite3 >> "$LOG" 2>&1
 log "System packages updated"
 
 # ── PHP multi-version setup ───────────────────────────────────────────────────
@@ -305,6 +305,9 @@ fi
 # Enable PHP-FPM services
 for VER in "${PHP_VERSIONS[@]}"; do
   systemctl enable php${VER}-fpm >> "$LOG" 2>&1 && systemctl start php${VER}-fpm >> "$LOG" 2>&1 || true
+  # Allow unlimited execution time so long-running panel tasks (package installs, WP) don't get killed
+  grep -q "php_admin_value\[max_execution_time\]" /etc/php/${VER}/fpm/pool.d/www.conf 2>/dev/null || \
+    echo "php_admin_value[max_execution_time] = 0" >> /etc/php/${VER}/fpm/pool.d/www.conf
 done
 
 # ── MySQL ─────────────────────────────────────────────────────────────────────
@@ -316,6 +319,10 @@ if $INSTALL_MYSQL; then
   mysql -e "CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >> "$LOG" 2>&1
   mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';" >> "$LOG" 2>&1
   mysql -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';" >> "$LOG" 2>&1
+  # Privileged user for WordPress DB provisioning (CREATE DATABASE + CREATE USER + GRANT)
+  mysql -e "CREATE USER IF NOT EXISTS '${DB_WP_USER}'@'localhost' IDENTIFIED BY '${DB_WP_PASS}';" >> "$LOG" 2>&1
+  mysql -e "GRANT ALL PRIVILEGES ON \`wp\_%\`.* TO '${DB_WP_USER}'@'localhost';" >> "$LOG" 2>&1
+  mysql -e "GRANT CREATE USER ON *.* TO '${DB_WP_USER}'@'localhost' WITH GRANT OPTION;" >> "$LOG" 2>&1
   mysql -e "FLUSH PRIVILEGES;" >> "$LOG" 2>&1
   log "MySQL installed and database created"
 fi
@@ -485,10 +492,9 @@ fi
 mkdir -p /etc/novacpx
 cat > /etc/novacpx/config.ini <<CONFIG
 [database]
-host     = localhost
-name     = ${DB_NAME}
-user     = ${DB_USER}
-pass     = ${DB_PASS}
+path     = ${DB_PATH}
+wp_user  = ${DB_WP_USER}
+wp_pass  = ${DB_WP_PASS}
 
 [panel]
 secret        = ${SECRET_KEY}
@@ -506,16 +512,19 @@ CONFIG
 chown root:www-data /etc/novacpx/config.ini
 chmod 640 /etc/novacpx/config.ini
 
-# Import database schema
+# Create SQLite panel database
+mkdir -p /var/lib/novacpx
 if [[ -f /opt/novacpx-src/db/schema.sql ]]; then
-  mysql "$DB_NAME" < /opt/novacpx-src/db/schema.sql >> "$LOG" 2>&1
+  sqlite3 "$DB_PATH" < /opt/novacpx-src/db/schema.sql >> "$LOG" 2>&1
   # Create admin user
   ADMIN_HASH=$(php -r "echo password_hash('${ADMIN_PASS}', PASSWORD_BCRYPT);")
-  mysql "$DB_NAME" -e "INSERT INTO users (username,password,email,role,status) VALUES ('admin','$ADMIN_HASH','root@localhost','admin','active') ON DUPLICATE KEY UPDATE password='$ADMIN_HASH';" >> "$LOG" 2>&1
+  sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO users (username,password,email,role,status) VALUES ('admin','${ADMIN_HASH}','root@localhost','admin','active');" >> "$LOG" 2>&1
   # Seed proxy defaults
-  mysql "$DB_NAME" -e "INSERT INTO settings (\`key\`, value) VALUES ('proxy_mode','disabled'),('proxy_apache_port','80') ON DUPLICATE KEY UPDATE value=VALUES(value);" >> "$LOG" 2>&1
-  log "Database schema imported and admin user created"
+  sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO settings (key, value) VALUES ('proxy_mode','disabled'),('proxy_apache_port','80');" >> "$LOG" 2>&1
+  log "SQLite panel database created and admin user seeded"
 fi
+chown www-data:www-data "$DB_PATH"
+chmod 660 "$DB_PATH"
 
 # Set permissions
 chown -R www-data:www-data "$WEB_ROOT"
@@ -640,6 +649,16 @@ www-data ALL=(root) NOPASSWD: /bin/systemctl reload nginx
 www-data ALL=(root) NOPASSWD: /bin/systemctl restart apache2
 www-data ALL=(root) NOPASSWD: /bin/systemctl reload apache2
 www-data ALL=(root) NOPASSWD: /usr/sbin/nginx *
+# DB tool installation privileges
+www-data ALL=(root) NOPASSWD: /usr/bin/gpg *
+www-data ALL=(root) NOPASSWD: /usr/bin/curl *
+www-data ALL=(root) NOPASSWD: /usr/sbin/debconf-set-selections *
+www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/apt/sources.list.d/*
+www-data ALL=(root) NOPASSWD: /usr/bin/tee /usr/share/keyrings/*
+www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/nginx/conf.d/*
+www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/apache2/conf-enabled/*
+www-data ALL=(root) NOPASSWD: /usr/pgadmin4/bin/setup-web.sh *
+www-data ALL=(root) NOPASSWD: /usr/bin/env *
 SUDOERS
 chmod 440 /etc/sudoers.d/novacpx-firewall
 log "Sudoers rules installed"

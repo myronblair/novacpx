@@ -34,11 +34,12 @@ class DB {
             function (array $m): string {
                 $pairs = preg_split('/,\s*/', trim($m[1]));
                 $sets  = array_map(function (string $pair): string {
-                    if (preg_match('/(\w+)\s*=\s*VALUES\s*\(\s*(\w+)\s*\)/i', $pair, $pm)) {
-                        return "{$pm[1]}=excluded.{$pm[2]}";
+                    // Match plain or backtick-quoted column names: `col`=VALUES(`col`) or col=VALUES(col)
+                    if (preg_match('/`?(\w+)`?\s*=\s*VALUES\s*\(\s*`?(\w+)`?\s*\)/i', $pair, $pm)) {
+                        return "\"{$pm[1]}\"=excluded.\"{$pm[2]}\"";
                     }
-                    // col=? or col=expr — keep as-is
-                    return $pair;
+                    // col=? or col=expr — strip backticks, keep as-is
+                    return preg_replace('/`(\w+)`/', '"$1"', $pair);
                 }, $pairs);
                 return 'ON CONFLICT DO UPDATE SET ' . implode(', ', $sets);
             },
@@ -94,6 +95,9 @@ class DB {
 
         // IFNULL → COALESCE (SQLite supports both but be safe)
         $sql = preg_replace('/\bIFNULL\s*\(/i', 'COALESCE(', $sql);
+
+        // Backtick identifier quoting → double-quote (SQLite standard)
+        $sql = preg_replace('/`(\w+)`/', '"$1"', $sql);
 
         return $sql;
     }

@@ -93,6 +93,7 @@
     docker,
     'ssl-manager': sslManager,
     firewall,
+    fail2ban,
     'audit-log': auditLog,
     twofa,
     updates,
@@ -1519,6 +1520,227 @@
 </div>`;
   }
 
+  // ── Fail2Ban Manager ────────────────────────────────────────────────────────
+  async function fail2ban() {
+    const [f2bRes, cfgRes, ignoreipRes] = await Promise.all([
+      Nova.api('firewall', 'f2b-status'),
+      Nova.api('firewall', 'f2b-config-get'),
+      Nova.api('firewall', 'f2b-ignoreip-list'),
+    ]);
+    const jails     = f2bRes?.data?.jails || [];
+    const cfg       = cfgRes?.data || { bantime: 3600, findtime: 600, maxretry: 5 };
+    const ignoreips = ignoreipRes?.data?.ignoreip || ignoreipRes?.data?.detected || [];
+    const totalBanned = jails.reduce((s, j) => s + (j.currently_banned || 0), 0);
+
+    return `
+<div class="page-header mb-3">
+  <h2 class="page-title">Fail2Ban</h2>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    ${totalBanned > 0 ? Nova.badge(totalBanned + ' banned', 'red') : Nova.badge('Clean', 'green')}
+    <button class="btn btn-sm btn-ghost" onclick="adminPage('fail2ban')">↻ Refresh</button>
+    <button class="btn btn-sm btn-ghost" onclick="f2bReloadCfg()">Reload Config</button>
+    <button class="btn btn-sm btn-ghost" onclick="f2bRestartSvc()">Restart Service</button>
+  </div>
+</div>
+
+<!-- Global Settings -->
+<div class="card mb-3">
+  <div class="card-header"><span class="card-title">Global Settings</span></div>
+  <div class="card-body">
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group mb-0">
+        <label class="form-label">Ban Time (seconds)</label>
+        <input id="f2b-bantime" type="number" class="form-control" value="${Nova.escHtml(cfg.bantime)}" style="width:130px" min="60">
+        <small class="text-muted">How long IPs stay banned</small>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label">Find Time (seconds)</label>
+        <input id="f2b-findtime" type="number" class="form-control" value="${Nova.escHtml(cfg.findtime)}" style="width:130px" min="60">
+        <small class="text-muted">Window to count failures</small>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label">Max Retry</label>
+        <input id="f2b-maxretry" type="number" class="form-control" value="${Nova.escHtml(cfg.maxretry)}" style="width:100px" min="1">
+        <small class="text-muted">Failures before ban</small>
+      </div>
+      <button class="btn btn-primary mb-0" onclick="f2bSaveCfg()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- Jails -->
+<div class="card mb-3">
+  <div class="card-header">
+    <span class="card-title">Active Jails</span>
+    <span class="text-muted text-sm ml-2">${jails.length} jail${jails.length !== 1 ? 's' : ''}</span>
+  </div>
+  ${jails.length ? `
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Jail</th><th>Currently Banned</th><th>Total Banned</th><th>Failed</th><th></th></tr></thead>
+      <tbody>
+        ${jails.map(j => `<tr>
+          <td><strong>${Nova.escHtml(j.jail)}</strong></td>
+          <td>${j.currently_banned > 0
+            ? `<span style="color:var(--red);font-weight:600">${j.currently_banned}</span>`
+            : '<span class="text-muted">0</span>'}</td>
+          <td class="text-muted">${j.total_banned}</td>
+          <td class="text-muted">${j.currently_failed}</td>
+          <td style="display:flex;gap:.35rem;flex-wrap:wrap">
+            ${j.currently_banned > 0
+              ? `<button class="btn btn-xs btn-ghost" onclick="f2bViewJail('${Nova.escHtml(j.jail)}')">View Banned</button>`
+              : ''}
+            <button class="btn btn-xs btn-ghost" onclick="f2bBanModal('${Nova.escHtml(j.jail)}')">Ban IP</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : `<div class="card-body"><p class="text-muted">Fail2Ban not running or no jails active.</p></div>`}
+</div>
+
+<!-- Whitelist -->
+<div class="card mb-3">
+  <div class="card-header">
+    <span class="card-title">Whitelist (Never Ban)</span>
+    <span class="text-muted text-sm ml-2">${ignoreips.length} entr${ignoreips.length !== 1 ? 'ies' : 'y'}</span>
+    <button class="btn btn-xs btn-ghost ml-auto" onclick="fwIgnoreipReset()">Reset to Defaults</button>
+  </div>
+  <div class="card-body">
+    <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+      <input id="f2b-ignoreip-input" class="form-control form-control-sm"
+        placeholder="IP or CIDR — e.g. 203.0.113.5 or 192.168.1.0/24" style="flex:1">
+      <button class="btn btn-sm btn-primary" onclick="f2bWhitelistAdd()">Add</button>
+    </div>
+    <div id="f2b-ignoreip-chips" style="display:flex;flex-wrap:wrap;gap:.35rem">
+      ${ignoreips.map(ip => `<span class="badge badge-green" style="cursor:pointer" title="Click to remove"
+        onclick="f2bWhitelistRemove('${Nova.escHtml(ip)}')">${Nova.escHtml(ip)} ×</span>`).join('')}
+    </div>
+    <p class="text-muted text-sm mt-2" style="font-size:.75rem">Your own IP/subnet should always be whitelisted.</p>
+  </div>
+</div>
+
+<!-- Log Viewer -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Log Viewer</span>
+    <div style="display:flex;gap:.5rem;align-items:center;margin-left:auto">
+      <select id="f2b-log-lines" class="form-control form-control-sm" style="width:auto">
+        <option value="50">Last 50</option>
+        <option value="100" selected>Last 100</option>
+        <option value="250">Last 250</option>
+        <option value="500">Last 500</option>
+      </select>
+      <button class="btn btn-sm btn-ghost" onclick="f2bLoadLog()">Load Log</button>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <div id="f2b-log-content" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;padding:1rem;max-height:400px;overflow-y:auto;border-radius:0 0 8px 8px">
+      <span class="text-muted">Click "Load Log" to view Fail2Ban activity.</span>
+    </div>
+  </div>
+</div>`;
+  }
+
+  window.f2bSaveCfg = async () => {
+    const bantime  = document.getElementById('f2b-bantime')?.value;
+    const findtime = document.getElementById('f2b-findtime')?.value;
+    const maxretry = document.getElementById('f2b-maxretry')?.value;
+    const r = await Nova.api('firewall', 'f2b-config-save', { method: 'POST', body: { bantime, findtime, maxretry } });
+    Nova.toast(r?.message || (r?.success ? 'Saved' : 'Failed'), r?.success ? 'success' : 'error');
+  };
+
+  window.f2bReloadCfg = async () => {
+    const r = await Nova.api('firewall', 'f2b-reload', { method: 'POST' });
+    Nova.toast(r?.message || (r?.success ? 'Reloaded' : 'Failed'), r?.success ? 'success' : 'error');
+  };
+
+  window.f2bRestartSvc = async () => {
+    const r = await Nova.api('firewall', 'f2b-restart', { method: 'POST' });
+    Nova.toast(r?.message || (r?.success ? 'Restarted' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('fail2ban');
+  };
+
+  window.f2bViewJail = async (jail) => {
+    const r = await Nova.api('firewall', 'f2b-jail', { method: 'POST', body: { jail } });
+    const d = r?.data || {};
+    const ips = d.banned_ips || [];
+    Nova.modal(`Jail: ${jail}`,
+      `<div style="display:flex;gap:2rem;margin-bottom:1rem">
+        <div><p class="text-muted text-sm">Currently Banned</p><p class="font-bold">${d.currently_banned ?? 0}</p></div>
+        <div><p class="text-muted text-sm">Total Banned</p><p class="font-bold">${d.total_banned ?? 0}</p></div>
+        <div><p class="text-muted text-sm">Currently Failed</p><p class="font-bold">${d.currently_failed ?? 0}</p></div>
+      </div>
+      ${ips.length ? `<table style="width:100%"><thead><tr><th>IP Address</th><th></th></tr></thead><tbody>
+        ${ips.map(ip => `<tr>
+          <td><code>${Nova.escHtml(ip)}</code></td>
+          <td><button class="btn btn-xs" style="color:var(--red)" onclick="f2bUnban('${Nova.escHtml(ip)}','${Nova.escHtml(jail)}')">Unban</button></td>
+        </tr>`).join('')}
+      </tbody></table>` : '<p class="text-muted">No IPs currently banned.</p>'}`
+    );
+  };
+
+  window.f2bBanModal = (jail) => {
+    Nova.modal(`Ban IP in jail: ${jail}`,
+      `<div class="form-group">
+        <label class="form-label">IP Address to Ban</label>
+        <input id="f2b-ban-ip" class="form-control" placeholder="1.2.3.4">
+      </div>`,
+      `<button class="btn btn-primary" onclick="f2bBanSubmit('${Nova.escHtml(jail)}')">Ban IP</button>`
+    );
+  };
+
+  window.f2bBanSubmit = async (jail) => {
+    const ip = document.getElementById('f2b-ban-ip')?.value?.trim();
+    if (!ip) return;
+    document.querySelector('.modal-overlay')?.remove();
+    const r = await Nova.api('firewall', 'f2b-ban', { method: 'POST', body: { ip, jail } });
+    Nova.toast(r?.message || (r?.success ? 'Banned' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('fail2ban');
+  };
+
+  window.f2bUnban = async (ip, jail) => {
+    document.querySelector('.modal-overlay')?.remove();
+    const r = await Nova.api('firewall', 'f2b-unban', { method: 'POST', body: { ip, jail } });
+    Nova.toast(r?.message || (r?.success ? 'Unbanned' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('fail2ban');
+  };
+
+  window.f2bWhitelistAdd = async () => {
+    const ip = document.getElementById('f2b-ignoreip-input')?.value?.trim();
+    if (!ip) return;
+    const r = await Nova.api('firewall', 'f2b-ignoreip-add', { method: 'POST', body: { ip } });
+    Nova.toast(r?.message || (r?.success ? 'Added' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('fail2ban');
+  };
+
+  window.f2bWhitelistRemove = async (ip) => {
+    const r = await Nova.api('firewall', 'f2b-ignoreip-remove', { method: 'POST', body: { ip } });
+    Nova.toast(r?.message || (r?.success ? 'Removed' : 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) adminPage('fail2ban');
+  };
+
+  window.f2bLoadLog = async () => {
+    const lines = document.getElementById('f2b-log-lines')?.value || 100;
+    const el = document.getElementById('f2b-log-content');
+    if (el) el.innerHTML = '<span class="text-muted">Loading…</span>';
+    const r = await Nova.api('firewall', 'f2b-log', { method: 'POST', body: { lines: parseInt(lines) } });
+    if (el) {
+      if (r?.success && r.data?.log) {
+        // Colorize: NOTICE=green, WARNING=yellow, ERROR/BAN=red, UNBAN=blue
+        const colored = Nova.escHtml(r.data.log)
+          .replace(/(NOTICE)/g, '<span style="color:#58a6ff">$1</span>')
+          .replace(/(WARNING)/g, '<span style="color:#e3b341">$1</span>')
+          .replace(/\b(BAN)\b/g, '<span style="color:#f85149">$1</span>')
+          .replace(/\b(UNBAN)\b/g, '<span style="color:#3fb950">$1</span>')
+          .replace(/(ERROR)/g, '<span style="color:#f85149;font-weight:bold">$1</span>');
+        el.innerHTML = colored;
+        el.scrollTop = el.scrollHeight;
+      } else {
+        el.innerHTML = '<span style="color:var(--red)">Failed to load log.</span>';
+      }
+    }
+  };
+
   function fwActionBadge(action) {
     const a = (action||'').toLowerCase();
     if (a.includes('allow')) return Nova.badge('ALLOW','green');
@@ -1758,13 +1980,15 @@ ${ips.length ? `
 
   // ── MySQL/DB Manager ───────────────────────────────────────────────────────
   async function mysqlManager() {
-    const [engRes, dbRes] = await Promise.all([
+    const [engRes, dbRes, toolsRes] = await Promise.all([
       Nova.api('system','db-engines'),
       Nova.api('databases','list',{params:{account_id:0}}),
+      Nova.api('system','db-tools'),
     ]);
-    const eng  = engRes?.data?.engines  || {};
-    const actE = engRes?.data?.active_engine || 'mysql';
-    const dbs  = dbRes?.data || [];
+    const eng   = engRes?.data?.engines  || {};
+    const actE  = engRes?.data?.active_engine || 'mysql';
+    const dbs   = dbRes?.data || [];
+    const tools = toolsRes?.data || {};
 
     const engineCard = (id, label, icon) => {
       const e = eng[id] || {};
@@ -1778,7 +2002,7 @@ ${ips.length ? `
     ${e.version ? `<span class="text-muted" style="font-size:.8rem;margin-left:.5rem">v${e.version}</span>` : ''}
   </div>
   <div class="card-body">
-    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.75rem">
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem">
       ${!e.installed
         ? `<button class="btn btn-xs btn-primary" onclick="dbEngineAction('${id}','install')">Install</button>`
         : `
@@ -1788,8 +2012,31 @@ ${ips.length ? `
         <button class="btn btn-xs btn-danger" onclick="dbEngineAction('${id}','remove')">Remove</button>`
       }
     </div>
-    ${e.installed && id !== 'postgresql' ? `<a href="http://${location.hostname}/phpmyadmin" target="_blank" class="btn btn-xs btn-ghost">phpMyAdmin ↗</a>` : ''}
-    ${e.installed && id === 'postgresql' ? `<a href="http://${location.hostname}/pgadmin" target="_blank" class="btn btn-xs btn-ghost">pgAdmin ↗</a>` : ''}
+  </div>
+</div>`;
+    };
+
+    const toolCard = (id, label, icon, url) => {
+      const t = tools[id] || {};
+      const statusColor = t.installed ? 'green' : 'default';
+      const statusText  = t.installed ? 'Installed' : 'Not Installed';
+      return `
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">${icon} ${label}</span>
+    ${Nova.badge(statusText, statusColor)}
+    ${t.version ? `<span class="text-muted" style="font-size:.8rem;margin-left:.5rem">v${t.version}</span>` : ''}
+  </div>
+  <div class="card-body">
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+      ${!t.installed
+        ? `<button class="btn btn-xs btn-primary" onclick="dbToolAction('${id}','install')">Install</button>`
+        : `
+        <button class="btn btn-xs" onclick="dbToolAction('${id}','reinstall')">Reinstall</button>
+        <button class="btn btn-xs btn-danger" onclick="dbToolAction('${id}','remove')">Remove</button>
+        <a href="${url}" target="_blank" class="btn btn-xs btn-ghost">Open ↗</a>`
+      }
+    </div>
   </div>
 </div>`;
     };
@@ -1827,6 +2074,16 @@ ${dbs.map(d=>`<tr>
   </div>
 </div>
 
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header"><span class="card-title">Database Admin Tools</span></div>
+  <div class="card-body" style="padding-bottom:.5rem">
+    <div class="grid-2 gap-2">
+      ${toolCard('phpmyadmin', 'phpMyAdmin', '🛢', `http://${location.hostname}/phpmyadmin`)}
+      ${toolCard('pgadmin',    'pgAdmin 4',  '🐘', `http://${location.hostname}/pgadmin4`)}
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-header"><span class="card-title">All Databases</span><span class="text-muted" style="font-size:.8rem">${dbs.length} total</span></div>
   ${dbTable}
@@ -1859,6 +2116,142 @@ ${dbs.map(d=>`<tr>
     const r = await Nova.api('system','db-engine-action',{method:'POST',body:{engine,action:'set-active'}});
     Nova.toast(r?.message||(r?.success?'Active engine updated':'Failed'), r?.success?'success':'error');
     if (r?.success) adminPage('mysql-manager');
+  };
+
+  window.dbToolAction = (tool, action) => {
+    const names = { phpmyadmin: 'phpMyAdmin', pgadmin: 'pgAdmin 4' };
+    const name  = names[tool] || tool;
+    const msgs  = {
+      install:   `Install ${name}?`,
+      reinstall: `Reinstall ${name}? The existing installation will be removed first.`,
+      remove:    `Remove ${name}?`,
+    };
+
+    // pgAdmin needs an admin account — collect credentials before install/reinstall
+    if (tool === 'pgadmin' && action !== 'remove') {
+      Nova.modal(`${action === 'reinstall' ? 'Reinstall' : 'Install'} pgAdmin 4`, `
+        <p class="text-muted text-sm mb-2">pgAdmin requires an admin account to be created on first run.</p>
+        <div class="form-group"><label>Admin Email</label><input id="pga-email" class="form-control" type="email" placeholder="admin@example.com"></div>
+        <div class="form-group"><label>Admin Password</label><input id="pga-pass" class="form-control" type="password" placeholder="Strong password"></div>`,
+        `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+         <button class="btn btn-primary" onclick="dbToolRunInstall('pgadmin','${action}')">Continue</button>`);
+      return;
+    }
+
+    const openTerminal = (extra = {}) => {
+      document.querySelector('.modal-overlay')?.remove();
+      const termId = 'dbt-term-' + Date.now();
+      const verb   = action === 'remove' ? 'Removing' : action === 'reinstall' ? 'Reinstalling' : 'Installing';
+      Nova.modal(`${verb} ${name}`, `
+        <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+             padding:1rem;border-radius:6px;height:280px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+          <span style="color:#7ec8e3">Starting…</span>\n
+        </div>`,
+        `<button class="btn btn-ghost" id="dbt-term-close" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+
+      const term   = document.getElementById(termId);
+      const append = t => { term.textContent += t; term.scrollTop = term.scrollHeight; };
+
+      fetch('/api/system/db-tools-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool, action, ...extra }),
+        credentials: 'same-origin',
+      }).then(resp => {
+        if (!resp.ok) { append(`\nHTTP error ${resp.status}`); return; }
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        const read = () => reader.read().then(({ done, value }) => {
+          if (done) { append('\n[stream closed]'); return; }
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop();
+          for (const part of parts) {
+            const m = part.match(/^data: (.+)$/m);
+            if (!m) continue;
+            try {
+              const obj = JSON.parse(m[1]);
+              if (obj.line)  { append(obj.line); }
+              else if (obj.error) { append(`\n✗ ${obj.error}\n`); }
+              else if (obj.done) {
+                const btn = document.getElementById('dbt-term-close');
+                if (btn) {
+                  btn.textContent = 'Done';
+                  btn.className   = 'btn btn-primary';
+                  btn.onclick     = () => { document.querySelector('.modal-overlay')?.remove(); adminPage('mysql-manager'); };
+                }
+              }
+            } catch(e) {}
+          }
+          read();
+        }).catch(err => append(`\n[error: ${err.message}]`));
+        read();
+      }).catch(err => append(`\nFetch error: ${err.message}`));
+    };
+
+    Nova.confirm(msgs[action], () => openTerminal(), action === 'remove');
+  };
+
+  window.dbToolRunInstall = (tool, action) => {
+    const email = document.getElementById('pga-email')?.value?.trim();
+    const pass  = document.getElementById('pga-pass')?.value;
+    if (!email) { Nova.toast('Email is required','error'); return; }
+    if (!pass)  { Nova.toast('Password is required','error'); return; }
+    // Re-invoke with credentials — openTerminal will close the form modal first
+    const names = { phpmyadmin: 'phpMyAdmin', pgadmin: 'pgAdmin 4' };
+    const name  = names[tool] || tool;
+    const msgs  = { install: `Install ${name}?`, reinstall: `Reinstall ${name}?` };
+    const doOpen = () => {
+      document.querySelector('.modal-overlay')?.remove();
+      const termId = 'dbt-term-' + Date.now();
+      const verb   = action === 'reinstall' ? 'Reinstalling' : 'Installing';
+      Nova.modal(`${verb} ${name}`, `
+        <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+             padding:1rem;border-radius:6px;height:280px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+          <span style="color:#7ec8e3">Starting…</span>\n
+        </div>`,
+        `<button class="btn btn-ghost" id="dbt-term-close" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+      const term   = document.getElementById(termId);
+      const append = t => { term.textContent += t; term.scrollTop = term.scrollHeight; };
+      fetch('/api/system/db-tools-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool, action, pga_email: email, pga_pass: pass }),
+        credentials: 'same-origin',
+      }).then(resp => {
+        if (!resp.ok) { append(`\nHTTP error ${resp.status}`); return; }
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        const read = () => reader.read().then(({ done, value }) => {
+          if (done) { append('\n[stream closed]'); return; }
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop();
+          for (const part of parts) {
+            const m = part.match(/^data: (.+)$/m);
+            if (!m) continue;
+            try {
+              const obj = JSON.parse(m[1]);
+              if (obj.line) { append(obj.line); }
+              else if (obj.error) { append(`\n✗ ${obj.error}\n`); }
+              else if (obj.done) {
+                const btn = document.getElementById('dbt-term-close');
+                if (btn) {
+                  btn.textContent = 'Done';
+                  btn.className   = 'btn btn-primary';
+                  btn.onclick     = () => { document.querySelector('.modal-overlay')?.remove(); adminPage('mysql-manager'); };
+                }
+              }
+            } catch(e) {}
+          }
+          read();
+        }).catch(err => append(`\n[error: ${err.message}]`));
+        read();
+      }).catch(err => append(`\nFetch error: ${err.message}`));
+    };
+    doOpen();
   };
 
   // ── Mail Server ────────────────────────────────────────────────────────────
@@ -2128,32 +2521,129 @@ window.wpInstallModal = () => {
   Nova.modal('Install WordPress', `
     <div class="form-group"><label>Account</label><select id="wp-acct" class="form-control">${opts}</select></div>
     <div class="form-group"><label>Domain</label><input id="wp-domain" class="form-control" placeholder="example.com"></div>
-    <div class="form-group"><label>Path (leave / for root)</label><input id="wp-path" class="form-control" value="/"></div>
+    <div class="form-group">
+      <label>Install Path</label>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <select id="wp-path-preset" class="form-control" style="flex:0 0 auto;width:auto" onchange="wpPathPreset(this)">
+          <option value="/">/ (site root)</option>
+          <option value="/blog">/blog</option>
+          <option value="/wp">/wp</option>
+          <option value="/wordpress">/wordpress</option>
+          <option value="/cms">/cms</option>
+          <option value="__custom">Custom…</option>
+        </select>
+        <input id="wp-path" class="form-control" value="/" placeholder="/path" style="display:none">
+      </div>
+      <p class="text-muted text-sm mt-1">Install at site root (/) unless you want WordPress at a subdirectory.</p>
+    </div>
     <div class="form-group"><label>Site Title</label><input id="wp-title" class="form-control" placeholder="My WordPress Site"></div>
     <div class="form-group"><label>WP Admin Username</label><input id="wp-admin" class="form-control" value="admin"></div>
     <div class="form-group"><label>WP Admin Password</label><input id="wp-adminpass" type="password" class="form-control"></div>
     <div class="form-group"><label>WP Admin Email</label><input id="wp-email" type="email" class="form-control"></div>
-    <p class="text-muted text-sm">wp-cli will be downloaded automatically if not installed. This may take 1-2 minutes.</p>`,
+    <p class="text-muted text-sm">wp-cli will be downloaded automatically if not installed. Installation takes 1-2 minutes — a live terminal will show progress.</p>`,
     `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
      <button class="btn btn-primary" id="wp-install-btn" onclick="wpSubmitInstall()">Install</button>`);
 };
 
-window.wpSubmitInstall = async () => {
-  const btn = document.getElementById('wp-install-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Installing…'; }
-  Nova.toast('Installing WordPress — this may take 1-2 minutes…', 'info', 90000);
-  const res = await Nova.api('wordpress','install',{method:'POST',body:{
-    account_id: +document.getElementById('wp-acct')?.value,
-    domain:     document.getElementById('wp-domain')?.value,
-    path:       document.getElementById('wp-path')?.value || '/',
-    site_title: document.getElementById('wp-title')?.value,
-    admin_user: document.getElementById('wp-admin')?.value,
-    admin_pass: document.getElementById('wp-adminpass')?.value,
-    admin_email:document.getElementById('wp-email')?.value,
-  }});
+window.wpPathPreset = (sel) => {
+  const pathInput = document.getElementById('wp-path');
+  if (sel.value === '__custom') {
+    pathInput.style.display = '';
+    pathInput.value = '/';
+    pathInput.focus();
+  } else {
+    pathInput.style.display = 'none';
+    pathInput.value = sel.value;
+  }
+};
+
+window.wpSubmitInstall = () => {
+  const acctId  = +document.getElementById('wp-acct')?.value;
+  const domain  = document.getElementById('wp-domain')?.value?.trim();
+  const preset  = document.getElementById('wp-path-preset')?.value;
+  const path    = preset === '__custom'
+    ? (document.getElementById('wp-path')?.value?.trim() || '/')
+    : (preset || '/');
+  const title   = document.getElementById('wp-title')?.value?.trim();
+  const admin   = document.getElementById('wp-admin')?.value?.trim();
+  const pass    = document.getElementById('wp-adminpass')?.value;
+  const email   = document.getElementById('wp-email')?.value?.trim();
+
+  if (!domain) { Nova.toast('Domain is required','error'); return; }
+  if (!title)  { Nova.toast('Site title is required','error'); return; }
+  if (!admin)  { Nova.toast('Admin username is required','error'); return; }
+  if (!pass)   { Nova.toast('Admin password is required','error'); return; }
+  if (!email)  { Nova.toast('Admin email is required','error'); return; }
+
+  // Close form modal, open terminal modal
   document.querySelector('.modal-overlay')?.remove();
-  if (res?.success) { Nova.toast('WordPress installed!','success'); adminPage('wordpress'); }
-  else Nova.toast(res?.message || 'Install failed','error');
+
+  const termId = 'wp-term-' + Date.now();
+  Nova.modal('Installing WordPress', `
+    <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+         padding:1rem;border-radius:6px;height:280px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+      <span style="color:#7ec8e3">Connecting to server…</span>\n
+    </div>`,
+    `<button class="btn btn-ghost" id="wp-term-cancel" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+
+  const term = document.getElementById(termId);
+  const append = (text) => {
+    term.textContent += text;
+    term.scrollTop = term.scrollHeight;
+  };
+
+  const body = JSON.stringify({ account_id: acctId, domain, path, site_title: title,
+                                admin_user: admin, admin_pass: pass, admin_email: email });
+
+  fetch(`/api/wordpress/install-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    credentials: 'same-origin',
+  }).then(resp => {
+    if (!resp.ok) { append(`\nHTTP error ${resp.status}`); return; }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const read = () => reader.read().then(({ done, value }) => {
+      if (done) { append('\n[stream closed]'); return; }
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const m = part.match(/^data: (.+)$/m);
+        if (!m) continue;
+        try {
+          const obj = JSON.parse(m[1]);
+          if (obj.line) {
+            // Check for __DONE__ sentinel
+            if (obj.line.startsWith('__DONE__')) {
+              try {
+                const result = JSON.parse(obj.line.slice(8));
+                append(`\n✓ WordPress installed! Admin: ${result.admin_user} | ID #${result.id}\n`);
+              } catch(e) { append('\n✓ WordPress installed!\n'); }
+            } else {
+              append(obj.line);
+            }
+          } else if (obj.error) {
+            append(`\n✗ Error: ${obj.error}\n`);
+          } else if (obj.done) {
+            const cancelBtn = document.getElementById('wp-term-cancel');
+            if (cancelBtn) {
+              cancelBtn.textContent = 'Done';
+              cancelBtn.className = 'btn btn-primary';
+              cancelBtn.onclick = () => {
+                document.querySelector('.modal-overlay')?.remove();
+                adminPage('wordpress');
+              };
+            }
+          }
+        } catch(e) {}
+      }
+      read();
+    }).catch(err => append(`\n[connection error: ${err.message}]`));
+    read();
+  }).catch(err => append(`\nFetch error: ${err.message}`));
 };
 
 window.wpUpdate = async (id, type) => {
@@ -3628,15 +4118,55 @@ async function serverOptions() {
 </div>`;
 }
 
-window.soSave = async (key, inputId, label) => {
+window.soSave = (key, inputId, label) => {
   const val = document.getElementById(inputId)?.value;
   if (!val) return;
-  Nova.confirm(`Switch ${label} to "${val}"? This will stop the current service and start the new one.`, async () => {
-    Nova.loading(`Switching ${label} to ${val}…`);
-    const r = await Nova.api('system', 'save-option', { method:'POST', body:{ key, value: val } });
-    Nova.loadingDone();
-    Nova.toast(r?.success ? `${label} switched to ${val}` : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-    if (r?.success) adminPage('server-options');
+  Nova.confirm(`Switch ${label} to "${val}"? This will stop the current service and start the new one.`, () => {
+    const termId = 'so-term-' + Date.now();
+    Nova.modal(`Switching ${label} to ${val}`, `
+      <div id="${termId}" style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:.82rem;
+           padding:1rem;border-radius:6px;height:260px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+        <span style="color:#7ec8e3">Starting…</span>\n
+      </div>`,
+      `<button class="btn btn-ghost" id="so-term-close" onclick="this.closest('.modal-overlay').remove()">Close</button>`);
+    const term   = document.getElementById(termId);
+    const append = t => { term.textContent += t; term.scrollTop = term.scrollHeight; };
+    fetch('/api/system/service-switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: val }),
+      credentials: 'same-origin',
+    }).then(resp => {
+      if (!resp.ok) { append(`\nHTTP error ${resp.status}`); return; }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      const read = () => reader.read().then(({ done, value }) => {
+        if (done) { append('\n[stream closed]'); return; }
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = part.match(/^data: (.+)$/m);
+          if (!m) continue;
+          try {
+            const obj = JSON.parse(m[1]);
+            if (obj.line) { append(obj.line); }
+            else if (obj.error) { append(`\n✗ ${obj.error}\n`); }
+            else if (obj.done) {
+              const btn = document.getElementById('so-term-close');
+              if (btn) {
+                btn.textContent = 'Done';
+                btn.className   = 'btn btn-primary';
+                btn.onclick     = () => { document.querySelector('.modal-overlay')?.remove(); adminPage('server-options'); };
+              }
+            }
+          } catch(e) {}
+        }
+        read();
+      }).catch(err => append(`\n[error: ${err.message}]`));
+      read();
+    }).catch(err => append(`\nFetch error: ${err.message}`));
   }, true);
 };
 

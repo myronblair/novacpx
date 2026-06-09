@@ -420,6 +420,52 @@ switch ($action) {
         Response::success(['ignoreip' => $defaults], 'Whitelist reset to server defaults');
         break;
 
+    // ── Fail2Ban: get global config (bantime/findtime/maxretry) ──────────────
+    case 'f2b-config-get':
+        $content = file_exists(JAIL_LOCAL) ? file_get_contents(JAIL_LOCAL) : '';
+        $get = function(string $key, string $default) use ($content): string {
+            return preg_match('/^\s*' . preg_quote($key) . '\s*=\s*(.+)$/m', $content, $m) ? trim($m[1]) : $default;
+        };
+        Response::success([
+            'bantime'  => $get('bantime',  '3600'),
+            'findtime' => $get('findtime', '600'),
+            'maxretry' => $get('maxretry', '5'),
+        ]);
+        break;
+
+    // ── Fail2Ban: save global config ──────────────────────────────────────
+    case 'f2b-config-save':
+        $bantime  = (int)($body['bantime']  ?? 3600);
+        $findtime = (int)($body['findtime'] ?? 600);
+        $maxretry = (int)($body['maxretry'] ?? 5);
+        if ($bantime < 60 || $findtime < 60 || $maxretry < 1) Response::error('Invalid values');
+        $content = file_exists(JAIL_LOCAL) ? file_get_contents(JAIL_LOCAL) : '';
+        $set = function(string $key, string $val) use (&$content): void {
+            if (preg_match('/^\s*' . preg_quote($key) . '\s*=/m', $content)) {
+                $content = preg_replace('/^(\s*' . preg_quote($key) . '\s*=\s*).+$/m', '${1}' . $val, $content);
+            } else {
+                // Insert into [DEFAULT] section
+                $content = preg_replace('/(\[DEFAULT\][^\[]*)/s', '$1' . "$key   = $val\n", $content, 1);
+            }
+        };
+        $set('bantime',  (string)$bantime);
+        $set('findtime', (string)$findtime);
+        $set('maxretry', (string)$maxretry);
+        file_put_contents(JAIL_LOCAL, $content);
+        fw_exec('fail2ban-client reload');
+        audit('firewall.f2b-config', "bantime=$bantime findtime=$findtime maxretry=$maxretry");
+        Response::success(null, 'Fail2Ban configuration saved');
+        break;
+
+    // ── Fail2Ban: tail log ────────────────────────────────────────────────
+    case 'f2b-log':
+        $lines = max(50, min(500, (int)($body['lines'] ?? 100)));
+        $log   = '/var/log/fail2ban.log';
+        if (!file_exists($log)) Response::error('Fail2Ban log not found');
+        $raw   = trim(shell_exec("tail -n {$lines} " . escapeshellarg($log)) ?: '');
+        Response::success(['log' => $raw, 'lines' => $lines]);
+        break;
+
     // ── UFW: raw command (admin escape hatch) ─────────────────────────────
     case 'raw':
         $cmd = trim($body['cmd'] ?? '');

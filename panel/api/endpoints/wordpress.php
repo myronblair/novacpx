@@ -27,6 +27,39 @@ match ($action) {
         Response::success($result, 'WordPress installed successfully');
     })(),
 
+    'install-stream' => (function() use ($wp, $body, $accountId) {
+        $required = ['domain','path','admin_user','admin_email','admin_pass','site_title'];
+        foreach ($required as $f) if (empty($body[$f])) {
+            header('Content-Type: text/event-stream');
+            echo 'data: ' . json_encode(['error' => "Missing: {$f}"]) . "\n\n";
+            flush(); exit;
+        }
+        if (!$accountId) {
+            header('Content-Type: text/event-stream');
+            echo 'data: ' . json_encode(['error' => 'account_id required']) . "\n\n";
+            flush(); exit;
+        }
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        ob_implicit_flush(true);
+        while (ob_get_level() > 0) ob_end_flush();
+        try {
+            foreach ($wp->installStream($accountId, $body['domain'], $body['path'],
+                        $body['admin_user'], $body['admin_email'], $body['admin_pass'],
+                        $body['site_title']) as $line) {
+                echo 'data: ' . json_encode(['line' => $line]) . "\n\n";
+                flush();
+            }
+        } catch (Throwable $e) {
+            echo 'data: ' . json_encode(['error' => $e->getMessage()]) . "\n\n";
+            flush();
+        }
+        echo 'data: ' . json_encode(['done' => true]) . "\n\n";
+        flush();
+        exit;
+    })(),
+
     'update-core' => (function() use ($wp, $body) {
         $id = (int)($body['id'] ?? 0);
         if (!$id) Response::error('id required');

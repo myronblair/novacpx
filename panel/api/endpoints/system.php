@@ -442,44 +442,130 @@ BASH;
         $value = $body['value'] ?? '';
         $allowed = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname'];
         if (!in_array($key, $allowed)) Response::error("Invalid setting key: $key");
+        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$key, $value]);
+        audit("settings.{$key}", $value);
+        Response::success(null, "Setting saved: {$key} = {$value}");
+    })(),
 
-        // Save before switching so the new value is in DB
+    // Streaming service switch for web/mail/ftp/dns server changes
+    'service-switch' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $key   = $body['key']   ?? '';
+        $value = $body['value'] ?? '';
+        $serviceKeys = ['web_server','mail_server','ftp_server','dns_server'];
+        if (!in_array($key, $serviceKeys)) Response::error("Invalid service key: $key");
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        while (ob_get_level()) ob_end_clean();
+
+        $sse = function(string $line) { echo 'data: ' . json_encode(['line' => $line]) . "\n\n"; flush(); };
+        $run = function(string $cmd) use ($sse): int {
+            $proc = proc_open($cmd, [1 => ['pipe','w'], 2 => ['pipe','w']], $pipes);
+            if (!$proc) { $sse("  [failed to start]\n"); return 1; }
+            while (!feof($pipes[1])) {
+                $line = fgets($pipes[1]);
+                if ($line !== false && $line !== '') $sse($line);
+            }
+            while (!feof($pipes[2])) {
+                $line = fgets($pipes[2]);
+                if ($line !== false && $line !== '') $sse("  " . $line);
+            }
+            fclose($pipes[1]); fclose($pipes[2]);
+            return proc_close($proc);
+        };
+
+        // Persist selection
         $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$key, $value]);
 
-        // Sync config.ini so PHP constants reflect the change immediately on next request
+        // Sync config.ini
         $configFile = '/etc/novacpx/config.ini';
-        if (in_array($key, ['web_server','ftp_server','dns_server']) && file_exists($configFile)) {
+        if (file_exists($configFile)) {
             $ini = file_get_contents($configFile);
-            if ($key === 'web_server') {
-                $ini = preg_replace('/^server\s*=\s*.*/m', "server = $value", $ini);
-            }
+            if ($key === 'web_server') $ini = preg_replace('/^server\s*=\s*.*/m', "server = $value", $ini);
             file_put_contents($configFile, $ini);
         }
 
-        // Inline service switching
-        // NOTE: Apache is NEVER stopped — it always serves the panel on ports 8880-8883.
-        // The web_server switch only controls which server owns ports 80/443 for customer hosting.
         if ($key === 'web_server') {
-            $target = in_array($value, ['nginx']) ? 'nginx' : 'apache';
-            $out = shell_exec("sudo /usr/local/bin/novacpx-webserver-switch " . escapeshellarg($target) . " 2>&1");
-            novacpx_log('info', "web_server switched to $target: $out");
-        } elseif ($key === 'ftp_server') {
-            foreach (['proftpd','vsftpd','pure-ftpd'] as $s) { shell_exec("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null"); }
-            $startSvc = match($value) { 'vsftpd' => 'vsftpd', 'pureftpd' => 'pure-ftpd', default => 'proftpd' };
-            if (trim(shell_exec("dpkg -l $startSvc 2>/dev/null | grep -c '^ii'") ?: '0') > 0) {
-                shell_exec("sudo systemctl enable $startSvc 2>/dev/null && sudo systemctl start $startSvc 2>/dev/null");
+            $target = ($value === 'nginx') ? 'nginx' : 'apache';
+            $sse("▶ Switching web server to {$target}…\n");
+            if (file_exists('/usr/local/bin/novacpx-webserver-switch')) {
+                $run("sudo /usr/local/bin/novacpx-webserver-switch " . escapeshellarg($target) . " 2>&1");
+            } else {
+                // Fallback: manage services directly
+                if ($target === 'nginx') {
+                    $sse("  Stopping Apache on ports 80/443…\n");
+                    $run("sudo systemctl stop apache2 2>&1");
+                    $sse("  Starting Nginx…\n");
+                    $run("sudo systemctl enable nginx 2>&1 && sudo systemctl start nginx 2>&1");
+                } else {
+                    $sse("  Stopping Nginx…\n");
+                    $run("sudo systemctl stop nginx 2>&1");
+                    $sse("  Starting Apache…\n");
+                    $run("sudo systemctl enable apache2 2>&1 && sudo systemctl start apache2 2>&1");
+                }
             }
+            $sse("  ✓ Web server switched to {$target}\n");
+
+        } elseif ($key === 'mail_server') {
+            $sse("▶ Updating mail server config to {$value}…\n");
+            if ($value === 'postfix-dovecot-rspamd') {
+                $installed = trim(shell_exec("dpkg -l rspamd 2>/dev/null | grep -c '^ii'") ?: '0');
+                if ($installed === '0') {
+                    $sse("  Installing Rspamd (this may take 1–2 minutes)…\n");
+                    $run("sudo apt-get install -y rspamd 2>&1");
+                }
+                $sse("  Enabling Rspamd…\n");
+                $run("sudo systemctl enable rspamd 2>&1 && sudo systemctl start rspamd 2>&1");
+                $sse("  ✓ Rspamd enabled\n");
+            } else {
+                $run("sudo systemctl stop rspamd 2>/dev/null; sudo systemctl disable rspamd 2>/dev/null; true");
+                $sse("  ✓ Rspamd disabled\n");
+            }
+            // Postfix + Dovecot always run
+            $run("sudo systemctl is-active postfix || sudo systemctl start postfix 2>&1");
+            $run("sudo systemctl is-active dovecot || sudo systemctl start dovecot 2>&1");
+            $sse("  ✓ Mail stack: postfix + dovecot running\n");
+
+        } elseif ($key === 'ftp_server') {
+            $sse("▶ Switching FTP server to {$value}…\n");
+            foreach (['proftpd','vsftpd','pure-ftpd'] as $s) {
+                $run("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null; true");
+            }
+            $startSvc = match($value) { 'vsftpd' => 'vsftpd', 'pureftpd' => 'pure-ftpd', default => 'proftpd' };
+            $installed = trim(shell_exec("dpkg -l $startSvc 2>/dev/null | grep -c '^ii'") ?: '0');
+            if ($installed === '0') {
+                $sse("  Installing {$startSvc}…\n");
+                $run("sudo apt-get install -y $startSvc 2>&1");
+            }
+            $sse("  Starting {$startSvc}…\n");
+            $run("sudo systemctl enable $startSvc 2>&1 && sudo systemctl start $startSvc 2>&1");
+            $sse("  ✓ FTP server switched to {$startSvc}\n");
+
         } elseif ($key === 'dns_server') {
-            foreach (['named','bind9','pdns','nsd'] as $s) { shell_exec("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null"); }
+            $sse("▶ Switching DNS server to {$value}…\n");
+            foreach (['named','bind9','pdns','nsd'] as $s) {
+                $run("sudo systemctl stop $s 2>/dev/null; sudo systemctl disable $s 2>/dev/null; true");
+            }
             if ($value !== 'none') {
                 $startSvc = match($value) { 'powerdns' => 'pdns', 'nsd' => 'nsd', default => 'named' };
-                shell_exec("sudo systemctl enable $startSvc 2>/dev/null && sudo systemctl start $startSvc 2>/dev/null");
+                $installed = trim(shell_exec("dpkg -l $startSvc 2>/dev/null | grep -c '^ii'") ?: '0');
+                if ($installed === '0') {
+                    $sse("  Installing {$startSvc}…\n");
+                    $run("sudo apt-get install -y $startSvc 2>&1");
+                }
+                $sse("  Starting {$startSvc}…\n");
+                $run("sudo systemctl enable $startSvc 2>&1 && sudo systemctl start $startSvc 2>&1");
+                $sse("  ✓ DNS server switched to {$startSvc}\n");
+            } else {
+                $sse("  ✓ All local DNS servers stopped\n");
             }
         }
-        // mail_server: postfix + dovecot are always running; mail_server setting controls config template only
 
         audit("settings.{$key}", $value);
-        Response::success(null, "Setting saved: {$key} = {$value}");
+        echo 'data: ' . json_encode(['done' => true]) . "\n\n"; flush();
+        exit;
     })(),
 
     // ── Notification settings (#25) ───────────────────────────────────────────
@@ -594,15 +680,7 @@ BASH;
         if (!in_array($engine, ['mysql','mariadb','postgresql'])) Response::error("Invalid engine");
         if (!in_array($action, ['install','remove','start','stop','restart','set-active'])) Response::error("Invalid action");
 
-        // Safety: never remove the engine that is currently hosting the NovaCPX panel DB
-        if ($action === 'remove') {
-            $activeConn = strtolower(DB_HOST === 'localhost' ? 'mysql' : '');
-            $isMariaDB  = str_contains(strtolower(shell_exec("mysql --version 2>/dev/null") ?: ''), 'mariadb');
-            $runningEngine = $isMariaDB ? 'mariadb' : 'mysql';
-            if ($engine === $runningEngine || ($engine === 'mysql' && $isMariaDB) || ($engine === 'mariadb' && !$isMariaDB)) {
-                Response::error("Cannot remove $engine — it is currently hosting the NovaCPX panel database. Migrate first.", 409);
-            }
-        }
+        // Panel DB is SQLite — no MySQL engine hosts it, so any MySQL/MariaDB/PG can be removed freely
 
         $out = '';
         if ($action === 'install') {
@@ -611,7 +689,7 @@ BASH;
                 'mariadb'    => 'mariadb-server',
                 'postgresql' => 'postgresql postgresql-contrib',
             };
-            $out = shell_exec("DEBIAN_FRONTEND=noninteractive sudo apt-get install -y $pkg 2>&1");
+            $out = shell_exec("sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y $pkg 2>&1");
             shell_exec("sudo systemctl enable $engine 2>/dev/null && sudo systemctl start $engine 2>/dev/null");
         } elseif ($action === 'remove') {
             $pkg = match($engine) {
@@ -620,7 +698,7 @@ BASH;
                 'postgresql' => 'postgresql postgresql-contrib',
             };
             shell_exec("sudo systemctl stop $engine 2>/dev/null || true");
-            $out = shell_exec("DEBIAN_FRONTEND=noninteractive sudo apt-get remove -y $pkg 2>&1");
+            $out = shell_exec("sudo env DEBIAN_FRONTEND=noninteractive apt-get remove -y $pkg 2>&1");
         } elseif ($action === 'set-active') {
             $db->execute("INSERT INTO settings (`key`,`value`) VALUES ('active_db_engine',?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$engine]);
             audit('settings.active_db_engine', $engine);
@@ -630,6 +708,145 @@ BASH;
         }
         audit("db-engine.$action", $engine);
         Response::success(['output' => substr($out ?: '', -1000)], ucfirst($action) . " $engine done");
+    })(),
+
+    'db-tools' => (function() {
+        Auth::getInstance()->require('admin');
+        $pmaInstalled  = (int)trim(shell_exec("dpkg -l phpmyadmin 2>/dev/null | grep -c '^ii'") ?: '0') > 0
+                      || is_dir('/usr/share/phpmyadmin');
+        $pgaInstalled  = (int)trim(shell_exec("dpkg -l pgadmin4 2>/dev/null | grep -c '^ii'") ?: '0') > 0
+                      || is_file('/usr/pgadmin4/bin/pgadmin4') || is_dir('/usr/pgadmin4');
+        $pmaVer = $pmaInstalled
+            ? trim(shell_exec("dpkg -l phpmyadmin 2>/dev/null | awk '/^ii/{print $3}' | head -1") ?: '')
+            : '';
+        $pgaVer = $pgaInstalled
+            ? trim(shell_exec("pgadmin4 --version 2>/dev/null | grep -oP '[0-9]+\\.[0-9]+' | head -1") ?: '')
+            : '';
+        Response::success([
+            'phpmyadmin' => ['installed' => $pmaInstalled, 'version' => $pmaVer],
+            'pgadmin'    => ['installed' => $pgaInstalled, 'version' => $pgaVer],
+        ]);
+    })(),
+
+    'db-tools-stream' => (function() use ($body) {
+        Auth::getInstance()->require('admin');
+        $tool   = $body['tool']   ?? '';
+        $action = $body['action'] ?? '';
+        if (!in_array($tool,   ['phpmyadmin','pgadmin'])) { echo 'data:'.json_encode(['error'=>'Invalid tool'])."\n\n"; exit; }
+        if (!in_array($action, ['install','reinstall','remove'])) { echo 'data:'.json_encode(['error'=>'Invalid action'])."\n\n"; exit; }
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        ob_implicit_flush(true);
+        while (ob_get_level() > 0) ob_end_flush();
+        set_time_limit(300);
+
+        $sse = function(string $line) { echo 'data: ' . json_encode(['line' => $line]) . "\n\n"; flush(); };
+        $run = function(string $cmd) use ($sse): int {
+            $proc = proc_open($cmd, [1 => ['pipe','w'], 2 => ['pipe','w']], $pipes);
+            if (!$proc) { $sse("  [failed to start process]\n"); return 1; }
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+            while (true) {
+                $r = [$pipes[1], $pipes[2]]; $w = $e = [];
+                if (stream_select($r, $w, $e, 1) > 0) {
+                    foreach ($r as $s) {
+                        $line = fgets($s, 4096);
+                        if ($line !== false && $line !== '') $sse($line);
+                    }
+                }
+                if (feof($pipes[1]) && feof($pipes[2])) break;
+            }
+            fclose($pipes[1]); fclose($pipes[2]);
+            return proc_close($proc);
+        };
+
+        $env = 'sudo env DEBIAN_FRONTEND=noninteractive';
+
+        if ($tool === 'phpmyadmin') {
+            if ($action === 'remove') {
+                $sse("▶ Removing phpMyAdmin…\n");
+                $run("$env apt-get remove -y phpmyadmin 2>&1");
+            } else {
+                if ($action === 'reinstall') {
+                    $sse("▶ Removing existing phpMyAdmin installation…\n");
+                    $run("$env apt-get remove -y phpmyadmin 2>&1");
+                }
+                $sse("▶ Pre-configuring debconf answers…\n");
+                shell_exec("echo 'phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2' | sudo debconf-set-selections 2>/dev/null");
+                shell_exec("echo 'phpmyadmin phpmyadmin/dbconfig-install boolean true' | sudo debconf-set-selections 2>/dev/null");
+                $sse("  ✓ Done\n");
+                $sse("▶ Installing phpMyAdmin (this takes 20–60 seconds)…\n");
+                $rc = $run("$env apt-get install -y phpmyadmin php8.3-mbstring php8.3-xml php8.3-zip 2>&1");
+                if ($rc !== 0) { echo 'data:'.json_encode(['error'=>'apt-get failed (see output above)'])."\n\n"; flush(); exit; }
+                $sse("▶ Configuring web server alias…\n");
+                if (!is_link('/etc/apache2/conf-enabled/phpmyadmin.conf') && is_file('/etc/phpmyadmin/apache.conf')) {
+                    shell_exec("sudo ln -sf /etc/phpmyadmin/apache.conf /etc/apache2/conf-enabled/phpmyadmin.conf 2>/dev/null");
+                    shell_exec("sudo systemctl reload apache2 2>/dev/null || true");
+                    $sse("  ✓ Apache alias enabled\n");
+                }
+                if (is_dir('/etc/nginx') && !is_file('/etc/nginx/conf.d/phpmyadmin.conf')) {
+                    $nginxConf = "location /phpmyadmin {\n    root /usr/share/;\n    index index.php;\n    location ~ ^/phpmyadmin/(.+\\.php)\$ {\n        root /usr/share/;\n        fastcgi_pass unix:/run/php/php8.3-fpm.sock;\n        fastcgi_index index.php;\n        include fastcgi.conf;\n    }\n}\n";
+                    shell_exec("echo " . escapeshellarg($nginxConf) . " | sudo tee /etc/nginx/conf.d/phpmyadmin.conf > /dev/null");
+                    shell_exec("sudo systemctl reload nginx 2>/dev/null || true");
+                    $sse("  ✓ Nginx alias created\n");
+                }
+            }
+        } else {
+            // pgAdmin4
+            if ($action === 'remove') {
+                $sse("▶ Removing pgAdmin 4…\n");
+                $run("$env apt-get remove -y pgadmin4 pgadmin4-web 2>&1");
+            } else {
+                if ($action === 'reinstall') {
+                    $sse("▶ Removing existing pgAdmin 4 installation…\n");
+                    $run("$env apt-get remove -y pgadmin4 pgadmin4-web 2>&1");
+                }
+                if (!is_file('/etc/apt/sources.list.d/pgadmin4.list')) {
+                    $sse("▶ Adding pgAdmin apt repository…\n");
+                    $distro = trim(shell_exec("lsb_release -cs 2>/dev/null") ?: 'jammy');
+                    $run("sudo curl -fsS https://www.pgadmin.org/static/packages_pgadmin_org.pub | sudo gpg --dearmor -o /usr/share/keyrings/pgadmin4.gpg 2>&1");
+                    $repoLine = "deb [signed-by=/usr/share/keyrings/pgadmin4.gpg] https://ftp.postgresql.org/pub/pgadmin/pgadmin4/apt/{$distro} pgadmin4 main\n";
+                    shell_exec("echo " . escapeshellarg($repoLine) . " | sudo tee /etc/apt/sources.list.d/pgadmin4.list > /dev/null");
+                    $sse("▶ Updating package lists…\n");
+                    $run("sudo apt-get update 2>&1");
+                }
+                $sse("▶ Installing pgAdmin 4 web (this takes 1–3 minutes)…\n");
+                $rc = $run("$env apt-get install -y pgadmin4-web 2>&1");
+                if ($rc !== 0) { echo 'data:'.json_encode(['error'=>'apt-get failed (see output above)'])."\n\n"; flush(); exit; }
+                // Enable Apache config
+                $sse("▶ Enabling Apache configuration…\n");
+                shell_exec("sudo a2enconf pgadmin4 2>/dev/null");
+                shell_exec("sudo systemctl reload apache2 2>/dev/null");
+                $sse("  ✓ Apache config enabled\n");
+                // Initialise pgAdmin DB with provided credentials
+                $pgaEmail = $body['pga_email'] ?? '';
+                $pgaPass  = $body['pga_pass']  ?? '';
+                if ($pgaEmail && $pgaPass) {
+                    $sse("▶ Initialising pgAdmin database and admin user…\n");
+                    // Wipe any broken DB from prior attempts
+                    shell_exec("sudo rm -f /var/lib/pgadmin/pgadmin4.db /var/lib/pgadmin/pgadmin4.db.* 2>/dev/null");
+                    $setupCmd = "sudo env"
+                        . " PGADMIN_SETUP_EMAIL=" . escapeshellarg($pgaEmail)
+                        . " PGADMIN_SETUP_PASSWORD=" . escapeshellarg($pgaPass)
+                        . " /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py setup-db 2>&1";
+                    $run($setupCmd);
+                    // Fix ownership so Apache/www-data can read the DB and log
+                    shell_exec("sudo mkdir -p /var/log/pgadmin && sudo chown -R www-data:www-data /var/lib/pgadmin /var/log/pgadmin 2>/dev/null");
+                    shell_exec("sudo systemctl reload apache2 2>/dev/null");
+                } else {
+                    $sse("  ⚠ No credentials provided — run Reinstall to set up admin user\n");
+                }
+            }
+        }
+
+        audit("db-tools.$action", $tool);
+        $verb = ['install'=>'Installed','reinstall'=>'Reinstalled','remove'=>'Removed'][$action];
+        $sse("  ✓ {$verb}!\n");
+        echo 'data: ' . json_encode(['done' => true, 'message' => "$verb $tool"]) . "\n\n";
+        flush();
+        exit;
     })(),
 
     default => Response::error("Unknown system action: $action", 404),
