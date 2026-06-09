@@ -1,6 +1,7 @@
 # NovaCPX .gitignore
 /etc/novacpx/config.ini
 panel/api/config.php
+VERSION
 *.log
 *.tmp
 /var/
