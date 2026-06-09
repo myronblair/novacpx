@@ -2749,7 +2749,7 @@ window.proxySync = async () => {
 };
 
 window.proxyAddHost = () => {
-  Nova.modal('Add Proxy Host', `
+  const ov = Nova.modal('Add Proxy Host', `
     <div class="form-group"><label>Domain</label>
       <input id="ph-domain" type="text" placeholder="example.com" class="form-control"></div>
     <div class="form-group"><label>Upstream URL</label>
@@ -2759,16 +2759,23 @@ window.proxyAddHost = () => {
       <label><input type="checkbox" id="ph-ssl"> Enable SSL</label></div>
     <div class="form-group"><label>Notes (optional)</label>
       <input id="ph-notes" type="text" class="form-control"></div>
-  `, async () => {
+  `,
+  `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+   <button class="btn btn-primary" id="ph-save-btn">Add Host</button>`
+  );
+  ov.querySelector('#ph-save-btn').addEventListener('click', async () => {
     const domain   = document.getElementById('ph-domain')?.value?.trim();
     const upstream = document.getElementById('ph-upstream')?.value?.trim();
     if (!domain || !upstream) { Nova.toast('Domain and upstream required', 'error'); return; }
+    const btn = ov.querySelector('#ph-save-btn');
+    btn.disabled = true; btn.textContent = 'Adding…';
     const r = await Nova.api('proxy', 'hosts', {
       method: 'POST',
       body: { domain, upstream, ssl_enabled: document.getElementById('ph-ssl')?.checked ? 1 : 0 }
     });
     Nova.toast(r?.success ? 'Host added' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-    if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
+    if (r?.success) { ov.remove(); Nova.loadPage('nginx-proxy', window._novaPages); }
+    else { btn.disabled = false; btn.textContent = 'Add Host'; }
   });
 };
 
@@ -2777,7 +2784,7 @@ window.proxyEditHost = async (id) => {
   const hosts  = hostsR?.data || (Array.isArray(hostsR) ? hostsR : []);
   const h      = hosts.find(x => x.id == id);
   if (!h) return;
-  Nova.modal('Edit Proxy Host', `
+  const ov = Nova.modal('Edit Proxy Host', `
     <div class="form-group"><label>Domain</label>
       <input id="phe-domain" type="text" value="${Nova.escHtml(h.domain)}" class="form-control"></div>
     <div class="form-group"><label>Upstream URL</label>
@@ -2787,7 +2794,13 @@ window.proxyEditHost = async (id) => {
     <div class="form-group"><label>Custom Nginx Config (overrides auto-generated)</label>
       <textarea id="phe-custom" rows="6" class="form-control" style="font-family:monospace;font-size:0.78rem">${Nova.escHtml(h.custom_config || '')}</textarea>
       <small class="text-muted">Leave blank to use auto-generated config</small></div>
-  `, async () => {
+  `,
+  `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+   <button class="btn btn-primary" id="phe-save-btn">Save Changes</button>`
+  );
+  ov.querySelector('#phe-save-btn').addEventListener('click', async () => {
+    const btn = ov.querySelector('#phe-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
     const r = await Nova.api('proxy', 'host', {
       method: 'PUT',
       body: { id,
@@ -2798,7 +2811,8 @@ window.proxyEditHost = async (id) => {
       }
     });
     Nova.toast(r?.success ? 'Updated' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-    if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
+    if (r?.success) { ov.remove(); Nova.loadPage('nginx-proxy', window._novaPages); }
+    else { btn.disabled = false; btn.textContent = 'Save Changes'; }
   });
 };
 
@@ -2892,7 +2906,7 @@ window.proxySetupInstructions = async () => {
 };
 
 window.proxySwitchLocal = () => {
-  Nova.modal('Enable Local Nginx Proxy', `
+  const slOv = Nova.modal('Enable Local Nginx Proxy', `
     <p style="margin-bottom:1rem">Nginx will be installed on <em>this server</em> and take over ports 80/443. Apache moves to an internal port and keeps serving all PHP sites — end users see no change.</p>
     <div style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-size:0.85rem;margin-bottom:1rem">
       <strong>What will happen:</strong><br>
@@ -2909,7 +2923,12 @@ window.proxySwitchLocal = () => {
       <input id="sl-port" type="number" class="form-control" value="8090" min="1024" max="65535"
              oninput="document.getElementById('sl-port-preview').textContent=this.value">
     </div>
-  `, () => {
+  `,
+  `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+   <button class="btn btn-primary" id="sl-switch-btn">Switch Now</button>`
+  );
+  slOv.querySelector('#sl-switch-btn').addEventListener('click', () => {
+    slOv.remove();
     const port = parseInt(document.getElementById('sl-port')?.value) || 8090;
     const ov   = Nova.modal('Switching to Local Proxy Mode', `
       <p style="color:var(--text-muted);margin-bottom:0.75rem">Moving Apache to port ${port} and starting nginx on 80/443…</p>
@@ -2947,7 +2966,7 @@ window.proxySwitchLocal = () => {
     }).catch(e => { log.textContent += '\n— Connection error: ' + e.message + '\n'; });
 
     ov.querySelector('.modal-close')?.addEventListener('click', () => { done = true; });
-  }, { confirmLabel: 'Switch Now' });
+  });
 };
 
 window.proxyDisableLocal = () => {
@@ -3017,18 +3036,25 @@ window.proxyRunSetup = () => {
 };
 
 window.proxyUninstall = () => {
-  Nova.modal('Uninstall Nginx Proxy', `
+  const ov = Nova.modal('Uninstall Nginx Proxy', `
     <p>Choose what to remove from the <strong>remote proxy VM</strong>:</p>
     <div class="form-group" style="margin-top:1rem">
       <label><input type="radio" name="uninst" value="configs" checked> Remove proxy host configs only <small class="text-muted">(keep nginx running)</small></label><br>
       <label style="margin-top:0.5rem"><input type="radio" name="uninst" value="full"> Remove everything <small class="text-muted">(uninstall nginx, delete all configs, disable proxy mode)</small></label>
     </div>
-  `, async () => {
-    const full = document.querySelector('input[name="uninst"]:checked')?.value === 'full';
+  `,
+  `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+   <button class="btn btn-danger" id="uninst-btn">Uninstall</button>`
+  );
+  ov.querySelector('#uninst-btn').addEventListener('click', async () => {
+    const btn  = ov.querySelector('#uninst-btn');
+    btn.disabled = true; btn.textContent = 'Removing…';
+    const full = ov.querySelector('input[name="uninst"]:checked')?.value === 'full';
     const r = await Nova.api('proxy', 'uninstall', { method: 'DELETE', body: { remove_nginx: full } });
     Nova.toast(r?.data?.result || r?.message || 'Done', r?.success ? 'success' : 'error');
-    if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
-  }, { confirmLabel: 'Uninstall', danger: true });
+    if (r?.success) { ov.remove(); Nova.loadPage('nginx-proxy', window._novaPages); }
+    else { btn.disabled = false; btn.textContent = 'Uninstall'; }
+  });
 };
 
 window.proxySettings = async () => {
