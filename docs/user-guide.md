@@ -61,7 +61,9 @@ Files outside your home directory cannot be accessed.
 
 ### Creating a mailbox
 
-Click **Add Email Account**. Enter the local part (the part before `@`), select the domain, and set a password. An optional storage quota limits how much mail the mailbox can hold.
+Click **Add Email Account**. Enter the local part (the part before `@`) in the text field, then select your domain from the dropdown. Set a password. An optional storage quota limits how much mail the mailbox can hold.
+
+Only domains on your account appear in the dropdown, preventing typos in the address.
 
 ### Accessing your email
 

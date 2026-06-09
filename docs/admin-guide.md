@@ -139,7 +139,18 @@ View all active login sessions. Revoke individual sessions or all sessions for a
 
 ### Updates
 
-Check for newer NovaCPX versions on GitHub. If an update is available, click **Update Now** — this runs `git pull` on the server and triggers a deploy.
+Check for NovaCPX and OS updates. Results are cached for 12 hours so the page loads instantly; click **↻ Refresh now** to force a live check.
+
+**Update channels** (set in Settings):
+
+| Channel | GitHub branch | Versioning |
+|---------|--------------|------------|
+| Stable | `main` | Major/minor releases (e.g. 1.1.0) |
+| Beta | `beta` | Patch and pre-release (e.g. 1.1.1-beta.3) |
+
+The Updates page shows your installed version, the latest available version for your channel, and pending commits. Click **Update NovaCPX** to pull and deploy. PHP syntax is validated before deploy; if the panel goes down after update it auto-restores from a backup.
+
+**OS Upgrade** streams `apt-get upgrade` output in real time. A backup of the web root is made before upgrading.
 
 ### Backups
 
@@ -190,7 +201,15 @@ Notification triggers:
 
 ### Settings
 
-Panel-wide settings: panel name, default PHP version, nameservers, update channel.
+Panel-wide settings. All values are loaded from the database when the page opens and saved individually.
+
+| Setting | Description |
+|---------|-------------|
+| Panel Name | Name shown in the browser title and sidebar |
+| Default PHP Version | PHP version applied to new accounts (7.4, 8.1, 8.2, 8.3) |
+| Primary Nameserver | NS1 hostname shown to users when setting up DNS |
+| Secondary Nameserver | NS2 hostname |
+| Update Channel | **Stable** (main branch) or **Beta** (beta branch) — controls which GitHub branch the Updates page checks and deploys from |
 
 ## WHMCS Billing Bridge
 
