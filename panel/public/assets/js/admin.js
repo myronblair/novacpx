@@ -2585,24 +2585,32 @@ window.totpAdminDisable = (userId, username) => {
 
 // ── Nginx Proxy Manager ───────────────────────────────────────────────────────
 async function nginxProxyPage() {
-  const [statusR, hostsR] = await Promise.all([
+  const [statusR, hostsR, settingsR] = await Promise.all([
     Nova.api('proxy', 'status'),
     Nova.api('proxy', 'hosts'),
+    Nova.api('proxy', 'settings'),
   ]);
-  const s     = statusR?.data  || {};
-  const hosts = hostsR?.data   || (Array.isArray(hostsR) ? hostsR : []);
-  const run   = s.running;
-  const inst  = s.installed;
+  const s       = statusR?.data   || {};
+  const hosts   = hostsR?.data    || (Array.isArray(hostsR) ? hostsR : []);
+  const cfg     = settingsR?.data || {};
+  const run     = s.running;
+  const inst    = s.installed;
+  const isRemote = cfg.mode === 'remote';
+  const modeLabel = cfg.mode === 'remote' ? `Remote (${cfg.remote_host || 'unconfigured'})` : (cfg.mode === 'local' ? 'Local' : 'Disabled');
 
   return `
 <div class="page-header">
   <h1 class="page-title">Nginx Proxy Manager</h1>
   <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" onclick="proxySettings()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+    <button class="btn btn-ghost btn-sm" onclick="proxySetupInstructions()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      Setup Guide
+    </button>
     ${inst ? `
-      <button class="btn btn-ghost btn-sm" onclick="proxySetupInstructions()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-        Setup Guide
-      </button>
       <button class="btn btn-sm btn-secondary" onclick="proxySync()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         Sync Accounts
@@ -2615,8 +2623,13 @@ async function nginxProxyPage() {
 <div class="stats-grid" style="margin-bottom:1.5rem">
   <div class="stat-card">
     <div class="stat-label">Nginx Status</div>
-    <div class="stat-value ${run ? 'stat-green' : 'stat-red'}">${inst ? (run ? 'Running' : 'Stopped') : 'Not Installed'}</div>
-    <div class="stat-sub">${s.version || (inst ? 'nginx' : 'click Install to set up')}</div>
+    <div class="stat-value ${run ? 'stat-green' : 'stat-red'}">${inst ? (run ? 'Running' : 'Stopped') : 'Not Configured'}</div>
+    <div class="stat-sub">${s.version || (inst ? 'nginx' : 'configure in Settings')}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Mode</div>
+    <div class="stat-value" style="font-size:1rem">${modeLabel}</div>
+    <div class="stat-sub">${isRemote ? 'configs pushed via SSH' : (cfg.mode === 'local' ? 'nginx on this VM' : 'click Settings to enable')}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Proxy Hosts</div>
@@ -2633,11 +2646,11 @@ async function nginxProxyPage() {
 ${!inst ? `
 <div class="panel" style="text-align:center;padding:3rem">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="color:var(--text-muted);margin-bottom:1rem"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-  <h3 style="margin-bottom:0.5rem">Nginx Not Installed</h3>
-  <p style="color:var(--text-muted);margin-bottom:1.5rem">Install Nginx on this VM to use it as a reverse proxy in front of Apache, or use a separate proxy VM (see Setup Guide).</p>
+  <h3 style="margin-bottom:0.5rem">Nginx Proxy Not Active</h3>
+  <p style="color:var(--text-muted);margin-bottom:1.5rem">Use a dedicated proxy VM (recommended) — run nginx on a separate LXC and control it from here via SSH. Or install nginx locally alongside Apache (requires moving Apache to port 8080).</p>
   <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap">
-    <button class="btn btn-primary" onclick="proxyInstall()">Install Nginx Locally</button>
-    <button class="btn btn-secondary" onclick="proxySetupInstructions()">Setup Guide / Remote VM</button>
+    <button class="btn btn-primary" onclick="proxySettings()">Configure Remote Proxy VM</button>
+    <button class="btn btn-secondary" onclick="proxySetupInstructions()">Setup Guide</button>
   </div>
 </div>
 ` : `
@@ -2827,6 +2840,76 @@ window.proxySetupInstructions = async () => {
   </ul>
 </div>
   `, null, { cancelLabel: 'Close', showConfirm: false });
+};
+
+window.proxySettings = async () => {
+  const r   = await Nova.api('proxy', 'settings');
+  const cfg = r?.data || {};
+  const ov  = Nova.modal('Nginx Proxy Settings', `
+    <div class="form-group">
+      <label>Proxy Mode</label>
+      <select id="ps-mode" class="form-control" onchange="document.getElementById('ps-remote-fields').style.display=this.value==='remote'?'':'none'">
+        <option value="disabled" ${cfg.mode==='disabled'?'selected':''}>Disabled</option>
+        <option value="remote"   ${cfg.mode==='remote'  ?'selected':''}>Remote VM (SSH)</option>
+        <option value="local"    ${cfg.mode==='local'   ?'selected':''}>Local (nginx on this VM)</option>
+      </select>
+    </div>
+    <div id="ps-remote-fields" style="display:${cfg.mode==='remote'?'':'none'}">
+      <div class="form-group">
+        <label>Remote Host <small class="text-muted">(IP of your nginx proxy VM)</small></label>
+        <input id="ps-host" type="text" class="form-control" placeholder="10.48.200.112" value="${Nova.escHtml(cfg.remote_host||'')}">
+      </div>
+      <div class="form-group">
+        <label>SSH User</label>
+        <input id="ps-user" type="text" class="form-control" value="${Nova.escHtml(cfg.remote_user||'root')}">
+      </div>
+      <div class="form-group">
+        <label>SSH Password</label>
+        <input id="ps-pass" type="password" class="form-control" placeholder="${cfg.remote_pass?'(saved — leave blank to keep)':'Enter password'}">
+      </div>
+      <div class="form-group">
+        <label>Backend IP <small class="text-muted">(NovaCPX Apache IP — used in proxy host upstreams)</small></label>
+        <input id="ps-backend" type="text" class="form-control" placeholder="10.48.200.110" value="${Nova.escHtml(cfg.backend_ip||'')}">
+      </div>
+      <div style="margin-bottom:1rem">
+        <button class="btn btn-sm btn-ghost" onclick="proxyTestRemote()">Test Connection</button>
+        <span id="ps-test-result" style="margin-left:0.75rem;font-size:0.85rem"></span>
+      </div>
+    </div>
+  `, async () => {
+    const mode = document.getElementById('ps-mode')?.value;
+    const pass = document.getElementById('ps-pass')?.value;
+    const body = {
+      mode,
+      remote_host: document.getElementById('ps-host')?.value?.trim()    || '',
+      remote_user: document.getElementById('ps-user')?.value?.trim()    || 'root',
+      remote_pass: pass || '••••••••',
+      backend_ip:  document.getElementById('ps-backend')?.value?.trim() || '',
+    };
+    const r = await Nova.api('proxy', 'settings', { method: 'POST', body });
+    Nova.toast(r?.success ? 'Settings saved' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) Nova.loadPage('nginx-proxy', window._novaPages);
+  });
+};
+
+window.proxyTestRemote = async () => {
+  const host = document.getElementById('ps-host')?.value?.trim();
+  const user = document.getElementById('ps-user')?.value?.trim() || 'root';
+  const pass = document.getElementById('ps-pass')?.value;
+  const el   = document.getElementById('ps-test-result');
+  if (!host) { if (el) el.textContent = 'Enter a host first'; return; }
+  if (el) el.textContent = 'Testing…';
+  // Save current fields temporarily so the test can use them
+  await Nova.api('proxy', 'settings', { method: 'POST', body: {
+    remote_host: host, remote_user: user,
+    remote_pass: pass || '••••••••',
+  }});
+  const r = await Nova.api('proxy', 'test-remote', { method: 'POST' });
+  const d = r?.data || {};
+  if (el) {
+    el.style.color = d.ok ? 'var(--color-success)' : 'var(--color-error)';
+    el.textContent = d.message || (d.ok ? 'Connected' : 'Failed');
+  }
 };
 
 // ── #29 Session Manager ───────────────────────────────────────────────────────

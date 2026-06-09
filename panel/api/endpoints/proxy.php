@@ -3,7 +3,7 @@
  * Proxy endpoint — manage Nginx reverse proxy
  * Routes:
  *  GET  /api/proxy/status           — nginx status
- *  POST /api/proxy/install           — install nginx
+ *  POST /api/proxy/install           — install nginx (local only)
  *  POST /api/proxy/control           — {action: start|stop|restart|reload}
  *  GET  /api/proxy/hosts             — list proxy hosts
  *  POST /api/proxy/hosts             — add proxy host
@@ -13,6 +13,9 @@
  *  POST /api/proxy/sync              — sync hosts from accounts
  *  POST /api/proxy/write-configs     — regenerate all nginx configs
  *  GET  /api/proxy/setup-script      — return bash install script
+ *  GET  /api/proxy/settings          — get proxy settings (mode, remote host, etc.)
+ *  POST /api/proxy/settings          — save proxy settings
+ *  POST /api/proxy/test-remote       — test SSH connectivity to remote proxy VM
  */
 
 Auth::getInstance()->require('admin');
@@ -98,6 +101,45 @@ try {
             echo ProxyManager::setupScript();
             exit;
         })(),
+
+        // GET settings — return current proxy configuration
+        $action === 'settings' && $method === 'GET' => (function() {
+            $db  = DB::getInstance();
+            $get = fn(string $k, string $d = '') => $db->fetchOne("SELECT value FROM settings WHERE `key`=?", [$k])['value'] ?? $d;
+            Response::json(['success' => true, 'data' => [
+                'mode'        => $get('proxy_mode', 'disabled'),
+                'remote_host' => $get('proxy_remote_host'),
+                'remote_user' => $get('proxy_remote_user', 'root'),
+                'remote_pass' => $get('proxy_remote_pass') ? '••••••••' : '',
+                'backend_ip'  => $get('proxy_backend_ip'),
+            ]]);
+        })(),
+
+        // POST settings — save proxy configuration
+        $action === 'settings' && $method === 'POST' => (function() use ($body) {
+            $db      = DB::getInstance();
+            $allowed = ['proxy_mode', 'proxy_remote_host', 'proxy_remote_user', 'proxy_remote_pass', 'proxy_backend_ip'];
+            $map     = [
+                'mode'        => 'proxy_mode',
+                'remote_host' => 'proxy_remote_host',
+                'remote_user' => 'proxy_remote_user',
+                'remote_pass' => 'proxy_remote_pass',
+                'backend_ip'  => 'proxy_backend_ip',
+            ];
+            foreach ($map as $field => $key) {
+                if (!array_key_exists($field, $body)) continue;
+                if ($field === 'remote_pass' && $body[$field] === '••••••••') continue; // unchanged placeholder
+                $db->execute(
+                    "INSERT INTO settings (`key`, value) VALUES (?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)",
+                    [$key, $body[$field]]
+                );
+            }
+            Response::json(['success' => true, 'message' => 'Proxy settings saved']);
+        })(),
+
+        // POST test-remote — verify SSH connection to remote proxy VM
+        $action === 'test-remote' && $method === 'POST' =>
+            Response::json(['success' => true, 'data' => ProxyManager::testRemote()]),
 
         default => Response::error('Not found', 404),
     };
