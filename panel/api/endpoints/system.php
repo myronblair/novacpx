@@ -144,32 +144,33 @@ match ($action) {
         $script   = "/tmp/ncpx-os-update-{$jobId}.sh";
         $webSvc   = defined('WEB_SERVER') && WEB_SERVER === 'nginx' ? 'nginx' : 'apache2';
         $webRoot  = defined('WEB_ROOT') ? WEB_ROOT : '/srv/novacpx/public';
-        $backupDir = '/var/novacpx/backups/pre-os-update-' . date('YmdHis');
+        $backupDir = '/tmp/novacpx-backup-' . date('YmdHis');
 
         $sh = <<<BASH
 #!/bin/bash
 exec > {$logFile} 2>&1
-echo "[$(date -u +%H:%M:%S UTC)] Preparing backup..."
+ts() { date -u +"%H:%M:%S UTC"; }
+echo "[\$(ts)] Preparing backup..."
 mkdir -p {$backupDir}
 cp -a {$webRoot} {$backupDir}/public 2>/dev/null
-echo "[$(date -u +%H:%M:%S UTC)] Updating package lists..."
+echo "[\$(ts)] Updating package lists..."
 sudo apt-get update -q
-echo "[$(date -u +%H:%M:%S UTC)] Running upgrade (non-interactive)..."
-DEBIAN_FRONTEND=noninteractive sudo apt-get upgrade -y \\
-  -o Dpkg::Options::="--force-confdef" \\
+echo "[\$(ts)] Running upgrade (non-interactive)..."
+DEBIAN_FRONTEND=noninteractive sudo apt-get upgrade -y \
+  -o Dpkg::Options::="--force-confdef" \
   -o Dpkg::Options::="--force-confold"
 UPGRADE_EXIT=\$?
-echo "[$(date -u +%H:%M:%S UTC)] Checking services..."
+echo "[\$(ts)] Checking services..."
 for SVC in {$webSvc} mysql postfix dovecot; do
   if systemctl is-active --quiet \$SVC 2>/dev/null; then :; else
-    echo "[$(date -u +%H:%M:%S UTC)] Restarting \$SVC..."
+    echo "[\$(ts)] Restarting \$SVC..."
     sudo systemctl restart \$SVC 2>/dev/null && echo "  \$SVC restarted OK" || echo "  \$SVC restart FAILED"
   fi
 done
 if [ \$UPGRADE_EXIT -eq 0 ]; then
-  echo "[$(date -u +%H:%M:%S UTC)] Upgrade complete."
+  echo "[\$(ts)] Upgrade complete."
 else
-  echo "[$(date -u +%H:%M:%S UTC)] Upgrade finished with errors (exit code \$UPGRADE_EXIT)."
+  echo "[\$(ts)] Upgrade finished with errors (exit code \$UPGRADE_EXIT)."
 fi
 echo \$UPGRADE_EXIT > {$doneFile}
 BASH;
