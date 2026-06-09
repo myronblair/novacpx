@@ -275,7 +275,7 @@
     const ncpxCount = ncpx.updates_available || 0;
     const osCount   = os.upgradable || 0;
 
-    return `
+    const html = `
 <div class="page-header mb-3">
   <h2 class="page-title">Updates</h2>
   <p class="text-muted text-sm">Manage NovaCPX panel updates and OS package upgrades.</p>
@@ -317,6 +317,20 @@
   </div>
 </div>
 
+<!-- Installed Services -->
+<div class="card mb-3" id="svc-versions-card">
+  <div class="card-header">
+    <span class="card-title">
+      <svg class="icon-sm mr-1"><use href="/assets/img/nova-icons.svg#ni-server"/></svg>
+      Installed Services
+    </span>
+    <button class="btn btn-ghost btn-sm ml-auto" onclick="loadServiceVersions()">↻ Refresh</button>
+  </div>
+  <div class="card-body" id="svc-versions-body">
+    <div class="loading">Loading service inventory…</div>
+  </div>
+</div>
+
 <!-- OS Updates -->
 <div class="card">
   <div class="card-header">
@@ -349,7 +363,34 @@
     ` : `<p class="text-muted">All OS packages are current.</p>`}
   </div>
 </div>`;
+
+    setTimeout(loadServiceVersions, 80);
+    return html;
   }
+
+  window.loadServiceVersions = async () => {
+    const body = document.getElementById('svc-versions-body');
+    if (!body) return;
+    body.innerHTML = '<div class="loading">Scanning installed services…</div>';
+    const r = await Nova.api('system', 'service-versions');
+    const svcs = r?.data?.services || [];
+    if (!svcs.length) { body.innerHTML = '<p class="text-muted">No tracked services found.</p>'; return; }
+    const statusDot = s => s === 'active'
+      ? '<span style="color:var(--green);font-size:.75rem">● running</span>'
+      : s === null ? '<span style="color:var(--text-muted);font-size:.75rem">—</span>'
+      : '<span style="color:var(--red);font-size:.75rem">● stopped</span>';
+    body.innerHTML = `<div style="overflow-x:auto"><table class="table">
+      <thead><tr><th>Service</th><th>Description</th><th>Installed</th><th>Latest</th><th>Status</th><th>State</th></tr></thead>
+      <tbody>${svcs.map(s => `<tr>
+        <td><strong>${Nova.escHtml(s.label)}</strong><br><code style="font-size:.7rem">${Nova.escHtml(s.pkg)}</code></td>
+        <td style="font-size:.82rem;color:var(--text-muted);max-width:280px">${Nova.escHtml(s.desc)}</td>
+        <td><code style="font-size:.8rem">${Nova.escHtml(s.installed)}</code></td>
+        <td><code style="font-size:.8rem;color:${s.up_to_date === false ? 'var(--yellow)' : 'var(--text-muted)'}">${Nova.escHtml(s.latest)}</code></td>
+        <td>${s.up_to_date === true ? Nova.badge('current','green') : s.up_to_date === false ? Nova.badge('update available','yellow') : '<span style="color:var(--text-muted);font-size:.8rem">—</span>'}</td>
+        <td>${statusDot(s.status)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  };
 
   // ── Audit Log ──────────────────────────────────────────────────────────────
   async function auditLog(opts = {}) {

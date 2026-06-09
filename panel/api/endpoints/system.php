@@ -370,6 +370,77 @@ BASH;
         Response::success(['service' => $svc, 'status' => $status]);
     })(),
 
+    // ── Installed service versions with latest available ──────────────────────
+    'service-versions' => (function() {
+        Auth::getInstance()->require('admin');
+
+        // pkg => [label, description, systemd service name]
+        $catalog = [
+            'apache2'           => ['Apache 2',        'Web server — serves all hosted websites on ports 80/443',           'apache2'],
+            'nginx'             => ['Nginx',            'High-performance web server / reverse proxy',                       'nginx'],
+            'php8.3'            => ['PHP 8.3',          'Server-side scripting runtime (CLI + FPM)',                         'php8.3-fpm'],
+            'php8.2'            => ['PHP 8.2',          'PHP 8.2 runtime (legacy support)',                                  'php8.2-fpm'],
+            'php8.1'            => ['PHP 8.1',          'PHP 8.1 runtime (legacy support)',                                  'php8.1-fpm'],
+            'php7.4'            => ['PHP 7.4',          'PHP 7.4 runtime (end-of-life compatibility)',                       'php7.4-fpm'],
+            'mysql-server'      => ['MySQL',            'Relational database server (MariaDB/MySQL) for hosted sites',       'mysql'],
+            'mariadb-server'    => ['MariaDB',          'MySQL-compatible database server fork',                             'mariadb'],
+            'postfix'           => ['Postfix',          'MTA — routes and delivers email for hosted domains',                'postfix'],
+            'dovecot-core'      => ['Dovecot',          'IMAP/POP3 server — lets users retrieve email via mail clients',     'dovecot'],
+            'rspamd'            => ['Rspamd',           'Spam filter that scores and rejects unwanted email',                'rspamd'],
+            'proftpd'           => ['ProFTPD',          'FTP server for account file transfers',                             'proftpd'],
+            'vsftpd'            => ['vsftpd',           'Lightweight FTP server',                                            'vsftpd'],
+            'bind9'             => ['BIND9',            'Authoritative DNS server — serves zone files for hosted domains',   'named'],
+            'fail2ban'          => ['Fail2Ban',         'Intrusion prevention — bans IPs after repeated failed logins',      'fail2ban'],
+            'ufw'               => ['UFW',              'Uncomplicated Firewall — iptables front-end for port management',   null],
+            'certbot'           => ['Certbot',          "Let's Encrypt client — automates SSL certificate issuance",         null],
+            'sqlite3'           => ['SQLite3',          'Embedded SQL database — stores NovaCPX panel data',                 null],
+            'redis-server'      => ['Redis',            'In-memory data store — used for caching and queuing',               'redis'],
+            'memcached'         => ['Memcached',        'Memory object cache',                                               'memcached'],
+            'nodejs'            => ['Node.js',          'JavaScript runtime — used by some web applications',                null],
+            'git'               => ['Git',              'Version control system — used for site deployments',                null],
+            'curl'              => ['curl',             'HTTP client — used by health checks and API calls',                 null],
+        ];
+
+        $dpkgOut = shell_exec("dpkg-query -W -f='\${Package} \${Version}\\n' 2>/dev/null") ?: '';
+        $installed = [];
+        foreach (explode("\n", trim($dpkgOut)) as $line) {
+            [$pkg, $ver] = array_pad(explode(' ', $line, 2), 2, '');
+            if ($pkg) $installed[$pkg] = trim($ver);
+        }
+
+        $aptOut = shell_exec("apt-cache policy " . implode(' ', array_keys($catalog)) . " 2>/dev/null") ?: '';
+        $latest = [];
+        $curPkg = null;
+        foreach (explode("\n", $aptOut) as $line) {
+            if (preg_match('/^(\S+):$/', trim($line), $m)) { $curPkg = $m[1]; continue; }
+            if ($curPkg && preg_match('/Candidate:\s+(.+)/', $line, $m)) {
+                $latest[$curPkg] = trim($m[1]);
+                $curPkg = null;
+            }
+        }
+
+        $services = [];
+        foreach ($catalog as $pkg => [$label, $desc, $svc]) {
+            $ver = $installed[$pkg] ?? null;
+            if (!$ver) continue; // skip not-installed
+            $latestVer = $latest[$pkg] ?? 'unknown';
+            $status = $svc ? trim(shell_exec("systemctl is-active $svc 2>/dev/null") ?: 'inactive') : null;
+            $upToDate = ($latestVer === 'unknown' || $latestVer === '(none)') ? null
+                      : (version_compare($ver, $latestVer, '>='));
+            $services[] = [
+                'pkg'        => $pkg,
+                'label'      => $label,
+                'desc'       => $desc,
+                'installed'  => $ver,
+                'latest'     => $latestVer,
+                'up_to_date' => $upToDate,
+                'status'     => $status,
+            ];
+        }
+
+        Response::success(['services' => $services]);
+    })(),
+
     // ── Service control (start/stop/restart) ──────────────────────────────────
     'service' => (function() use ($body, $db) {
         Auth::getInstance()->require('admin');

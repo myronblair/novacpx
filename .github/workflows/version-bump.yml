@@ -1,0 +1,50 @@
+name: Auto Version Bump
+
+on:
+  push:
+    branches:
+      - main
+      - beta
+    paths-ignore:
+      - 'VERSION'
+      - '.github/**'
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump version
+        id: bump
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          CURRENT=$(cat VERSION)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT%%-*}"
+          PATCH=${PATCH:-0}
+
+          if [ "$BRANCH" = "main" ]; then
+            NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          else
+            # beta branch: append -beta.N
+            BETA_NUM=$(echo "$CURRENT" | grep -oP '(?<=beta\.)\d+' || echo "0")
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}-beta.$((BETA_NUM + 1))"
+          fi
+
+          echo "$NEW_VERSION" > VERSION
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Bumped $CURRENT → $NEW_VERSION"
+
+      - name: Commit version
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }} [skip ci]"
+          git push
