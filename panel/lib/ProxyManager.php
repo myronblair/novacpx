@@ -80,7 +80,7 @@ class ProxyManager {
         if (!$r['host']) return 'no remote host configured';
         return shell_exec(
             'sshpass -p ' . escapeshellarg($r['pass']) .
-            ' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ' .
+            ' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR ' .
             escapeshellarg($r['user'] . '@' . $r['host']) . ' ' .
             escapeshellarg($cmd) . ' 2>&1'
         ) ?? '';
