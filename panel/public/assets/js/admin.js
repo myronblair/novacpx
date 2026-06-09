@@ -2802,48 +2802,75 @@ window.proxyDeleteHost = (id, domain) => {
 };
 
 window.proxySetupInstructions = async () => {
-  const scriptUrl = '/api/proxy/setup-script';
   Nova.modal('Nginx Proxy Setup Guide', `
-<div style="max-height:60vh;overflow-y:auto">
-  <h4 style="margin-bottom:0.75rem">Option A — Local (Nginx on this VM)</h4>
-  <p style="color:var(--text-muted);margin-bottom:1rem">Install Nginx alongside Apache on this VM. Nginx listens on ports 80/443 and forwards to Apache. Best for SSL termination and caching.</p>
-  <ol style="color:var(--text-muted);margin-bottom:1.5rem;padding-left:1.2rem;line-height:1.8">
-    <li>Click <strong>Install Nginx Locally</strong> on the main Nginx Proxy page</li>
-    <li>Move Apache to port 8080: edit <code>/etc/apache2/ports.conf</code> → change <code>Listen 80</code> to <code>Listen 8080</code></li>
-    <li>Update upstream in all proxy hosts to <code>http://127.0.0.1:8080</code></li>
-    <li>Click <strong>Sync Accounts</strong> to auto-populate proxy hosts from your hosted accounts</li>
-    <li>Click <strong>Reload Config</strong> to apply changes</li>
-  </ol>
+<div style="max-height:65vh;overflow-y:auto;line-height:1.7">
 
-  <h4 style="margin-bottom:0.75rem">Option B — Remote Proxy VM (Recommended for production)</h4>
-  <p style="color:var(--text-muted);margin-bottom:1rem">Run a dedicated Nginx proxy VM in front of this NovaCPX VM. Traffic flows: Internet → FortiGate → Nginx Proxy VM → NovaCPX VM (Apache).</p>
-  <ol style="color:var(--text-muted);margin-bottom:1.5rem;padding-left:1.2rem;line-height:1.8">
-    <li>Create a new VM on Proxmox (Ubuntu 22.04, 1 vCPU, 1GB RAM)</li>
-    <li>Run the setup script below on the new VM as root</li>
-    <li>Point FortiGate VIPs to the proxy VM IP (ports 80/443)</li>
-    <li>Set the proxy upstream to this NovaCPX VM IP (<code>http://10.48.200.110:80</code>)</li>
-    <li>Add proxy hosts for each domain from your NovaCPX admin panel</li>
-  </ol>
-
-  <h4 style="margin-bottom:0.75rem">Automated Setup Script</h4>
-  <p style="color:var(--text-muted);margin-bottom:0.75rem">Run this on the target VM (local or remote) as root:</p>
-  <div style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-family:monospace;font-size:0.8rem;margin-bottom:0.75rem">
-    curl -sk https://YOUR_NOVACPX_IP:8882/api/proxy/setup-script | bash
-  </div>
-  <p style="color:var(--text-muted);font-size:0.85rem">Or download and review before running:</p>
-  <div style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-family:monospace;font-size:0.8rem">
-    curl -sk https://YOUR_NOVACPX_IP:8882/api/proxy/setup-script -o proxy-setup.sh<br>
-    cat proxy-setup.sh   # review<br>
-    bash proxy-setup.sh
+  <div style="background:var(--bg-secondary);border-left:3px solid var(--color-primary);padding:0.75rem 1rem;border-radius:0 6px 6px 0;margin-bottom:1.5rem">
+    <strong>Designed for Proxmox (or any Linux hypervisor)</strong><br>
+    <span style="color:var(--text-muted);font-size:0.88rem">
+      Run NovaCPX on one VM and a lightweight Debian LXC as the nginx proxy.
+      The panel pushes configs and controls nginx via SSH.
+      Works equally well on VMware, AWS, DigitalOcean, bare-metal — see Option C below.
+    </span>
   </div>
 
-  <h4 style="margin-bottom:0.75rem;margin-top:1.5rem">Integration with VirtualHost Manager</h4>
-  <p style="color:var(--text-muted);margin-bottom:0.75rem">When proxy mode is active, NovaCPX automatically:</p>
-  <ul style="color:var(--text-muted);padding-left:1.2rem;line-height:1.8">
-    <li>Creates a proxy host entry for every new account</li>
-    <li>Removes the proxy host when an account is terminated</li>
-    <li>Re-generates Nginx config on every account change</li>
-    <li>Uses account SSL certs automatically if SSL is enabled on the proxy host</li>
+  <h4 style="margin-bottom:0.5rem">Option A — Proxmox LXC (Recommended)</h4>
+  <p style="color:var(--text-muted);margin-bottom:0.75rem">Create a 512MB Debian 12 LXC on the same Proxmox node. Costs almost no resources.</p>
+  <ol style="color:var(--text-muted);margin-bottom:1.5rem;padding-left:1.2rem">
+    <li>In Proxmox: Create CT → Debian 12 → 512MB RAM, 8GB disk, same bridge as NovaCPX VM</li>
+    <li>Boot the LXC, set root password</li>
+    <li>Go to <strong>Settings</strong> → set Mode=Remote, enter the LXC IP, root password, and this VM's IP as Backend IP</li>
+    <li>Click <strong>Run Setup on Remote VM</strong> — watch live progress</li>
+    <li>Point your router/firewall port 80/443 to the LXC IP</li>
+    <li>Click <strong>Sync Accounts</strong> to auto-populate proxy hosts</li>
+  </ol>
+
+  <h4 style="margin-bottom:0.5rem">Option B — Other hypervisors (VMware, Hyper-V, KVM)</h4>
+  <p style="color:var(--text-muted);margin-bottom:0.75rem">Same flow — any Debian/Ubuntu VM reachable by SSH works.</p>
+  <ol style="color:var(--text-muted);margin-bottom:1.5rem;padding-left:1.2rem">
+    <li>Create a Debian/Ubuntu VM (1 vCPU, 512MB RAM)</li>
+    <li>Enable SSH root login: <code>PermitRootLogin yes</code> in <code>/etc/ssh/sshd_config</code></li>
+    <li>Install <code>sshpass</code> on the NovaCPX server: <code>apt-get install -y sshpass</code></li>
+    <li>Follow steps 3–6 from Option A above</li>
+  </ol>
+
+  <h4 style="margin-bottom:0.5rem">Option C — Cloud / Remote Server (AWS, DigitalOcean, etc.)</h4>
+  <p style="color:var(--text-muted);margin-bottom:0.75rem">NovaCPX pushes configs via public SSH. The proxy VM's public IP handles port 80/443; it forwards to NovaCPX over a private network or VPN.</p>
+  <ol style="color:var(--text-muted);margin-bottom:1.5rem;padding-left:1.2rem">
+    <li>Provision a small Debian droplet/instance in the same region or with low latency to NovaCPX</li>
+    <li>Open port 22 (SSH) from NovaCPX's IP only; open 80/443 from anywhere</li>
+    <li>Set Backend IP to NovaCPX's IP reachable from the cloud proxy (use VPN/private IP if possible)</li>
+    <li>In Settings: set Remote Host to the cloud server's public IP or hostname</li>
+    <li>Click Run Setup, then Sync Accounts</li>
+  </ol>
+
+  <h4 style="margin-bottom:0.5rem">Option D — Local nginx on this VM</h4>
+  <p style="color:var(--text-muted);margin-bottom:0.75rem">Not recommended — requires moving Apache off port 80/443 first.</p>
+  <ol style="color:var(--text-muted);margin-bottom:1.5rem;padding-left:1.2rem">
+    <li>Edit <code>/etc/apache2/ports.conf</code> → change <code>Listen 80</code> to <code>Listen 8090</code>, restart Apache</li>
+    <li>Set Settings → Mode = Local, Backend IP = 127.0.0.1</li>
+    <li>Click <strong>Install Nginx Locally</strong></li>
+    <li>Set upstream <code>http://127.0.0.1:8090</code> on all proxy hosts</li>
+    <li>Click Sync Accounts</li>
+  </ol>
+
+  <h4 style="margin-bottom:0.5rem">Settings Reference (Admin → Nginx Proxy → Settings)</h4>
+  <table style="width:100%;font-size:0.83rem;border-collapse:collapse;color:var(--text-muted)">
+    <tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0.5rem">Field</th><th style="text-align:left;padding:0.3rem 0.5rem">Description</th></tr>
+    <tr><td style="padding:0.3rem 0.5rem"><code>Mode</code></td><td style="padding:0.3rem 0.5rem">disabled / remote / local</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem"><code>Remote Host</code></td><td style="padding:0.3rem 0.5rem">IP or hostname of nginx proxy VM (SSH target)</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem"><code>Remote User</code></td><td style="padding:0.3rem 0.5rem">SSH user on proxy VM (default: root)</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem"><code>Remote Password</code></td><td style="padding:0.3rem 0.5rem">SSH password (stored encrypted in DB)</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem"><code>Backend IP</code></td><td style="padding:0.3rem 0.5rem">IP of this NovaCPX Apache — used in auto-generated proxy upstream URLs</td></tr>
+  </table>
+
+  <h4 style="margin-bottom:0.5rem;margin-top:1.25rem">How it works</h4>
+  <ul style="color:var(--text-muted);padding-left:1.2rem;margin-bottom:0">
+    <li>Each domain gets an nginx vhost config on the proxy VM, proxying to Apache on the backend IP</li>
+    <li>Configs are pushed automatically when accounts are created/terminated or manually via Sync Accounts</li>
+    <li>The panel starts/stops/reloads nginx on the proxy VM over SSH</li>
+    <li>Every 5 minutes the health check verifies nginx is running and restarts it if not</li>
+    <li>Use <strong>Uninstall</strong> to remove proxy configs or wipe nginx from the remote VM entirely</li>
   </ul>
 </div>
   `, null, { cancelLabel: 'Close', showConfirm: false });

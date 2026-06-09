@@ -3,12 +3,54 @@
  * ProxyManager — manages Nginx reverse proxy for NovaCPX hosted accounts.
  * Supports local nginx (on same VM) or remote nginx (separate proxy VM via SSH).
  *
- * Settings keys:
+ * ── INTENDED ENVIRONMENT ────────────────────────────────────────────────────
+ * This proxy feature is designed for Proxmox VE (or similar Linux
+ * hypervisor / LXC / KVM environments) where you run NovaCPX on one VM
+ * and dedicate a lightweight container (Debian/Ubuntu LXC, 512MB RAM,
+ * 1 vCPU) purely to nginx as a reverse proxy.
+ *
+ * Typical stack on Proxmox:
+ *   CT 120  NovaCPX VM  10.48.200.110  — Apache + PHP, panel on :8880–8883
+ *   CT 121  Proxy LXC   10.48.200.112  — nginx only, public ports 80/443
+ *   FortiGate VIPs route 80/443 → 10.48.200.112
+ *
+ * The panel pushes nginx vhost configs to the proxy VM via SSH and can
+ * start/stop/reload nginx remotely — all from Admin → Nginx Proxy.
+ *
+ * ── NON-PROXMOX / BARE-METAL / OTHER HYPERVISORS ────────────────────────────
+ * The feature works on any Linux environment. Requirements:
+ *
+ *   1. A second Linux VM or server accessible by SSH from NovaCPX.
+ *      (AWS EC2, DigitalOcean droplet, VMware VM, Hyper-V, bare-metal — all fine.)
+ *   2. SSH password auth enabled for root (or another sudo user).
+ *   3. The proxy VM must be able to reach NovaCPX's Apache (port 80) via LAN/VPN.
+ *   4. sshpass must be installed on the NovaCPX server: apt-get install -y sshpass
+ *
+ *   Configuration (Admin → Nginx Proxy → Settings):
+ *     Mode:        remote
+ *     Remote host: <proxy VM IP or hostname>
+ *     Remote user: root
+ *     Remote pass: <root SSH password>
+ *     Backend IP:  <this NovaCPX server's IP that Apache listens on>
+ *
+ *   One-time setup: click "Run Setup on Remote VM" — it installs nginx,
+ *   removes the default site, and creates the NovaCPX catch-all.
+ *   After that, add proxy hosts per domain from Admin → Nginx Proxy → Add Host.
+ *
+ * ── LOCAL MODE (nginx on same VM as NovaCPX) ────────────────────────────────
+ * Apache must be moved off port 80/443 first:
+ *   1. Edit /etc/apache2/ports.conf → change Listen 80 to Listen 8090
+ *   2. Restart Apache: systemctl restart apache2
+ *   3. Set proxy_backend_ip = 127.0.0.1 and all upstreams to http://127.0.0.1:8090
+ *   4. Set Mode = local, click Install Nginx Locally
+ *   5. Click Sync Accounts to populate proxy hosts
+ *
+ * ── Settings keys stored in `settings` table ────────────────────────────────
  *   proxy_mode          — 'disabled' | 'local' | 'remote'
  *   proxy_remote_host   — IP/hostname of remote nginx VM
  *   proxy_remote_user   — SSH user (default: root)
  *   proxy_remote_pass   — SSH password
- *   proxy_backend_ip    — IP of NovaCPX Apache server (used when syncing proxy hosts)
+ *   proxy_backend_ip    — IP of NovaCPX Apache (used when syncing proxy hosts)
  */
 class ProxyManager {
 
