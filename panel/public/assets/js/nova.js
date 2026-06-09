@@ -23,7 +23,7 @@ window.Nova = (() => {
     _barEl.style.width = _barPct + '%';
     clearInterval(_barTimer);
     _barTimer = setInterval(() => {
-      if (_barPct < 85) { _barPct += (_barPct < 50 ? 8 : _barPct < 70 ? 4 : 1); _barEl.style.width = _barPct + '%'; }
+      if (_barEl && _barPct < 85) { _barPct += (_barPct < 50 ? 8 : _barPct < 70 ? 4 : 1); _barEl.style.width = _barPct + '%'; }
     }, 200);
   }
   function _barDone() {
