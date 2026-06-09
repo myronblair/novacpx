@@ -11,6 +11,9 @@ $_pname = novacpx_panel_name('NovaCPX');
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Your hosting control panel — manage your website, domains, email accounts, databases, FTP, SSL certificates, and files in one place.">
+<meta name="keywords" content="hosting control panel, manage website, email hosting, domain management, database management, SSL certificate, FTP, web hosting dashboard">
+<meta name="robots" content="noindex, nofollow">
 <title><?= $_pname ?> — My Hosting</title>
 <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
 <link rel="stylesheet" href="/assets/css/nova.css<?= $_v('/assets/css/nova.css') ?>">

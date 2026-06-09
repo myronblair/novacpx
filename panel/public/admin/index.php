@@ -10,6 +10,9 @@ require_once dirname(__DIR__) . '/_branding.php';
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="NovaCPX Admin Panel — full-featured hosting control panel for managing servers, accounts, domains, email, databases, and services.">
+<meta name="keywords" content="hosting control panel, server management, web hosting admin, NovaCPX, domain management, email hosting, database management">
+<meta name="robots" content="noindex, nofollow">
 <title>NovaCPX Admin</title>
 <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
 <link rel="stylesheet" href="/assets/css/nova.css<?= $_v('/assets/css/nova.css') ?>">

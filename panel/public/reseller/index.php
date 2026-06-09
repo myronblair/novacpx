@@ -11,6 +11,9 @@ $_pname = novacpx_panel_name('NovaCPX');
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="NovaCPX Reseller Panel — manage your reseller hosting accounts, packages, clients, and branding from one dashboard.">
+<meta name="keywords" content="reseller hosting panel, reseller control panel, manage hosting clients, white label hosting, NovaCPX reseller">
+<meta name="robots" content="noindex, nofollow">
 <title><?= $_pname ?> — Reseller</title>
 <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
 <link rel="stylesheet" href="/assets/css/nova.css<?= $_v('/assets/css/nova.css') ?>">
