@@ -241,7 +241,12 @@ SH;
     public function createStack(?int $accountId, string $name, string $composeYaml): array {
         $safeName = preg_replace('/[^a-z0-9_-]/', '', strtolower($name));
         $dir = "{$this->appsDir}/" . ($accountId ? "account-{$accountId}" : 'admin') . "/{$safeName}";
-        if (!is_dir($dir)) mkdir($dir, 0750, true);
+        if (!is_dir($dir)) {
+            shell_exec('sudo mkdir -p ' . escapeshellarg($dir) . ' 2>/dev/null');
+            shell_exec('sudo chown www-data:www-data ' . escapeshellarg($dir) . ' 2>/dev/null');
+            shell_exec('sudo chmod 750 ' . escapeshellarg($dir) . ' 2>/dev/null');
+        }
+        if (!is_dir($dir)) throw new RuntimeException("Failed to create stack directory: {$dir}");
         file_put_contents("{$dir}/docker-compose.yml", $composeYaml);
         $this->db->execute(
             "INSERT INTO docker_compose_stacks (account_id, name, stack_dir, compose_file, status) VALUES (?,?,?,?,'pending')",
