@@ -1,5 +1,7 @@
 <?php
 // NovaCPX Admin Panel — Datacenter/Server Manager
+if (!defined('NOVACPX_ROOT'))    define('NOVACPX_ROOT',    dirname(__DIR__));
+if (!defined('NOVACPX_VERSION')) define('NOVACPX_VERSION', trim(@file_get_contents(NOVACPX_ROOT . '/VERSION') ?: '1.0.0'));
 $_v = fn($f) => '?v=' . @filemtime(dirname(__DIR__) . $f);
 require_once dirname(__DIR__) . '/_branding.php';
 ?>
