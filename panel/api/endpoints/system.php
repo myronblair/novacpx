@@ -39,11 +39,11 @@ match ($action) {
     // ── Check for updates ─────────────────────────────────────────────────────
     'check-update' => (function() use ($db) {
         Auth::getInstance()->require('admin');
-        $remote = $db->fetchOne("SELECT value FROM settings WHERE `key` = 'git_remote'");
-        $gitRemote = $remote['value'] ?? '';
-        if (!$gitRemote) Response::error('No git remote configured');
+        // Source repo is at /opt/novacpx-src — the web root is a deployed copy, not a git repo
+        $srcDir = '/opt/novacpx-src';
+        if (!is_dir($srcDir . '/.git')) Response::error('Source repository not found at ' . $srcDir . '. Re-run the installer to restore it.');
 
-        $output = shell_exec("git -C " . escapeshellarg(NOVACPX_ROOT) . " fetch origin 2>&1 && git -C " . escapeshellarg(NOVACPX_ROOT) . " log HEAD..origin/main --oneline 2>/dev/null");
+        $output  = shell_exec("git -C " . escapeshellarg($srcDir) . " fetch origin 2>&1 && git -C " . escapeshellarg($srcDir) . " log HEAD..origin/main --oneline 2>/dev/null");
         $updates = array_values(array_filter(explode("\n", trim($output ?: ''))));
 
         Response::success([
@@ -55,16 +55,27 @@ match ($action) {
     // ── Apply update ──────────────────────────────────────────────────────────
     'apply-update' => (function() use ($db) {
         Auth::getInstance()->require('admin');
-        $before = trim(shell_exec("git -C " . escapeshellarg(NOVACPX_ROOT) . " rev-parse HEAD 2>/dev/null") ?: '');
+        $srcDir = '/opt/novacpx-src';
+        if (!is_dir($srcDir . '/.git')) Response::error('Source repository not found at ' . $srcDir);
 
-        $pull = shell_exec("git -C " . escapeshellarg(NOVACPX_ROOT) . " pull origin main 2>&1");
-
-        $after  = trim(shell_exec("git -C " . escapeshellarg(NOVACPX_ROOT) . " rev-parse HEAD 2>/dev/null") ?: '');
+        $before = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
+        $pull   = shell_exec("git -C " . escapeshellarg($srcDir) . " pull origin main 2>&1");
+        $after  = trim(shell_exec("git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
         $changed = $before !== $after;
 
         if ($changed) {
+            // Deploy updated files from source repo to web root
+            $dst = rtrim(NOVACPX_ROOT, '/');
+            shell_exec("cp -a " . escapeshellarg($srcDir . '/panel/public/.') . " {$dst}/");
+            shell_exec("cp -a " . escapeshellarg($srcDir . '/panel/api/.') . " {$dst}/api/");
+            shell_exec("cp -a " . escapeshellarg($srcDir . '/panel/lib/.') . " {$dst}/lib/");
+            if (is_dir($srcDir . '/panel/bin')) {
+                shell_exec("cp -a " . escapeshellarg($srcDir . '/panel/bin/.') . " {$dst}/bin/");
+            }
+            shell_exec("chown -R www-data:www-data " . escapeshellarg($dst) . " 2>/dev/null");
+
             // Run any pending DB migrations
-            $migrDir = NOVACPX_ROOT . '/db/migrations';
+            $migrDir = $srcDir . '/db/migrations';
             if (is_dir($migrDir)) {
                 foreach (glob("$migrDir/*.sql") as $sql) {
                     $migName = basename($sql, '.sql');
@@ -81,10 +92,10 @@ match ($action) {
         }
 
         Response::success([
-            'updated'      => $changed,
-            'from_commit'  => $before,
-            'to_commit'    => $after,
-            'pull_output'  => $pull,
+            'updated'     => $changed,
+            'from_commit' => $before,
+            'to_commit'   => $after,
+            'pull_output' => $pull,
         ]);
     })(),
 
