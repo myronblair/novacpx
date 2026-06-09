@@ -2651,13 +2651,23 @@ async function nginxProxyPage() {
 </div>
 
 ${!inst ? `
-<div class="panel" style="text-align:center;padding:3rem">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="color:var(--text-muted);margin-bottom:1rem"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-  <h3 style="margin-bottom:0.5rem">Nginx Proxy Not Active</h3>
-  <p style="color:var(--text-muted);margin-bottom:1.5rem">Use a dedicated proxy VM (recommended) — run nginx on a separate LXC and control it from here via SSH. Or install nginx locally alongside Apache (requires moving Apache to port 8080).</p>
-  <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap">
-    <button class="btn btn-primary" onclick="proxySettings()">Configure Remote Proxy VM</button>
-    <button class="btn btn-secondary" onclick="proxySetupInstructions()">Setup Guide</button>
+<div class="panel" style="padding:2rem">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;max-width:680px;margin:0 auto">
+    <div style="border:1px solid var(--border);border-radius:8px;padding:1.5rem;text-align:center">
+      <div style="font-size:2rem;margin-bottom:0.5rem">🖥</div>
+      <h4 style="margin-bottom:0.5rem">Local Mode</h4>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:1rem">nginx on <em>this server</em>. Apache moves to an internal port. All websites keep working — nginx proxies everything through. One-click setup.</p>
+      <button class="btn btn-primary btn-sm" onclick="proxySwitchLocal()">Enable Local Mode</button>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:1.5rem;text-align:center">
+      <div style="font-size:2rem;margin-bottom:0.5rem">🌐</div>
+      <h4 style="margin-bottom:0.5rem">Remote Proxy VM</h4>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:1rem">Dedicated LXC or VM runs nginx. Panel pushes configs via SSH. Best for production — keeps proxy and hosting isolated.</p>
+      <button class="btn btn-secondary btn-sm" onclick="proxySettings()">Configure Remote VM</button>
+    </div>
+  </div>
+  <div style="text-align:center;margin-top:1.25rem">
+    <button class="btn btn-ghost btn-sm" onclick="proxySetupInstructions()">Setup Guide &amp; Requirements</button>
   </div>
 </div>
 ` : `
@@ -2669,6 +2679,7 @@ ${!inst ? `
       <button class="btn btn-sm btn-warning" onclick="proxyControl('restart')">Restart</button>
       <button class="btn btn-sm btn-danger"  onclick="proxyControl('stop')">Stop</button>
       <button class="btn btn-sm btn-ghost"   onclick="proxyControl('reload')">Reload Config</button>
+      ${cfg.mode === 'local' ? `<button class="btn btn-sm btn-ghost" style="margin-left:0.5rem" onclick="proxyDisableLocal()">Disable Local Mode</button>` : ''}
     </div>
   </div>
 </div>
@@ -2874,6 +2885,97 @@ window.proxySetupInstructions = async () => {
   </ul>
 </div>
   `, null, { cancelLabel: 'Close', showConfirm: false });
+};
+
+window.proxySwitchLocal = () => {
+  Nova.modal('Enable Local Nginx Proxy', `
+    <p style="margin-bottom:1rem">Nginx will be installed on <em>this server</em> and take over ports 80/443. Apache moves to an internal port and keeps serving all PHP sites — end users see no change.</p>
+    <div style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-size:0.85rem;margin-bottom:1rem">
+      <strong>What will happen:</strong><br>
+      <span style="color:var(--text-muted)">
+        1. nginx installed (if not present)<br>
+        2. Apache moved from port 80 → <strong id="sl-port-preview">8090</strong><br>
+        3. All existing vhosts updated<br>
+        4. nginx starts on port 80/443 and proxies to Apache<br>
+        5. Proxy hosts auto-synced from your accounts
+      </span>
+    </div>
+    <div class="form-group">
+      <label>Apache backend port <small class="text-muted">(any unused port; 8090 is the default)</small></label>
+      <input id="sl-port" type="number" class="form-control" value="8090" min="1024" max="65535"
+             oninput="document.getElementById('sl-port-preview').textContent=this.value">
+    </div>
+  `, () => {
+    const port = parseInt(document.getElementById('sl-port')?.value) || 8090;
+    const ov   = Nova.modal('Switching to Local Proxy Mode', `
+      <p style="color:var(--text-muted);margin-bottom:0.75rem">Moving Apache to port ${port} and starting nginx on 80/443…</p>
+      <pre id="proxy-local-log" style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-size:0.78rem;max-height:320px;overflow-y:auto;white-space:pre-wrap;font-family:monospace">Starting…\n</pre>
+    `, null, { cancelLabel: 'Close', showConfirm: false });
+
+    const log = document.getElementById('proxy-local-log');
+    const es  = new EventSource('/api/proxy/switch-local');
+    let done  = false;
+
+    // POST with port — can't use native EventSource for POST, so use fetch+ReadableStream
+    es.close();
+    fetch('/api/proxy/switch-local', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apache_port: port }),
+    }).then(async res => {
+      const reader = res.body.getReader();
+      const dec    = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done: d } = await reader.read();
+        if (d) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = part.match(/^data: (.+)$/m);
+          if (!m) continue;
+          try {
+            const evt = JSON.parse(m[1]);
+            if (evt.line) { log.textContent += evt.line; log.scrollTop = log.scrollHeight; }
+            if (evt.done)  { done = true; log.textContent += '\n— Done.\n'; setTimeout(() => Nova.loadPage('nginx-proxy', window._novaPages), 1500); }
+          } catch {}
+        }
+      }
+    }).catch(e => { log.textContent += '\n— Connection error: ' + e.message + '\n'; });
+
+    ov.querySelector('.modal-close')?.addEventListener('click', () => { done = true; });
+  }, { confirmLabel: 'Switch Now' });
+};
+
+window.proxyDisableLocal = () => {
+  Nova.confirm('Revert to direct Apache mode? nginx will be stopped and Apache will move back to port 80.', () => {
+    const ov  = Nova.modal('Disabling Local Proxy Mode', `
+      <pre id="proxy-disable-log" style="background:var(--bg-secondary);padding:0.75rem;border-radius:6px;font-size:0.78rem;max-height:240px;overflow-y:auto;white-space:pre-wrap;font-family:monospace">Starting…\n</pre>
+    `, null, { cancelLabel: 'Close', showConfirm: false });
+    const log = document.getElementById('proxy-disable-log');
+    fetch('/api/proxy/disable-local', { method: 'POST', credentials: 'include' }).then(async res => {
+      const reader = res.body.getReader();
+      const dec    = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = part.match(/^data: (.+)$/m);
+          if (m) try {
+            const evt = JSON.parse(m[1]);
+            if (evt.line) { log.textContent += evt.line; log.scrollTop = log.scrollHeight; }
+            if (evt.done) setTimeout(() => Nova.loadPage('nginx-proxy', window._novaPages), 1000);
+          } catch {}
+        }
+      }
+    });
+  }, true);
 };
 
 window.proxyRunSetup = () => {

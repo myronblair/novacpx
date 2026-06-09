@@ -141,6 +141,39 @@ try {
         $action === 'test-remote' && $method === 'POST' =>
             Response::json(['success' => true, 'data' => ProxyManager::testRemote()]),
 
+        // POST switch-local — migrate Apache to internal port, install nginx, enable local proxy mode
+        ($action === 'switch-local') && $method === 'POST' => (function() use ($body) {
+            header('Content-Type: text/event-stream');
+            header('Cache-Control: no-cache');
+            header('X-Accel-Buffering: no');
+            ob_implicit_flush(true);
+            while (ob_get_level() > 0) ob_end_flush();
+            $port = (int)($body['apache_port'] ?? 8090);
+            foreach (ProxyManager::switchToLocalMode($port) as $line) {
+                echo 'data: ' . json_encode(['line' => $line]) . "\n\n";
+                flush();
+            }
+            echo "data: " . json_encode(['done' => true]) . "\n\n";
+            flush();
+            exit;
+        })(),
+
+        // POST disable-local — revert: Apache back to 80, stop nginx, disable proxy
+        ($action === 'disable-local') && $method === 'POST' => (function() {
+            header('Content-Type: text/event-stream');
+            header('Cache-Control: no-cache');
+            header('X-Accel-Buffering: no');
+            ob_implicit_flush(true);
+            while (ob_get_level() > 0) ob_end_flush();
+            foreach (ProxyManager::disableLocalMode() as $line) {
+                echo 'data: ' . json_encode(['line' => $line]) . "\n\n";
+                flush();
+            }
+            echo "data: " . json_encode(['done' => true]) . "\n\n";
+            flush();
+            exit;
+        })(),
+
         // POST setup-remote — run nginx setup on remote VM, stream output via SSE
         ($action === 'setup-remote') && $method === 'POST' => (function() {
             header('Content-Type: text/event-stream');

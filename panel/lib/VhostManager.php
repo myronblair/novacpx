@@ -117,10 +117,61 @@ class VhostManager {
         @symlink($conf, "/etc/nginx/sites-enabled/novacpx-{$username}.conf");
     }
 
+    // Returns the port Apache listens on for customer vhosts.
+    // 80 normally; changes to an internal port (e.g. 8090) in local proxy mode.
+    public static function getApachePort(): int {
+        $db = DB::getInstance();
+        return (int)($db->fetchOne("SELECT value FROM settings WHERE `key`='proxy_apache_port'")['value'] ?? 80);
+    }
+
+    // Re-write all existing novacpx-*.conf vhosts to use $to instead of $from,
+    // and update /etc/apache2/ports.conf accordingly.  Returns count of files changed.
+    public static function migrateApachePort(int $from, int $to): int {
+        $count = 0;
+        foreach (glob('/etc/apache2/sites-available/novacpx-*.conf') ?: [] as $f) {
+            $orig    = file_get_contents($f);
+            $updated = str_replace(
+                ["<VirtualHost *:{$from}>", "VirtualHost *:{$from}"],
+                ["<VirtualHost *:{$to}>",   "VirtualHost *:{$to}"],
+                $orig
+            );
+            if ($updated !== $orig) { file_put_contents($f, $updated); $count++; }
+        }
+        // Update ports.conf: swap Listen $from → Listen $to, drop Listen 443 (nginx handles SSL)
+        $ports = file_get_contents('/etc/apache2/ports.conf') ?: '';
+        $ports = preg_replace('/^Listen\s+' . $from . '\b/m', "Listen {$to}", $ports);
+        $ports = preg_replace('/^Listen\s+443\b/m', '', $ports);
+        $ports = preg_replace('/<IfModule ssl_module>.*?<\/IfModule>/s', '', $ports);
+        file_put_contents('/etc/apache2/ports.conf', $ports);
+        return $count;
+    }
+
+    // Reverse migration: move Apache back from proxy port to standard 80/443.
+    public static function restoreApachePort(int $from, int $to = 80): int {
+        $count = 0;
+        foreach (glob('/etc/apache2/sites-available/novacpx-*.conf') ?: [] as $f) {
+            $orig    = file_get_contents($f);
+            $updated = str_replace(
+                ["<VirtualHost *:{$from}>", "VirtualHost *:{$from}"],
+                ["<VirtualHost *:{$to}>",   "VirtualHost *:{$to}"],
+                $orig
+            );
+            if ($updated !== $orig) { file_put_contents($f, $updated); $count++; }
+        }
+        $ports = file_get_contents('/etc/apache2/ports.conf') ?: '';
+        $ports = preg_replace('/^Listen\s+' . $from . '\b/m', "Listen {$to}", $ports);
+        if (!str_contains($ports, 'Listen 443')) {
+            $ports .= "\n<IfModule ssl_module>\n    Listen 443\n</IfModule>\n";
+        }
+        file_put_contents('/etc/apache2/ports.conf', $ports);
+        return $count;
+    }
+
     private static function writeApache(string $username, string $domain, string $docRoot, string $phpVer, string $logDir): void {
+        $port = self::getApachePort();
         $sock = "/run/php/php{$phpVer}-fpm-{$username}.sock";
         $conf = "/etc/apache2/sites-available/novacpx-{$username}.conf";
-        file_put_contents($conf, "<VirtualHost *:80>
+        file_put_contents($conf, "<VirtualHost *:{$port}>
     ServerName {$domain}
     ServerAlias www.{$domain}
     DocumentRoot {$docRoot}

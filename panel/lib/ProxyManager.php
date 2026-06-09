@@ -326,6 +326,115 @@ class ProxyManager {
         return ['ok' => true, 'message' => 'Connected — ' . trim($out)];
     }
 
+    // --- Local mode switch ---
+
+    /**
+     * Switch to local proxy mode:
+     *   Apache moves to $apachePort (default 8090), nginx takes 80/443.
+     *   All existing vhosts are re-written; proxy hosts synced automatically.
+     *   Yields progress lines suitable for SSE streaming.
+     */
+    public static function switchToLocalMode(int $apachePort = 8090): \Generator {
+        require_once NOVACPX_LIB . '/VhostManager.php';
+        $db   = DB::getInstance();
+        $save = function(string $k, string $v) use ($db) {
+            $db->execute("INSERT INTO settings (`key`, value) VALUES (?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)", [$k, $v]);
+        };
+
+        yield "» Checking nginx installation...\n";
+        if (!file_exists('/usr/sbin/nginx') && empty(shell_exec('which nginx 2>/dev/null'))) {
+            yield "» Installing nginx (apt-get install -y nginx)...\n";
+            $out = shell_exec('apt-get update -qq 2>&1 && apt-get install -y nginx 2>&1');
+            if ($out) yield trim($out) . "\n";
+            if (!file_exists('/usr/sbin/nginx')) { yield "ERROR: nginx install failed. Aborting.\n"; return; }
+            yield "  nginx installed\n";
+        } else {
+            yield "  nginx already installed\n";
+        }
+
+        yield "» Stopping nginx to avoid config conflicts...\n";
+        shell_exec('systemctl stop nginx 2>/dev/null');
+
+        yield "» Migrating Apache from port 80 → {$apachePort}...\n";
+        $changed = VhostManager::migrateApachePort(80, $apachePort);
+        yield "  Updated {$changed} vhost(s) and ports.conf\n";
+
+        yield "» Restarting Apache on port {$apachePort}...\n";
+        $apacheTest = shell_exec('apache2ctl configtest 2>&1');
+        if (strpos($apacheTest ?? '', 'Syntax OK') === false) {
+            yield "ERROR: Apache config test failed:\n{$apacheTest}\nRolling back...\n";
+            VhostManager::restoreApachePort($apachePort, 80);
+            shell_exec('systemctl restart apache2 2>/dev/null');
+            yield "  Apache restored to port 80. Aborting.\n";
+            return;
+        }
+        shell_exec('systemctl restart apache2 2>/dev/null');
+        yield "  Apache is up on port {$apachePort}\n";
+
+        yield "» Configuring nginx (remove default site, add catch-all)...\n";
+        @unlink('/etc/nginx/sites-enabled/default');
+        $catchAll = "server {\n    listen 80 default_server;\n    server_name _;\n    return 444;\n}\n";
+        file_put_contents('/etc/nginx/sites-available/novacpx-default.conf', $catchAll);
+        if (!file_exists('/etc/nginx/sites-enabled/novacpx-default.conf')) {
+            @symlink('/etc/nginx/sites-available/novacpx-default.conf', '/etc/nginx/sites-enabled/novacpx-default.conf');
+        }
+        if (!file_exists('/etc/nginx/conf.d/novacpx-proxy.conf')) {
+            file_put_contents('/etc/nginx/conf.d/novacpx-proxy.conf',
+                "client_max_body_size 256M;\nproxy_buffers 16 16k;\nproxy_buffer_size 16k;\n");
+        }
+
+        yield "» Saving proxy settings...\n";
+        $save('proxy_mode', 'local');
+        $save('proxy_backend_ip', '127.0.0.1');
+        $save('proxy_apache_port', (string)$apachePort);
+
+        yield "» Starting nginx on port 80/443...\n";
+        shell_exec('systemctl enable nginx 2>/dev/null && systemctl start nginx 2>/dev/null');
+        sleep(1);
+        if (!self::isRunning()) {
+            $err = shell_exec('nginx -t 2>&1');
+            yield "ERROR: nginx failed to start:\n{$err}\n";
+            yield "Apache is running on port {$apachePort}. Fix nginx config and try again.\n";
+            return;
+        }
+        yield "  nginx is running\n";
+
+        yield "» Syncing proxy hosts from all active accounts...\n";
+        $added = self::syncFromAccounts();
+        yield "  Added {$added} proxy host(s)\n";
+        self::writeAllConfigs();
+
+        yield "✓ Local proxy mode active!\n";
+        yield "  Apache: 127.0.0.1:{$apachePort} (PHP, file serving)\n";
+        yield "  Nginx:  0.0.0.0:80/443 (public, proxies to Apache)\n";
+        yield "  All accounts route through nginx → Apache automatically.\n";
+    }
+
+    /**
+     * Revert local mode: move Apache back to 80/443, stop nginx, disable proxy.
+     */
+    public static function disableLocalMode(): \Generator {
+        require_once NOVACPX_LIB . '/VhostManager.php';
+        $db         = DB::getInstance();
+        $apachePort = (int)($db->fetchOne("SELECT value FROM settings WHERE `key`='proxy_apache_port'")['value'] ?? 8090);
+
+        yield "» Stopping nginx...\n";
+        shell_exec('systemctl stop nginx 2>/dev/null && systemctl disable nginx 2>/dev/null');
+
+        yield "» Migrating Apache from port {$apachePort} → 80...\n";
+        $changed = VhostManager::restoreApachePort($apachePort);
+        yield "  Updated {$changed} vhost(s) and ports.conf\n";
+
+        yield "» Restarting Apache on port 80...\n";
+        shell_exec('systemctl restart apache2 2>/dev/null');
+
+        yield "» Saving settings...\n";
+        $db->execute("INSERT INTO settings (`key`, value) VALUES ('proxy_mode','disabled') ON DUPLICATE KEY UPDATE value='disabled'");
+        $db->execute("UPDATE settings SET value='80' WHERE `key`='proxy_apache_port'");
+
+        yield "✓ Proxy disabled. Apache is back on port 80/443.\n";
+    }
+
     // --- Remote setup & uninstall ---
 
     public static function runSetupOnRemote(): \Generator {
