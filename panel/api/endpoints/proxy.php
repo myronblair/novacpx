@@ -200,10 +200,9 @@ try {
         $action === 'uninstall' && $method === 'DELETE' => (function() use ($body) {
             $removeNginx = !empty($body['remove_nginx']);
             $result      = ProxyManager::uninstall($removeNginx);
-            if ($removeNginx) {
-                $db = DB::getInstance();
-                $db->execute("INSERT INTO settings (`key`, value) VALUES ('proxy_mode','disabled') ON DUPLICATE KEY UPDATE value='disabled'");
-            }
+            // Always reset to disabled — configs are gone regardless of whether nginx binary was removed
+            $db = DB::getInstance();
+            $db->execute("INSERT INTO settings (`key`, value) VALUES ('proxy_mode','disabled'),('proxy_remote_host',''),('proxy_backend_ip','') ON DUPLICATE KEY UPDATE value=VALUES(value)");
             Response::json(['success' => true, 'data' => ['result' => $result]]);
         })(),
 

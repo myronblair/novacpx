@@ -2630,7 +2630,7 @@ async function nginxProxyPage() {
 <div class="stats-grid" style="margin-bottom:1.5rem">
   <div class="stat-card">
     <div class="stat-label">Nginx Status</div>
-    <div class="stat-value ${run ? 'stat-green' : 'stat-red'}">${inst ? (run ? 'Running' : 'Stopped') : 'Not Configured'}</div>
+    <div class="stat-value ${run ? 'stat-green' : 'stat-red'}">${cfg.mode === 'disabled' ? 'Disabled' : (run ? 'Running' : 'Stopped')}</div>
     <div class="stat-sub">${s.version || (inst ? 'nginx' : 'configure in Settings')}</div>
   </div>
   <div class="stat-card">
@@ -2650,7 +2650,7 @@ async function nginxProxyPage() {
   </div>
 </div>
 
-${!inst ? `
+${(!inst || cfg.mode === 'disabled') ? `
 <div class="panel" style="padding:2rem">
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;max-width:680px;margin:0 auto">
     <div style="border:1px solid var(--border);border-radius:8px;padding:1.5rem;text-align:center">
