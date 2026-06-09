@@ -327,9 +327,21 @@ async function loadEmailList() {
 }
 window.loadEmailList = loadEmailList;
 
-window.addEmailAccount = () => {
+window.addEmailAccount = async () => {
+  const dr = await Nova.api('domains', 'list');
+  const domains = (dr?.data || []).map(d => d.domain).filter(Boolean);
+  const domainOpts = domains.length
+    ? domains.map(d => `<option value="${Nova.escHtml(d)}">${Nova.escHtml(d)}</option>`).join('')
+    : '<option value="" disabled>No domains on this account</option>';
   Nova.modal('Add Email Account', `
-    <div class="form-group"><label class="form-label">Email Address</label><input id="em-addr" class="form-control" placeholder="user@yourdomain.com"></div>
+    <div class="form-group">
+      <label class="form-label">Email Address</label>
+      <div style="display:flex;align-items:center;gap:.4rem">
+        <input id="em-local" class="form-control" placeholder="username" style="flex:1;min-width:0">
+        <span style="color:var(--text-muted);font-size:1rem;flex-shrink:0">@</span>
+        <select id="em-domain" class="form-control" style="flex:1.2;min-width:0">${domainOpts}</select>
+      </div>
+    </div>
     <div class="form-group"><label class="form-label">Password</label><input id="em-pass" type="password" class="form-control"></div>
     <div class="form-group"><label class="form-label">Quota (MB, 0=unlimited)</label><input id="em-quota" type="number" class="form-control" value="0"></div>`,
     `<button class="btn btn-primary" onclick="submitAddEmail()">Create</button>`
@@ -337,8 +349,12 @@ window.addEmailAccount = () => {
 };
 
 window.submitAddEmail = async () => {
+  const local  = (document.getElementById('em-local')?.value || '').trim();
+  const domain = document.getElementById('em-domain')?.value || '';
+  if (!local)  { Nova.toast('Enter a username', 'error'); return; }
+  if (!domain) { Nova.toast('Select a domain', 'error'); return; }
   const res = await Nova.api('email', 'create', { method: 'POST', body: {
-    email: document.getElementById('em-addr')?.value,
+    email: `${local}@${domain}`,
     password: document.getElementById('em-pass')?.value,
     quota_mb: parseInt(document.getElementById('em-quota')?.value || '0'),
   }});
