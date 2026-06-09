@@ -102,6 +102,17 @@ match ($action) {
     // ── Check OS updates ─────────────────────────────────────────────────────
     'check-os-update' => (function() use ($db) {
         Auth::getInstance()->require('admin');
+        $force  = !empty($_GET['force']);
+        $cached = $db->fetchOne("SELECT value, updated_at FROM settings WHERE `key`='update_cache_os'");
+        $age    = $cached ? (time() - strtotime($cached['updated_at'])) : PHP_INT_MAX;
+
+        if (!$force && $cached && $age < 43200) {
+            $data = json_decode($cached['value'], true) ?: [];
+            $data['cached'] = true;
+            $data['cached_at'] = $cached['updated_at'];
+            Response::success($data);
+        }
+
         shell_exec('apt-get update -qq 2>/dev/null');
         $out = shell_exec('apt-get -s upgrade 2>/dev/null | grep "^Inst " | head -50') ?: '';
         $packages = array_values(array_filter(array_map(function($line) {
@@ -114,12 +125,14 @@ match ($action) {
         }, explode("\n", trim($out)))));
         $security = array_filter($packages, fn($p) => str_contains($p['name'] ?? '', 'security') ||
             (bool)shell_exec("apt-get -s upgrade 2>/dev/null | grep -c \"^Inst {$p['name']}.*security\" 2>/dev/null"));
-        Response::success([
+        $result = [
             'upgradable'       => count($packages),
             'security_updates' => count($security),
             'packages'         => $packages,
             'last_checked'     => date('Y-m-d H:i:s'),
-        ]);
+        ];
+        $db->execute("INSERT INTO settings(`key`,value,updated_at) VALUES('update_cache_os',?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [json_encode($result)]);
+        Response::success($result);
     })(),
 
     // ── Start OS update (background job) ─────────────────────────────────────
@@ -194,21 +207,27 @@ BASH;
     // ── Check NovaCPX update ─────────────────────────────────────────────────
     'check-novacpx-update' => (function() use ($db) {
         Auth::getInstance()->require('admin');
+        $force  = !empty($_GET['force']);
+        $cached = $db->fetchOne("SELECT value, updated_at FROM settings WHERE `key`='update_cache_novacpx'");
+        $age    = $cached ? (time() - strtotime($cached['updated_at'])) : PHP_INT_MAX;
+
+        if (!$force && $cached && $age < 43200) {
+            $data = json_decode($cached['value'], true) ?: [];
+            $data['cached'] = true;
+            $data['cached_at'] = $cached['updated_at'];
+            Response::success($data);
+        }
+
         $srcDir = '/opt/novacpx-src';
         if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
-        // Use sudo git so www-data can access root-owned repo
-        $fetchOut = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " fetch origin 2>&1");
-        $logOut   = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " log HEAD..origin/main --oneline 2>/dev/null") ?: '';
-        $updates  = array_values(array_filter(explode("\n", trim($logOut))));
-        $branch   = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " branch --show-current 2>/dev/null") ?: 'main');
-        $commit   = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse --short HEAD 2>/dev/null") ?: '');
-        Response::success([
-            'updates_available' => count($updates),
-            'current_commit'    => $commit,
-            'branch'            => $branch,
-            'commits'           => $updates,
-            'fetch_output'      => trim($fetchOut ?: ''),
-        ]);
+        shell_exec("sudo git -C " . escapeshellarg($srcDir) . " fetch origin 2>/dev/null");
+        $logOut  = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " log HEAD..origin/main --oneline 2>/dev/null") ?: '';
+        $updates = array_values(array_filter(explode("\n", trim($logOut))));
+        $branch  = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " branch --show-current 2>/dev/null") ?: 'main');
+        $commit  = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse --short HEAD 2>/dev/null") ?: '');
+        $result  = ['updates_available' => count($updates), 'current_commit' => $commit, 'branch' => $branch, 'commits' => $updates];
+        $db->execute("INSERT INTO settings(`key`,value,updated_at) VALUES('update_cache_novacpx',?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [json_encode($result)]);
+        Response::success($result);
     })(),
 
     // ── Apply NovaCPX update ─────────────────────────────────────────────────

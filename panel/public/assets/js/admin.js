@@ -263,11 +263,12 @@
   }
 
   // ── Updates ────────────────────────────────────────────────────────────────
-  async function updates() {
+  async function updates(force = false) {
+    const qp = force ? { force: 1 } : {};
     const [ver, ncpxCheck, osCheck] = await Promise.all([
       Nova.api('system', 'version'),
-      Nova.api('system', 'check-novacpx-update'),
-      Nova.api('system', 'check-os-update'),
+      Nova.api('system', 'check-novacpx-update', { params: qp }),
+      Nova.api('system', 'check-os-update', { params: qp }),
     ]);
     const v     = ver?.data || {};
     const ncpx  = ncpxCheck?.data || {};
@@ -278,7 +279,10 @@
     const html = `
 <div class="page-header mb-3">
   <h2 class="page-title">Updates</h2>
-  <p class="text-muted text-sm">Manage NovaCPX panel updates and OS package upgrades.</p>
+  <div style="display:flex;align-items:center;gap:1rem;margin-left:auto">
+    ${(ncpx.cached || os.cached) ? `<span class="text-muted text-sm">Cached · last checked ${Nova.relTime(ncpx.cached_at || os.cached_at)}</span>` : ''}
+    <button class="btn btn-ghost btn-sm" onclick="forceRefreshUpdates()">↻ Refresh now</button>
+  </div>
 </div>
 
 <!-- NovaCPX Panel Updates -->
@@ -367,6 +371,13 @@
     setTimeout(loadServiceVersions, 80);
     return html;
   }
+
+  window.forceRefreshUpdates = () => {
+    const content = document.getElementById('page-content');
+    if (!content) return;
+    content.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">Checking for updates…</div>';
+    updates(true).then(html => { if (html) content.innerHTML = html; });
+  };
 
   window.loadServiceVersions = async () => {
     const body = document.getElementById('svc-versions-body');
