@@ -324,10 +324,10 @@ CREATE TABLE IF NOT EXISTS backup_schedules (
 -- ── Server Stats ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS server_stats (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  cpu_pct     REAL,
-  ram_pct     REAL,
-  disk_pct    REAL,
-  load_1m     REAL,
+  cpu_usage   REAL,
+  ram_usage   REAL,
+  disk_usage  REAL,
+  load_avg    REAL,
   load_5m     REAL,
   load_15m    REAL,
   net_in_kb   INTEGER DEFAULT 0,
