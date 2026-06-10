@@ -636,19 +636,81 @@ log "Fail2Ban configured"
 # ── Sudoers for NovaCPX panel (www-data needs root for firewall/opendkim) ────
 cat > /etc/sudoers.d/novacpx-firewall <<SUDOERS
 Defaults:www-data !requiretty
+# Firewall / security
 www-data ALL=(root) NOPASSWD: /usr/sbin/ufw *
 www-data ALL=(root) NOPASSWD: /usr/bin/fail2ban-client *
-www-data ALL=(root) NOPASSWD: /bin/systemctl restart fail2ban
-www-data ALL=(root) NOPASSWD: /bin/systemctl reload fail2ban
-www-data ALL=(root) NOPASSWD: /bin/systemctl start fail2ban
-www-data ALL=(root) NOPASSWD: /bin/systemctl stop fail2ban
+# Web servers
+www-data ALL=(root) NOPASSWD: /bin/systemctl start apache2
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop apache2
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart apache2
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload apache2
+www-data ALL=(root) NOPASSWD: /bin/systemctl enable apache2
 www-data ALL=(root) NOPASSWD: /bin/systemctl start nginx
 www-data ALL=(root) NOPASSWD: /bin/systemctl stop nginx
 www-data ALL=(root) NOPASSWD: /bin/systemctl restart nginx
 www-data ALL=(root) NOPASSWD: /bin/systemctl reload nginx
-www-data ALL=(root) NOPASSWD: /bin/systemctl restart apache2
-www-data ALL=(root) NOPASSWD: /bin/systemctl reload apache2
+www-data ALL=(root) NOPASSWD: /bin/systemctl enable nginx
 www-data ALL=(root) NOPASSWD: /usr/sbin/nginx *
+# Mail servers
+www-data ALL=(root) NOPASSWD: /bin/systemctl start postfix
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop postfix
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart postfix
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload postfix
+www-data ALL=(root) NOPASSWD: /bin/systemctl start dovecot
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop dovecot
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart dovecot
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload dovecot
+www-data ALL=(root) NOPASSWD: /bin/systemctl start rspamd
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop rspamd
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart rspamd
+www-data ALL=(root) NOPASSWD: /bin/systemctl enable rspamd
+www-data ALL=(root) NOPASSWD: /bin/systemctl disable rspamd
+www-data ALL=(root) NOPASSWD: /usr/sbin/postqueue -f
+# FTP servers
+www-data ALL=(root) NOPASSWD: /bin/systemctl start proftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop proftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart proftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload proftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl enable proftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl start vsftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop vsftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart vsftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl enable vsftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl start pure-ftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop pure-ftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart pure-ftpd
+www-data ALL=(root) NOPASSWD: /bin/systemctl enable pure-ftpd
+# DNS servers
+www-data ALL=(root) NOPASSWD: /bin/systemctl start named
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop named
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart named
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload named
+www-data ALL=(root) NOPASSWD: /bin/systemctl start bind9
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop bind9
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart bind9
+www-data ALL=(root) NOPASSWD: /bin/systemctl start pdns
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop pdns
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart pdns
+www-data ALL=(root) NOPASSWD: /bin/systemctl start nsd
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop nsd
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart nsd
+# Database servers
+www-data ALL=(root) NOPASSWD: /bin/systemctl start mysql
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop mysql
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart mysql
+www-data ALL=(root) NOPASSWD: /bin/systemctl start mariadb
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop mariadb
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart mariadb
+# Security
+www-data ALL=(root) NOPASSWD: /bin/systemctl start fail2ban
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop fail2ban
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart fail2ban
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload fail2ban
+# PHP-FPM
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload php*-fpm
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart php*-fpm
+www-data ALL=(root) NOPASSWD: /bin/systemctl start php*-fpm
+www-data ALL=(root) NOPASSWD: /bin/systemctl stop php*-fpm
 # DB tool installation privileges
 www-data ALL=(root) NOPASSWD: /usr/bin/gpg *
 www-data ALL=(root) NOPASSWD: /usr/bin/curl *
