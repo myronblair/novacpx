@@ -1155,6 +1155,7 @@ ${stacks.map(s=>`<tr>
       ? `<button class="btn btn-xs btn-warning" onclick="uStackAct(${s.id},'down')">Stop</button>`
       : `<button class="btn btn-xs btn-success" onclick="uStackAct(${s.id},'up')">Start</button>`}
     <button class="btn btn-xs btn-ghost" onclick="uStackLogs(${s.id},'${Nova.escHtml(s.name)}')">Logs</button>
+    <button class="btn btn-xs btn-secondary" onclick="uStackReinstall(${s.id},'${Nova.escHtml(s.name)}')">Reinstall</button>
     <button class="btn btn-xs btn-danger" onclick="uStackRemove(${s.id},'${Nova.escHtml(s.name)}')">Remove</button>
   </td>
 </tr>`).join('')}
@@ -1193,10 +1194,22 @@ window.uStackLogs = async (stackId, name) => {
   Nova.modal(`Logs: ${name}`, `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(r?.data?.output||'No logs available')}</pre>`);
 };
 
+window.uStackReinstall = (stackId, name) => Nova.confirm(
+  `Reinstall "${name}"? This will pull the latest images, restart all containers, and reset to a fresh state. Your data volumes will be preserved.`,
+  async () => {
+    Nova.loading(`Reinstalling ${name}…`);
+    const r = await Nova.api('docker', 'stack-reinstall', { method: 'POST', body: { stack_id: stackId } });
+    Nova.loadingDone();
+    Nova.toast(r?.success ? `${name} reinstalled` : (r?.message || 'Reinstall failed'), r?.success ? 'success' : 'error');
+    if (r?.success) await uDockerReloadStacks();
+  },
+  true
+);
+
 window.uStackRemove = async (stackId, name) => {
   if (!confirm(`Remove app "${name}"? This will stop and delete its containers and data.`)) return;
   Nova.loading('Removing app…');
-  const r = await Nova.api('docker', 'remove-stack', { method: 'POST', body: { stack_id: stackId } });
+  const r = await Nova.api('docker', 'stack-remove', { method: 'POST', body: { stack_id: stackId } });
   Nova.loadingDone();
   Nova.toast(r?.success ? 'App removed' : (r?.message||'Failed'), r?.success?'success':'error');
   if (r?.success) await uDockerReloadStacks();
