@@ -1166,7 +1166,7 @@
 
   // ── Resellers ──────────────────────────────────────────────────────────────
   async function resellers() {
-    const res = await Nova.api('accounts', 'list', { params:{ role: 'reseller' }});
+    const res = await Nova.api('users', 'list', { params:{ role: 'reseller' }});
     const rows = res?.data || [];
     return `
 <div class="card">
@@ -1175,14 +1175,18 @@
     <button class="btn btn-primary btn-sm" onclick="adminAddReseller()">+ Add Reseller</button>
   </div>
   <div id="reseller-table">
-    ${rows.length ? `<table class="table"><thead><tr><th>Username</th><th>Email</th><th>Accounts</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+    ${rows.length ? `<table class="table"><thead><tr><th>Username</th><th>Email</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
       ${rows.map(r => `<tr>
-        <td>${r.username}</td><td>${r.email||'—'}</td>
-        <td>${r.account_count||0}</td>
-        <td>${Nova.badge(r.status,r.status==='active'?'green':'red')}</td>
+        <td><strong>${Nova.escHtml(r.username)}</strong></td>
+        <td>${Nova.escHtml(r.email||'—')}</td>
+        <td>${Nova.badge(r.status, r.status==='active'?'green':'red')}</td>
+        <td class="text-sm text-muted">${r.created_at ? r.created_at.slice(0,10) : '—'}</td>
         <td style="display:flex;gap:.25rem">
-          <button class="btn btn-xs" onclick="adminChangePass(${r.id},'${r.username}')">Passwd</button>
-          <button class="btn btn-xs btn-danger" onclick="adminSuspend(${r.id},'${r.username}')">Suspend</button>
+          <button class="btn btn-xs" onclick="adminResellerPasswd(${r.id},'${Nova.escHtml(r.username)}')">Passwd</button>
+          ${r.status === 'active'
+            ? `<button class="btn btn-xs btn-warning" onclick="adminResellerSuspend(${r.id},'${Nova.escHtml(r.username)}')">Suspend</button>`
+            : `<button class="btn btn-xs btn-success" onclick="adminResellerUnsuspend(${r.id})">Unsuspend</button>`}
+          <button class="btn btn-xs btn-danger" onclick="adminResellerDelete(${r.id},'${Nova.escHtml(r.username)}')">Delete</button>
         </td>
       </tr>`).join('')}
     </tbody></table>`
@@ -1193,10 +1197,51 @@
 
   window.adminAddReseller = () => {
     Nova.modal('Create Reseller Account', `
-      <div class="form-group"><label class="form-label">Username</label><input id="ar-user" class="form-control"></div>
-      <div class="form-group"><label class="form-label">Password</label><input id="ar-pass" type="password" class="form-control"></div>
-      <div class="form-group"><label class="form-label">Email</label><input id="ar-email" type="email" class="form-control"></div>`,
-      `<button class="btn btn-primary" onclick="Nova.api('auth','register',{method:'POST',body:{username:document.getElementById('ar-user').value,password:document.getElementById('ar-pass').value,email:document.getElementById('ar-email').value,role:'reseller'}}).then(r=>{if(r?.success){Nova.toast('Reseller created','success');document.querySelector('.modal-overlay').remove();adminPage('resellers');}else Nova.toast(r?.message,'error');})">Create</button>`);
+      <div class="form-group"><label class="form-label">Username</label><input id="ar-user" class="form-control" autocomplete="off"></div>
+      <div class="form-group"><label class="form-label">Email</label><input id="ar-email" type="email" class="form-control"></div>
+      <div class="form-group"><label class="form-label">Password</label><input id="ar-pass" type="password" class="form-control" autocomplete="new-password"></div>`,
+      `<button class="btn btn-primary" onclick="
+        Nova.api('users','create',{method:'POST',body:{
+          username:document.getElementById('ar-user').value,
+          email:document.getElementById('ar-email').value,
+          password:document.getElementById('ar-pass').value,
+          role:'reseller'
+        }}).then(r=>{
+          if(r?.success){Nova.toast('Reseller created','success');document.querySelector('.modal-overlay').remove();adminPage('resellers');}
+          else Nova.toast(r?.message||'Error','error');
+        })">Create</button>`);
+  };
+
+  window.adminResellerPasswd = (id, user) => {
+    Nova.modal(`Change Password — ${user}`,
+      `<div class="form-group"><label class="form-label">New Password</label><input id="arp-pass" type="password" class="form-control" autocomplete="new-password"></div>`,
+      `<button class="btn btn-primary" onclick="
+        Nova.api('users','change-password',{method:'POST',body:{id:${id},password:document.getElementById('arp-pass').value}}).then(r=>{
+          if(r?.success){Nova.toast('Password updated','success');document.querySelector('.modal-overlay').remove();}
+          else Nova.toast(r?.message||'Error','error');
+        })">Update</button>`);
+  };
+
+  window.adminResellerSuspend = (id, user) => {
+    Nova.confirm(`Suspend reseller ${user}?`, async () => {
+      const r = await Nova.api('users','suspend',{method:'POST',body:{id}});
+      if (r?.success) { Nova.toast('Suspended','success'); adminPage('resellers'); }
+      else Nova.toast(r?.message||'Error','error');
+    });
+  };
+
+  window.adminResellerUnsuspend = async (id) => {
+    const r = await Nova.api('users','unsuspend',{method:'POST',body:{id}});
+    if (r?.success) { Nova.toast('Unsuspended','success'); adminPage('resellers'); }
+    else Nova.toast(r?.message||'Error','error');
+  };
+
+  window.adminResellerDelete = (id, user) => {
+    Nova.confirm(`Delete reseller ${user}? Their accounts will be disowned (moved to admin).`, async () => {
+      const r = await Nova.api('users','delete',{method:'POST',body:{id}});
+      if (r?.success) { Nova.toast('Reseller deleted','success'); adminPage('resellers'); }
+      else Nova.toast(r?.message||'Error','error');
+    }, true);
   };
 
   // ── Packages ───────────────────────────────────────────────────────────────
