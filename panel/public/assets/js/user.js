@@ -1076,9 +1076,10 @@ async function dockerPage(el) {
   <div class="stat-card"><div class="stat-label">Max CPUs / App</div><div class="stat-value stat-green">${quota.max_cpus}</div></div>
 </div>
 
-<div style="display:flex;gap:.5rem;margin-bottom:1rem">
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">
   <button class="btn btn-sm ${_uDockerTab==='my-apps'?'btn-primary':'btn-ghost'}" onclick="uDockerTab('my-apps')">My Apps</button>
   <button class="btn btn-sm ${_uDockerTab==='catalog'?'btn-primary':'btn-ghost'}" onclick="uDockerTab('catalog')">App Catalog</button>
+  <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="uDockerUninstallAll()">Remove All My Apps</button>
 </div>
 <div id="udocker-content"><div class="loading">Loading…</div></div>`;
 
@@ -1102,6 +1103,18 @@ async function dockerPage(el) {
 }
 
 window._uDockerTab = 'my-apps';
+
+window.uDockerUninstallAll = () => Nova.confirm(
+  'Remove ALL your Docker apps? This will stop and delete every container and stack you own. Your hosting account and websites are not affected.',
+  async () => {
+    Nova.loading('Removing all your Docker apps…');
+    const r = await Nova.api('docker', 'uninstall-account', { method: 'POST', body: {} });
+    Nova.loadingDone();
+    Nova.toast(r?.success ? 'All Docker apps removed' : (r?.error || r?.message || 'Failed'), r?.success ? 'success' : 'error');
+    if (r?.success) await uDockerReloadStacks();
+  },
+  true
+);
 
 async function uDockerReloadStacks() {
   const r = await Nova.api('docker', 'stacks');

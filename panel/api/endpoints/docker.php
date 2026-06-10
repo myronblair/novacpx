@@ -29,6 +29,36 @@ match ($action) {
         Response::success(null, $msg);
     })(),
 
+    'uninstall-account' => (function() use ($dm, $currentUser, $isAdmin, $_userAccountId, $body) {
+        // Stop and remove all containers and stacks belonging to one account.
+        // Users can only remove their own; admins can specify any account_id.
+        $accountId = $isAdmin ? (int)($body['account_id'] ?? $_userAccountId) : ($_userAccountId ?? 0);
+        if (!$accountId) Response::error('account_id required');
+
+        $db = DB::getInstance();
+
+        // Tear down compose stacks
+        $stacks = $db->fetchAll("SELECT * FROM docker_compose_stacks WHERE account_id = ?", [$accountId]);
+        foreach ($stacks as $stack) {
+            if (is_dir($stack['stack_dir']) && file_exists("{$stack['stack_dir']}/docker-compose.yml")) {
+                shell_exec("sudo docker compose -f " . escapeshellarg("{$stack['stack_dir']}/docker-compose.yml") . " down -v 2>/dev/null");
+            }
+            $db->execute("DELETE FROM docker_compose_stacks WHERE id = ?", [$stack['id']]);
+        }
+
+        // Stop and remove bare containers
+        $containers = $db->fetchAll("SELECT container_id FROM docker_containers WHERE account_id = ?", [$accountId]);
+        foreach ($containers as $c) {
+            if ($c['container_id']) {
+                shell_exec("sudo docker rm -f " . escapeshellarg($c['container_id']) . " 2>/dev/null");
+            }
+        }
+        $db->execute("DELETE FROM docker_containers WHERE account_id = ?", [$accountId]);
+
+        audit("docker.uninstall-account", "account:{$accountId}");
+        Response::success(null, 'All Docker apps and containers removed for this account');
+    })(),
+
     'prune' => (function() use ($dm, $body, $isAdmin) {
         if (!$isAdmin) Response::error('Admin only', 403);
         $out = $dm->systemPrune((bool)($body['volumes'] ?? false));

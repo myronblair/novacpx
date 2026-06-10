@@ -4047,8 +4047,8 @@ async function docker() {
   ${(status.disk||[]).map(d=>`<div class="stat-card"><div class="stat-label">${Nova.escHtml(d.Type||d.type||'?')}</div><div class="stat-value" style="font-size:1rem">${Nova.escHtml(d.TotalCount||d.Size||'—')}</div><div class="stat-sub">${Nova.escHtml(d.Reclaimable||d.reclaimable||'')}</div></div>`).join('')}
 </div>
 <div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">
-  ${tab('containers','Containers')} ${tab('images','Images')} ${tab('volumes','Volumes')} ${tab('networks','Networks')} ${tab('stacks','Compose Stacks')} ${tab('quotas','User Quotas')}
-  <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="dockerPrune()">System Prune</button>
+  ${tab('containers','Containers')} ${tab('images','Images')} ${tab('volumes','Volumes')} ${tab('networks','Networks')} ${tab('stacks','Compose Stacks')} ${tab('catalog','App Catalog')} ${tab('quotas','User Quotas')}
+  <button class="btn btn-sm btn-warning" style="margin-left:auto" onclick="dockerPrune()">System Prune</button>
 </div>
 <div id="docker-tab-content"><div class="loading">Loading…</div></div>`;
 }
@@ -4148,6 +4148,23 @@ ${stacks.map(s=>`<tr>
 </tr>`).join('')}
 </tbody></table></div>`}`;
 
+  } else if (tab === 'catalog') {
+    const r = await Nova.api('docker', 'catalog');
+    const catalog = r?.data?.catalog || {};
+    tc.innerHTML = `
+<p class="text-muted" style="margin-bottom:1rem">One-click app deployment. Each app runs as an isolated Docker Compose stack. Select an account after clicking Launch.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem">
+${Object.entries(catalog).map(([key,app])=>`
+<div class="card" style="transition:var(--transition)" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor=''">
+  <div class="card-body" style="text-align:center;padding:1.5rem">
+    <div style="font-size:1.8rem;font-weight:700;margin-bottom:.5rem;color:var(--primary)">${Nova.escHtml(app.icon)}</div>
+    <div style="font-weight:600;margin-bottom:.25rem">${Nova.escHtml(app.name)}</div>
+    <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:.75rem">${Nova.escHtml(app.description)}</div>
+    <button class="btn btn-sm btn-primary" onclick="dockerAdminLaunchApp('${key}')">Launch</button>
+  </div>
+</div>`).join('')}
+</div>`;
+
   } else if (tab === 'quotas') {
     const r = await Nova.api('accounts', 'list', { params: { limit: 200 } });
     const users = r?.data || [];
@@ -4164,6 +4181,47 @@ ${users.map(u=>`<tr id="docker-quota-row-${u.user_id}">
 </tbody></table></div>`;
   }
 }
+
+window.dockerAdminLaunchApp = async (preselect) => {
+  const catRes = await Nova.api('docker', 'catalog');
+  const catalog = catRes?.data?.catalog || {};
+  const acctRes = await Nova.api('accounts', 'list', { params: { limit: 200 } });
+  const accounts = acctRes?.data || [];
+  const appOpts = Object.entries(catalog).map(([k,a])=>`<option value="${k}" ${k===preselect?'selected':''}>${Nova.escHtml(a.name)}</option>`).join('');
+  const acctOpts = accounts.map(a=>`<option value="${a.id}">${Nova.escHtml(a.username)} (${Nova.escHtml(a.domain)})</option>`).join('');
+
+  window.dockerAdminUpdateParams = (key) => {
+    const app = catalog[key]; if (!app) return;
+    const tc = document.getElementById('dal-params'); if (!tc) return;
+    tc.innerHTML = (app.params||[]).map(p=>`
+      <div class="form-group"><label>${Nova.escHtml(p.label)}${p.required?' *':''}</label>
+      <input id="dal-${Nova.escHtml(p.key)}" type="${p.type||'text'}" class="form-control" ${p.placeholder?`placeholder="${Nova.escHtml(p.placeholder)}"`:''}></div>`).join('');
+  };
+
+  const ov = Nova.modal('Launch App (Admin)',
+    `<div class="form-group"><label>Account</label><select id="dal-account" class="form-control">${acctOpts}</select></div>
+     <div class="form-group"><label>Application</label><select id="dal-app" class="form-control" onchange="dockerAdminUpdateParams(this.value)">${appOpts}</select></div>
+     <div id="dal-params"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="dockerAdminLaunchSubmit()">Launch</button>`
+  );
+  dockerAdminUpdateParams(preselect || Object.keys(catalog)[0] || '');
+
+  window.dockerAdminLaunchSubmit = async () => {
+    const appKey = document.getElementById('dal-app').value;
+    const accountId = parseInt(document.getElementById('dal-account').value);
+    const app = catalog[appKey]; if (!app) return;
+    const params = {};
+    (app.params||[]).forEach(p => { const el = document.getElementById(`dal-${p.key}`); if (el) params[p.key] = el.value.trim(); });
+    const missing = (app.params||[]).filter(p => p.required && !params[p.key]);
+    if (missing.length) { Nova.toast(`Required: ${missing.map(p=>p.label).join(', ')}`, 'error'); return; }
+    ov.remove();
+    Nova.toast(`Launching ${app.name}…`, 'info', 15000);
+    const r = await Nova.api('docker', 'launch', { method: 'POST', body: { app_key: appKey, account_id: accountId, params } });
+    Nova.toast(r?.success ? `${app.name} launched!` : (r?.error || r?.message || 'Launch failed'), r?.success ? 'success' : 'error');
+    if (r?.success) dockerLoadTab('stacks');
+  };
+};
 
 window.dockerContainerAct = async (cid, action) => {
   const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
