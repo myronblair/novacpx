@@ -1,14 +1,19 @@
 <?php
 class WordPressManager {
     private \PDO $db;
-    private \PDO $provDb;
+    private ?\PDO $provDb = null;
     private string $wpcli = '/usr/local/bin/wp';
 
     public function __construct() {
         $this->db = DB::getInstance()->pdo();
-        // Separate privileged connection for CREATE DATABASE / CREATE USER / GRANT
-        $this->provDb = $this->makeProvPdo();
         $this->ensureWpCli();
+    }
+
+    private function getProvDb(): \PDO {
+        if ($this->provDb === null) {
+            $this->provDb = $this->makeProvPdo();
+        }
+        return $this->provDb;
     }
 
     private function makeProvPdo(): \PDO {
@@ -44,9 +49,9 @@ class WordPressManager {
         $dbUser  = substr($dbName, 0, 32);
 
         // Create DB
-        $this->provDb->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $this->provDb->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY '{$dbPass}'");
-        $this->provDb->exec("GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost'");
+        $this->getProvDb()->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $this->getProvDb()->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY '{$dbPass}'");
+        $this->getProvDb()->exec("GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost'");
 
         // Download WP + install
         $sysUser = $account['system_user'] ?? 'www-data';
@@ -111,9 +116,9 @@ class WordPressManager {
         // Clone DB
         $stagingDb   = $install['db_name'] . '_staging';
         $stagingDbPw = bin2hex(random_bytes(8));
-        $this->provDb->exec("CREATE DATABASE IF NOT EXISTS `{$stagingDb}`");
-        $this->provDb->exec("CREATE USER IF NOT EXISTS '{$stagingDb}'@'localhost' IDENTIFIED BY '{$stagingDbPw}'");
-        $this->provDb->exec("GRANT ALL ON `{$stagingDb}`.* TO '{$stagingDb}'@'localhost'");
+        $this->getProvDb()->exec("CREATE DATABASE IF NOT EXISTS `{$stagingDb}`");
+        $this->getProvDb()->exec("CREATE USER IF NOT EXISTS '{$stagingDb}'@'localhost' IDENTIFIED BY '{$stagingDbPw}'");
+        $this->getProvDb()->exec("GRANT ALL ON `{$stagingDb}`.* TO '{$stagingDb}'@'localhost'");
         $this->exec("mysqldump {$install['db_name']} | mysql {$stagingDb}");
 
         // Update staging wp-config
@@ -137,8 +142,8 @@ class WordPressManager {
     public function delete(int $id): bool {
         [$install, $sysUser, $docRoot] = $this->resolve($id);
         $this->exec("rm -rf {$docRoot}");
-        $this->provDb->exec("DROP DATABASE IF EXISTS `{$install['db_name']}`");
-        $this->provDb->exec("DROP USER IF EXISTS '{$install['db_user']}'@'localhost'");
+        $this->getProvDb()->exec("DROP DATABASE IF EXISTS `{$install['db_name']}`");
+        $this->getProvDb()->exec("DROP USER IF EXISTS '{$install['db_user']}'@'localhost'");
         $this->db->prepare("DELETE FROM wordpress_installs WHERE id=?")->execute([$id]);
         return true;
     }
@@ -202,9 +207,9 @@ class WordPressManager {
         $sysUser = $account['system_user'] ?? 'www-data';
 
         yield "▶ Creating MySQL database ({$dbName})...\n";
-        $this->provDb->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $this->provDb->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY '{$dbPass}'");
-        $this->provDb->exec("GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost'");
+        $this->getProvDb()->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $this->getProvDb()->exec("CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost' IDENTIFIED BY '{$dbPass}'");
+        $this->getProvDb()->exec("GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost'");
         yield "  ✓ Database ready\n";
 
         yield "▶ Downloading WordPress core (this takes 20-40 seconds)...\n";

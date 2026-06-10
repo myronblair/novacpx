@@ -14,6 +14,7 @@ if (!$_cfg) {
 }
 
 define('DB_PATH',        $_cfg['database']['path']        ?? '/var/lib/novacpx/panel.db');
+define('DB_HOST',        $_cfg['database']['host']        ?? 'localhost');
 define('DB_WP_USER',     $_cfg['database']['wp_user']     ?? '');
 define('DB_WP_PASS',     $_cfg['database']['wp_pass']     ?? '');
 define('SECRET_KEY',     $_cfg['panel']['secret']         ?? '');
