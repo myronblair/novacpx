@@ -65,7 +65,8 @@ php_value[max_execution_time]  = 30
 
         // Remove old pool, create new one
         $oldPool = str_replace('{ver}', $oldVer, self::$poolDir) . "/{$acct['username']}.conf";
-        if (file_exists($oldPool)) { unlink($oldPool); self::reloadFPM($oldVer); }
+        shell_exec("sudo rm -f " . escapeshellarg($oldPool) . " 2>/dev/null");
+        self::reloadFPM($oldVer);
 
         self::createPool($acct['username'], $newVer);
 
@@ -100,10 +101,12 @@ php_value[max_execution_time]  = 30
         self::reloadFPM($acct['php_version']);
 
         $db->execute(
-            "INSERT INTO php_configs (account_id, php_version, memory_limit, max_execution_time, upload_max_filesize, post_max_size)
-             VALUES (?,?,?,?,?,?)
-             ON DUPLICATE KEY UPDATE memory_limit=VALUES(memory_limit), max_execution_time=VALUES(max_execution_time),
-             upload_max_filesize=VALUES(upload_max_filesize), post_max_size=VALUES(post_max_size), updated_at=NOW()",
+            "INSERT INTO php_configs (account_id, php_version, memory_limit, max_execution_time, upload_max_filesize, post_max_size, updated_at)
+             VALUES (?,?,?,?,?,?,datetime('now'))
+             ON CONFLICT(account_id) DO UPDATE SET php_version=excluded.php_version,
+             memory_limit=excluded.memory_limit, max_execution_time=excluded.max_execution_time,
+             upload_max_filesize=excluded.upload_max_filesize, post_max_size=excluded.post_max_size,
+             updated_at=excluded.updated_at",
             [$accountId, $acct['php_version'], $cfg['memory_limit'] ?? '256M', $cfg['max_execution_time'] ?? 30,
              $cfg['upload_max_filesize'] ?? '64M', $cfg['post_max_size'] ?? '64M']
         );

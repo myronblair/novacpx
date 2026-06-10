@@ -637,7 +637,15 @@ log "Fail2Ban configured"
 cat > /etc/sudoers.d/novacpx-firewall <<SUDOERS
 Defaults:www-data !requiretty
 # Firewall / security
-www-data ALL=(root) NOPASSWD: /usr/sbin/ufw *
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw status
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw allow *
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw deny *
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw delete *
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw reload
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw enable
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw disable
+www-data ALL=(root) NOPASSWD: /usr/sbin/ufw logging *
 www-data ALL=(root) NOPASSWD: /usr/bin/fail2ban-client *
 # Web servers
 www-data ALL=(root) NOPASSWD: /bin/systemctl start apache2
@@ -711,16 +719,9 @@ www-data ALL=(root) NOPASSWD: /bin/systemctl reload php*-fpm
 www-data ALL=(root) NOPASSWD: /bin/systemctl restart php*-fpm
 www-data ALL=(root) NOPASSWD: /bin/systemctl start php*-fpm
 www-data ALL=(root) NOPASSWD: /bin/systemctl stop php*-fpm
-# DB tool installation privileges
-www-data ALL=(root) NOPASSWD: /usr/bin/gpg *
-www-data ALL=(root) NOPASSWD: /usr/bin/curl *
-www-data ALL=(root) NOPASSWD: /usr/sbin/debconf-set-selections *
-www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/apt/sources.list.d/*
-www-data ALL=(root) NOPASSWD: /usr/bin/tee /usr/share/keyrings/*
+# Web config file management (scoped paths only)
 www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/nginx/conf.d/*
 www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/apache2/conf-enabled/*
-www-data ALL=(root) NOPASSWD: /usr/pgadmin4/bin/setup-web.sh *
-www-data ALL=(root) NOPASSWD: /usr/bin/env *
 SUDOERS
 chmod 440 /etc/sudoers.d/novacpx-firewall
 log "Sudoers rules installed"

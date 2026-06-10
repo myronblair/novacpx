@@ -111,7 +111,7 @@ class WordPressManager {
         $stagingRoot   = dirname($docRoot) . rtrim($stagingPath, '/');
 
         // Copy files
-        $this->exec("cp -r {$docRoot} {$stagingRoot}");
+        $this->exec("cp -r " . escapeshellarg($docRoot) . " " . escapeshellarg($stagingRoot));
 
         // Clone DB
         $stagingDb   = $install['db_name'] . '_staging';
@@ -119,7 +119,7 @@ class WordPressManager {
         $this->getProvDb()->exec("CREATE DATABASE IF NOT EXISTS `{$stagingDb}`");
         $this->getProvDb()->exec("CREATE USER IF NOT EXISTS '{$stagingDb}'@'localhost' IDENTIFIED BY '{$stagingDbPw}'");
         $this->getProvDb()->exec("GRANT ALL ON `{$stagingDb}`.* TO '{$stagingDb}'@'localhost'");
-        $this->exec("mysqldump {$install['db_name']} | mysql {$stagingDb}");
+        $this->exec("mysqldump " . escapeshellarg($install['db_name']) . " | mysql " . escapeshellarg($stagingDb));
 
         // Update staging wp-config
         $this->wp($stagingRoot, "config set DB_NAME {$stagingDb}", $sysUser);
@@ -141,10 +141,11 @@ class WordPressManager {
     // ── Delete ────────────────────────────────────────────────────────────────
     public function delete(int $id): bool {
         [$install, $sysUser, $docRoot] = $this->resolve($id);
-        $this->exec("rm -rf {$docRoot}");
+        // Remove DB record first so a failed filesystem cleanup doesn't leave a phantom record
+        $this->db->prepare("DELETE FROM wordpress_installs WHERE id=?")->execute([$id]);
+        $this->exec("rm -rf " . escapeshellarg($docRoot));
         $this->getProvDb()->exec("DROP DATABASE IF EXISTS `{$install['db_name']}`");
         $this->getProvDb()->exec("DROP USER IF EXISTS '{$install['db_user']}'@'localhost'");
-        $this->db->prepare("DELETE FROM wordpress_installs WHERE id=?")->execute([$id]);
         return true;
     }
 
@@ -245,7 +246,12 @@ class WordPressManager {
 
     private function ensureWpCli(): void {
         if (!file_exists($this->wpcli)) {
-            file_put_contents('/tmp/wp-cli.phar', file_get_contents('https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar'));
+            $ctx  = stream_context_create(['http' => ['timeout' => 30]]);
+            $data = @file_get_contents('https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar', false, $ctx);
+            if (!$data || strlen($data) < 100000) {
+                throw new \RuntimeException("Failed to download WP-CLI (received " . strlen((string)$data) . " bytes)");
+            }
+            file_put_contents('/tmp/wp-cli.phar', $data);
             rename('/tmp/wp-cli.phar', $this->wpcli);
             chmod($this->wpcli, 0755);
         }
