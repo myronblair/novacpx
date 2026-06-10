@@ -79,6 +79,9 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT QUEUED_BRANCH; do
   rsync -av "$REPO_PATH/panel/bin/" /opt/novacpx/bin/ >> "$LOG" 2>&1
   chmod +x /opt/novacpx/bin/*.php 2>/dev/null || true
 
+  # Copy VERSION to web root so /VERSION endpoint stays current
+  [[ -f "$REPO_PATH/VERSION" ]] && cp "$REPO_PATH/VERSION" "$WEB_ROOT/VERSION"
+
   # Run pending DB migrations (SQLite)
   MIGR_DIR="$REPO_PATH/db/migrations"
   if [[ -d "$MIGR_DIR" && -f "$DB_PATH" ]]; then
