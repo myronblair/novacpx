@@ -15,15 +15,21 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 exec 9>"$LOCK"
 flock -n 9 || { log "Deploy already running, skipping"; exit 0; }
 
-while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
-  [[ -z "$REPO_PATH" ]] && continue
-  log "--- Deploying commit $COMMIT ---"
+# Read DB path and channel once before processing the queue
+DB_PATH=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c.get('database','path',fallback='/var/lib/novacpx/panel.db'))" 2>/dev/null || echo "/var/lib/novacpx/panel.db")
+CHANNEL=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='update_channel'" 2>/dev/null || echo "stable")
+[[ "$CHANNEL" != "beta" ]] && CHANNEL="stable"
 
-  # Read update channel from DB to know which branch to pull
-  DB_PATH=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read('/etc/novacpx/config.ini'); print(c.get('database','path',fallback='/var/lib/novacpx/panel.db'))" 2>/dev/null || echo "/var/lib/novacpx/panel.db")
-  CHANNEL=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='update_channel'" 2>/dev/null || echo "stable")
+while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT QUEUED_BRANCH; do
+  [[ -z "$REPO_PATH" ]] && continue
+
+  # Use branch recorded in queue entry (from webhook); fall back to DB channel
   TARGET_BRANCH="main"
-  [[ "$CHANNEL" == "beta" ]] && TARGET_BRANCH="beta"
+  if [[ "$QUEUED_BRANCH" == "beta" || ("$QUEUED_BRANCH" != "main" && "$CHANNEL" == "beta") ]]; then
+    TARGET_BRANCH="beta"
+  fi
+
+  log "--- Deploying commit $COMMIT (branch: $TARGET_BRANCH) ---"
 
   # Validate PHP syntax before applying
   cd "$REPO_PATH" || continue
@@ -47,9 +53,9 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
   fi
 
   # Pull from channel branch
-  BEFORE=$(git rev-parse HEAD)
+  BEFORE=$(git rev-parse HEAD | tr -cd 'a-f0-9A-F')
   git pull origin "${TARGET_BRANCH}" >> "$LOG" 2>&1
-  AFTER=$(git rev-parse HEAD)
+  AFTER=$(git rev-parse HEAD | tr -cd 'a-f0-9A-F')
 
   if [[ "$BEFORE" == "$AFTER" ]]; then
     log "Nothing new to deploy (already at $AFTER)"
@@ -88,8 +94,8 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT; do
     done
   fi
 
-  # Record new version in DB
-  NEW_VERSION=$(cat "$REPO_PATH/VERSION" 2>/dev/null | tr -d '[:space:]' || true)
+  # Record new version in DB — sanitize values before interpolating into SQL
+  NEW_VERSION=$(cat "$REPO_PATH/VERSION" 2>/dev/null | tr -d '[:space:]' | tr -cd 'a-zA-Z0-9.-' || true)
   if [[ -n "$NEW_VERSION" && -f "$DB_PATH" ]]; then
     sqlite3 "$DB_PATH" "INSERT INTO novacpx_version (version, installed_at, notes, git_commit) VALUES ('$NEW_VERSION', datetime('now'), 'Auto-deployed via webhook ($CHANNEL channel)', '$AFTER')" 2>/dev/null || true
     sqlite3 "$DB_PATH" "INSERT INTO settings (key, value, updated_at) VALUES ('panel_version', '$NEW_VERSION', datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at" 2>/dev/null || true

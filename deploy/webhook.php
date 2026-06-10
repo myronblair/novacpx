@@ -11,7 +11,6 @@ $cfg        = is_file($configFile) ? parse_ini_file($configFile, true) : [];
 $secret     = $cfg['deploy']['webhook_secret'] ?? '';
 $repoPath   = $cfg['deploy']['repo_path']      ?? '/opt/novacpx-src';
 $webRoot    = $cfg['deploy']['web_root']       ?? '/srv/novacpx/public';
-$branch     = $cfg['deploy']['branch']         ?? 'main';
 $logFile    = '/var/log/novacpx/deploy.log';
 
 header('Content-Type: application/json');
@@ -50,9 +49,9 @@ $message = $payload['head_commit']['message'] ?? '';
 
 log_deploy("Deploy triggered by $pusher | branch $pushedBranch | commit $commit | $message");
 
-// Queue the deploy — include branch so runner knows what to pull
+// Queue the deploy — include branch so runner uses the exact pushed branch
 $queueFile = '/tmp/novacpx-deploy-queue.txt';
-file_put_contents($queueFile, "$repoPath|$webRoot|$commit\n", FILE_APPEND | LOCK_EX);
+file_put_contents($queueFile, "$repoPath|$webRoot|$commit|$pushedBranch\n", FILE_APPEND | LOCK_EX);
 
 http_response_code(200);
 echo json_encode(['status' => 'queued', 'commit' => $commit]);

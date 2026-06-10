@@ -82,7 +82,7 @@ match ($action) {
                     $already = $db->fetchOne("SELECT 1 FROM settings WHERE `key` = 'migration_$migName'");
                     if (!$already) {
                         $db->pdo()->exec(file_get_contents($sql));
-                        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,NOW()) ON DUPLICATE KEY UPDATE `value`=NOW()", ["migration_$migName"]);
+                        $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES (?,datetime('now'),datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", ["migration_$migName"]);
                         novacpx_log('info', "Migration applied: $migName");
                     }
                 }
@@ -221,14 +221,15 @@ BASH;
 
         $srcDir  = '/opt/novacpx-src';
         if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
-        $channel = trim($db->fetchOne("SELECT value FROM settings WHERE `key`='update_channel'")['value'] ?? 'stable');
+        $channelRow   = $db->fetchOne("SELECT value FROM settings WHERE `key`='update_channel'");
+        $channel      = in_array($channelRow['value'] ?? '', ['stable', 'beta']) ? $channelRow['value'] : 'stable';
         $remoteBranch = $channel === 'beta' ? 'origin/beta' : 'origin/main';
         shell_exec("sudo git -C " . escapeshellarg($srcDir) . " fetch origin 2>/dev/null");
-        $logOut  = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " log HEAD..{$remoteBranch} --oneline 2>/dev/null") ?: '';
+        $logOut  = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " log HEAD.." . escapeshellarg($remoteBranch) . " --oneline 2>/dev/null") ?: '';
         $updates = array_values(array_filter(explode("\n", trim($logOut))));
         $branch  = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " branch --show-current 2>/dev/null") ?: 'main');
         $commit  = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse --short HEAD 2>/dev/null") ?: '');
-        $remoteVer = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " show {$remoteBranch}:VERSION 2>/dev/null") ?: '');
+        $remoteVer = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " show " . escapeshellarg("{$remoteBranch}:VERSION") . " 2>/dev/null") ?: '');
         $result  = ['updates_available' => count($updates), 'current_commit' => $commit, 'branch' => $branch, 'channel' => $channel, 'remote_version' => $remoteVer, 'commits' => $updates];
         $db->execute("INSERT INTO settings(`key`,value,updated_at) VALUES('update_cache_novacpx',?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [json_encode($result)]);
         Response::success($result);
@@ -244,15 +245,17 @@ BASH;
 
         if (!is_dir($srcDir)) Response::error('Source repo not found at /opt/novacpx-src');
 
-        $channel      = trim($db->fetchOne("SELECT value FROM settings WHERE `key`='update_channel'")['value'] ?? 'stable');
+        $channelRow   = $db->fetchOne("SELECT value FROM settings WHERE `key`='update_channel'");
+        $channel      = in_array($channelRow['value'] ?? '', ['stable', 'beta']) ? $channelRow['value'] : 'stable';
         $targetBranch = $channel === 'beta' ? 'beta' : 'main';
 
         $before = trim(shell_exec("sudo git -C " . escapeshellarg($srcDir) . " rev-parse HEAD 2>/dev/null") ?: '');
         $steps[] = "Before: $before (channel: $channel)";
 
         // Backup current web root to /tmp (writable, no sudo needed)
+        // rsync contents into $backupDir so restore can rsync $backupDir/ back symmetrically
         $backupDir = '/tmp/novacpx-backup-' . date('YmdHis');
-        shell_exec("cp -a " . escapeshellarg($webRoot) . " " . escapeshellarg($backupDir) . " 2>&1");
+        shell_exec("rsync -a " . escapeshellarg("$webRoot/") . " " . escapeshellarg("$backupDir/") . " 2>&1");
         $steps[] = "Backup: $backupDir";
 
         // Pull new code from the channel branch (sudo so www-data can write root-owned repo)
@@ -264,10 +267,16 @@ BASH;
         $steps[] = "After: $after" . ($changed ? " (changed)" : " (no change)");
 
         if ($changed) {
-            // Validate PHP syntax
+            // Validate PHP syntax — only check files changed in this update
+            $diffOut  = shell_exec("sudo git -C " . escapeshellarg($srcDir) . " diff " . escapeshellarg($before) . " " . escapeshellarg($after) . " --name-only 2>/dev/null") ?: '';
             $phpFiles = [];
-            $found = shell_exec("find " . escapeshellarg("$srcDir/panel") . " -name '*.php' 2>/dev/null") ?: '';
-            foreach (array_filter(explode("\n", trim($found))) as $f) { $phpFiles[] = trim($f); }
+            foreach (array_filter(explode("\n", trim($diffOut))) as $f) {
+                $f = trim($f);
+                if (str_ends_with($f, '.php')) {
+                    $full = "$srcDir/$f";
+                    if (file_exists($full)) $phpFiles[] = $full;
+                }
+            }
 
             $syntaxErr = [];
             foreach ($phpFiles as $f) {
@@ -276,7 +285,7 @@ BASH;
                     $syntaxErr[] = basename($f) . ': ' . trim($check);
                 }
             }
-            $steps[] = "Syntax check: " . count($phpFiles) . " files, " . count($syntaxErr) . " errors";
+            $steps[] = "Syntax check: " . count($phpFiles) . " changed files, " . count($syntaxErr) . " errors";
 
             if ($syntaxErr) {
                 shell_exec("sudo git -C " . escapeshellarg($srcDir) . " reset --hard " . escapeshellarg($before) . " 2>&1");
@@ -287,7 +296,7 @@ BASH;
             shell_exec("sudo rsync -a --delete " . escapeshellarg("$srcDir/panel/public/") . " " . escapeshellarg("$webRoot/") . " 2>&1");
             shell_exec("sudo rsync -a " . escapeshellarg("$srcDir/panel/lib/") . " " . escapeshellarg("$webRoot/lib/") . " 2>&1");
             shell_exec("sudo rsync -a " . escapeshellarg("$srcDir/panel/api/") . " " . escapeshellarg("$webRoot/api/") . " 2>&1");
-            shell_exec("sudo cp " . escapeshellarg("$srcDir/VERSION") . " " . escapeshellarg("$webRoot/../VERSION") . " 2>/dev/null");
+            shell_exec("sudo cp " . escapeshellarg("$srcDir/VERSION") . " " . escapeshellarg("$webRoot/VERSION") . " 2>/dev/null");
             shell_exec("sudo chown -R www-data:www-data " . escapeshellarg($webRoot));
             $steps[] = "Deploy: rsync complete";
 
@@ -584,7 +593,7 @@ BASH;
         };
 
         // Persist selection
-        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$key, $value]);
+        $db->execute("INSERT INTO settings (`key`,`value`) VALUES (?,?) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value", [$key, $value]);
 
         // Sync config.ini
         $configFile = '/etc/novacpx/config.ini';
@@ -700,7 +709,7 @@ BASH;
             $value = trim($body[$key]);
             if ($key === 'cybermail_api_key' && str_contains($value, '***')) continue; // skip masked placeholder
             $db->execute(
-                "INSERT INTO settings (`key`,`value`) VALUES (?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)",
+                "INSERT INTO settings (`key`,`value`) VALUES (?,?) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value",
                 [$key, $value]
             );
             $saved[] = $key;
@@ -897,7 +906,7 @@ BASH;
             shell_exec("sudo systemctl stop $engine 2>/dev/null || true");
             $out = shell_exec("sudo env DEBIAN_FRONTEND=noninteractive apt-get remove -y $pkg 2>&1");
         } elseif ($action === 'set-active') {
-            $db->execute("INSERT INTO settings (`key`,`value`) VALUES ('active_db_engine',?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [$engine]);
+            $db->execute("INSERT INTO settings (`key`,`value`) VALUES ('active_db_engine',?) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value", [$engine]);
             audit('settings.active_db_engine', $engine);
             Response::success(null, "Active database engine set to $engine");
         } else {
