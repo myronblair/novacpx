@@ -193,20 +193,42 @@ match ($action) {
         Response::success($result, 'Stack created');
     })(),
 
-    'stack-action' => (function() use ($dm, $body, $isAdmin) {
-        if (!$isAdmin) Response::error('Admin only', 403);
+    'stack-action' => (function() use ($dm, $body, $isAdmin, $_userAccountId) {
         $id  = (int)($body['stack_id'] ?? 0);
         $act = $body['action'] ?? '';
         if (!$id || !$act) Response::error('stack_id and action required');
+        // Non-admins can only act on their own stacks
+        if (!$isAdmin) {
+            $stack = DB::getInstance()->fetchOne("SELECT account_id FROM docker_compose_stacks WHERE id = ?", [$id]);
+            if (!$stack || (int)$stack['account_id'] !== (int)$_userAccountId) Response::error('Not found', 404);
+        }
         $out = $dm->composeAction($id, $act);
         audit("docker.stack.{$act}", "stack:{$id}");
         Response::success(['output' => $out]);
     })(),
 
-    'stack-remove' => (function() use ($dm, $body, $isAdmin) {
-        if (!$isAdmin) Response::error('Admin only', 403);
+    'stack-reinstall' => (function() use ($dm, $body, $isAdmin, $_userAccountId) {
         $id = (int)($body['stack_id'] ?? 0);
         if (!$id) Response::error('stack_id required');
+        if (!$isAdmin) {
+            $stack = DB::getInstance()->fetchOne("SELECT account_id FROM docker_compose_stacks WHERE id = ?", [$id]);
+            if (!$stack || (int)$stack['account_id'] !== (int)$_userAccountId) Response::error('Not found', 404);
+        }
+        // Pull latest images, bring down (removing volumes), then start fresh
+        $dm->composeAction($id, 'pull');
+        $dm->composeAction($id, 'down');
+        $out = $dm->composeAction($id, 'up');
+        audit('docker.stack.reinstall', "stack:{$id}");
+        Response::success(['output' => $out], 'Stack reinstalled');
+    })(),
+
+    'stack-remove' => (function() use ($dm, $body, $isAdmin, $_userAccountId) {
+        $id = (int)($body['stack_id'] ?? 0);
+        if (!$id) Response::error('stack_id required');
+        if (!$isAdmin) {
+            $stack = DB::getInstance()->fetchOne("SELECT account_id FROM docker_compose_stacks WHERE id = ?", [$id]);
+            if (!$stack || (int)$stack['account_id'] !== (int)$_userAccountId) Response::error('Not found', 404);
+        }
         $dm->removeStack($id);
         audit('docker.stack.remove', "stack:{$id}");
         Response::success(null, 'Stack removed');

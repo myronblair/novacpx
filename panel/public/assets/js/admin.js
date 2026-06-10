@@ -4143,6 +4143,7 @@ ${stacks.map(s=>`<tr>
     <button class="btn btn-xs btn-success" onclick="dockerStackAct(${s.id},'up')">Up</button>
     <button class="btn btn-xs btn-warning" onclick="dockerStackAct(${s.id},'down')">Down</button>
     <button class="btn btn-xs btn-ghost" onclick="dockerStackAct(${s.id},'logs')">Logs</button>
+    <button class="btn btn-xs btn-secondary" onclick="dockerStackReinstall(${s.id})">Reinstall</button>
     <button class="btn btn-xs btn-danger" onclick="dockerStackRemove(${s.id})">Remove</button>
   </td>
 </tr>`).join('')}
@@ -4300,6 +4301,13 @@ window.dockerStackAct = async (id, action) => {
     if (r?.success) dockerLoadTab('stacks');
   }
 };
+
+window.dockerStackReinstall = (id) => Nova.confirm('Reinstall this stack? Latest images will be pulled and containers restarted. Data volumes are preserved.', async () => {
+  Nova.toast('Reinstalling stack…', 'info', 15000);
+  const r = await Nova.api('docker', 'stack-reinstall', { method: 'POST', body: { stack_id: id } });
+  Nova.toast(r?.success ? 'Stack reinstalled' : (r?.message||'Reinstall failed'), r?.success?'success':'error');
+  if (r?.success) dockerLoadTab('stacks');
+}, true);
 
 window.dockerStackRemove = (id) => Nova.confirm('Remove this stack? Docker Compose down will be run first.', async () => {
   const r = await Nova.api('docker', 'stack-remove', { method: 'DELETE', body: { stack_id: id } });
