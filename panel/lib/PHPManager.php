@@ -48,7 +48,10 @@ php_value[max_execution_time]  = 30
     public static function removePool(string $username): void {
         foreach (['7.4','8.1','8.2','8.3'] as $ver) {
             $file = str_replace('{ver}', $ver, self::$poolDir) . "/{$username}.conf";
-            if (file_exists($file)) { shell_exec("sudo rm -f " . escapeshellarg($file)); self::reloadFPM($ver); }
+            // Always attempt removal — don't rely on file_exists() which fails when
+            // www-data can't read the pool.d directory; rm -f is a no-op if missing
+            shell_exec("sudo rm -f " . escapeshellarg($file) . " 2>/dev/null");
+            self::reloadFPM($ver);
         }
     }
 
@@ -112,6 +115,6 @@ php_value[max_execution_time]  = 30
     }
 
     private static function reloadFPM(string $ver): void {
-        shell_exec("systemctl reload php{$ver}-fpm 2>/dev/null || true");
+        shell_exec("sudo systemctl reload php{$ver}-fpm 2>/dev/null || true");
     }
 }
