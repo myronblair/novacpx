@@ -384,6 +384,115 @@ SH;
                     ['key' => 'port',   'label' => 'Port',   'type' => 'number', 'required' => true, 'placeholder' => '8080'],
                 ],
             ],
+            'uptime-kuma' => [
+                'name'        => 'Uptime Kuma',
+                'description' => 'Self-hosted uptime monitoring dashboard',
+                'icon'        => 'UK',
+                'params'      => [
+                    ['key' => 'domain', 'label' => 'Domain', 'type' => 'text', 'required' => true],
+                ],
+            ],
+            'portainer' => [
+                'name'        => 'Portainer CE',
+                'description' => 'Docker container management web UI',
+                'icon'        => 'P',
+                'params'      => [
+                    ['key' => 'domain', 'label' => 'Domain', 'type' => 'text', 'required' => true],
+                ],
+            ],
+            'minio' => [
+                'name'        => 'MinIO',
+                'description' => 'S3-compatible object storage',
+                'icon'        => 'S3',
+                'params'      => [
+                    ['key' => 'domain',     'label' => 'Domain',     'type' => 'text',     'required' => true],
+                    ['key' => 'access_key', 'label' => 'Access Key', 'type' => 'text',     'required' => true],
+                    ['key' => 'secret_key', 'label' => 'Secret Key', 'type' => 'password', 'required' => true],
+                ],
+            ],
+            'n8n' => [
+                'name'        => 'n8n',
+                'description' => 'Workflow automation (Zapier alternative)',
+                'icon'        => 'n8n',
+                'params'      => [
+                    ['key' => 'domain', 'label' => 'Domain', 'type' => 'text', 'required' => true],
+                ],
+            ],
+            'directus' => [
+                'name'        => 'Directus',
+                'description' => 'Headless CMS + data platform (Postgres)',
+                'icon'        => 'Dir',
+                'params'      => [
+                    ['key' => 'domain',      'label' => 'Domain',         'type' => 'text',     'required' => true],
+                    ['key' => 'admin_email', 'label' => 'Admin Email',    'type' => 'email',    'required' => true],
+                    ['key' => 'admin_pass',  'label' => 'Admin Password', 'type' => 'password', 'required' => true],
+                    ['key' => 'db_pass',     'label' => 'DB Password',    'type' => 'password', 'required' => true],
+                ],
+            ],
+            'listmonk' => [
+                'name'        => 'Listmonk',
+                'description' => 'Newsletter & mailing list manager (Postgres)',
+                'icon'        => 'LM',
+                'params'      => [
+                    ['key' => 'domain',  'label' => 'Domain',      'type' => 'text',     'required' => true],
+                    ['key' => 'db_pass', 'label' => 'DB Password', 'type' => 'password', 'required' => true],
+                ],
+            ],
+            'umami' => [
+                'name'        => 'Umami',
+                'description' => 'Privacy-focused web analytics (Postgres)',
+                'icon'        => 'Um',
+                'params'      => [
+                    ['key' => 'domain',  'label' => 'Domain',      'type' => 'text',     'required' => true],
+                    ['key' => 'db_pass', 'label' => 'DB Password', 'type' => 'password', 'required' => true],
+                ],
+            ],
+            'photoprism' => [
+                'name'        => 'PhotoPrism',
+                'description' => 'AI-powered photo management (MariaDB)',
+                'icon'        => 'PP',
+                'params'      => [
+                    ['key' => 'domain',     'label' => 'Domain',         'type' => 'text',     'required' => true],
+                    ['key' => 'admin_pass', 'label' => 'Admin Password', 'type' => 'password', 'required' => true],
+                    ['key' => 'db_pass',    'label' => 'DB Password',    'type' => 'password', 'required' => true],
+                ],
+            ],
+            'meilisearch' => [
+                'name'        => 'Meilisearch',
+                'description' => 'Fast, typo-tolerant search engine',
+                'icon'        => 'MS',
+                'params'      => [
+                    ['key' => 'domain',     'label' => 'Domain',     'type' => 'text',     'required' => true],
+                    ['key' => 'master_key', 'label' => 'Master Key', 'type' => 'password', 'required' => true],
+                ],
+            ],
+            'wikijs' => [
+                'name'        => 'Wiki.js',
+                'description' => 'Modern wiki platform (Postgres)',
+                'icon'        => 'Wiki',
+                'params'      => [
+                    ['key' => 'domain',  'label' => 'Domain',      'type' => 'text',     'required' => true],
+                    ['key' => 'db_pass', 'label' => 'DB Password', 'type' => 'password', 'required' => true],
+                ],
+            ],
+            'vikunja' => [
+                'name'        => 'Vikunja',
+                'description' => 'Open-source task & project management (MariaDB)',
+                'icon'        => 'Vik',
+                'params'      => [
+                    ['key' => 'domain',  'label' => 'Domain',      'type' => 'text',     'required' => true],
+                    ['key' => 'db_pass', 'label' => 'DB Password', 'type' => 'password', 'required' => true],
+                ],
+            ],
+            'mattermost' => [
+                'name'        => 'Mattermost',
+                'description' => 'Open-source team messaging, Slack alternative (Postgres)',
+                'icon'        => 'MM',
+                'params'      => [
+                    ['key' => 'domain',  'label' => 'Domain',      'type' => 'text',     'required' => true],
+                    ['key' => 'db_pass', 'label' => 'DB Password', 'type' => 'password', 'required' => true],
+                ],
+            ],
         ];
     }
 
@@ -433,6 +542,34 @@ SH;
             })(),
 
             'static' => "version: '3.8'\nservices:\n  static:\n    image: nginx:alpine\n    restart: unless-stopped\n    ports:\n      - '" . ((int)($p['port'] ?? 8080)) . "'\n    volumes:\n      - ./public:/usr/share/nginx/html:ro\n    labels:\n      - 'novacpx.domain={$domain}'\n",
+
+            'uptime-kuma' => "version: '3.8'\nservices:\n  uptime-kuma:\n    image: louislam/uptime-kuma:latest\n    restart: unless-stopped\n    volumes:\n      - kuma_data:/app/data\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  kuma_data:\n",
+
+            'portainer' => "version: '3.8'\nservices:\n  portainer:\n    image: portainer/portainer-ce:latest\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - portainer_data:/data\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  portainer_data:\n",
+
+            'minio' => "version: '3.8'\nservices:\n  minio:\n    image: minio/minio:latest\n    restart: unless-stopped\n    command: server /data --console-address ':9001'\n    environment:\n      MINIO_ROOT_USER: " . ($p['access_key'] ?? 'minioadmin') . "\n      MINIO_ROOT_PASSWORD: " . ($p['secret_key'] ?? bin2hex(random_bytes(8))) . "\n    volumes:\n      - minio_data:/data\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  minio_data:\n",
+
+            'n8n' => "version: '3.8'\nservices:\n  n8n:\n    image: n8nio/n8n:latest\n    restart: unless-stopped\n    environment:\n      N8N_HOST: {$domain}\n      N8N_PROTOCOL: https\n      WEBHOOK_URL: https://{$domain}/\n      DB_TYPE: sqlite\n    volumes:\n      - n8n_data:/home/node/.n8n\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  n8n_data:\n",
+
+            'directus' => (function() use ($p, $domain, $dbPass, $adminPass): string {
+                $email  = preg_replace('/[^a-zA-Z0-9@._\-]/', '', $p['admin_email'] ?? 'admin@' . $domain);
+                $secret = bin2hex(random_bytes(16));
+                return "version: '3.8'\nservices:\n  db:\n    image: postgres:16-alpine\n    restart: unless-stopped\n    environment:\n      POSTGRES_DB: directus\n      POSTGRES_USER: directus\n      POSTGRES_PASSWORD: {$dbPass}\n    volumes:\n      - db_data:/var/lib/postgresql/data\n  directus:\n    image: directus/directus:latest\n    restart: unless-stopped\n    depends_on: [db]\n    environment:\n      SECRET: {$secret}\n      DB_CLIENT: pg\n      DB_HOST: db\n      DB_PORT: '5432'\n      DB_DATABASE: directus\n      DB_USER: directus\n      DB_PASSWORD: {$dbPass}\n      ADMIN_EMAIL: {$email}\n      ADMIN_PASSWORD: {$adminPass}\n    volumes:\n      - directus_uploads:/directus/uploads\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  db_data:\n  directus_uploads:\n";
+            })(),
+
+            'listmonk' => "version: '3.8'\nservices:\n  db:\n    image: postgres:16-alpine\n    restart: unless-stopped\n    environment:\n      POSTGRES_DB: listmonk\n      POSTGRES_USER: listmonk\n      POSTGRES_PASSWORD: {$dbPass}\n    volumes:\n      - db_data:/var/lib/postgresql/data\n  listmonk:\n    image: listmonk/listmonk:latest\n    restart: unless-stopped\n    depends_on: [db]\n    environment:\n      LISTMONK_db__host: db\n      LISTMONK_db__port: '5432'\n      LISTMONK_db__user: listmonk\n      LISTMONK_db__password: {$dbPass}\n      LISTMONK_db__database: listmonk\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  db_data:\n",
+
+            'umami' => "version: '3.8'\nservices:\n  db:\n    image: postgres:16-alpine\n    restart: unless-stopped\n    environment:\n      POSTGRES_DB: umami\n      POSTGRES_USER: umami\n      POSTGRES_PASSWORD: {$dbPass}\n    volumes:\n      - db_data:/var/lib/postgresql/data\n  umami:\n    image: ghcr.io/umami-software/umami:postgresql-latest\n    restart: unless-stopped\n    depends_on: [db]\n    environment:\n      DATABASE_URL: postgresql://umami:{$dbPass}@db:5432/umami\n      APP_SECRET: " . bin2hex(random_bytes(16)) . "\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  db_data:\n",
+
+            'photoprism' => "version: '3.8'\nservices:\n  db:\n    image: mariadb:10.11\n    restart: unless-stopped\n    environment:\n      MYSQL_ROOT_PASSWORD: {$dbPass}\n      MYSQL_DATABASE: photoprism\n      MYSQL_USER: photoprism\n      MYSQL_PASSWORD: {$dbPass}\n    volumes:\n      - db_data:/var/lib/mysql\n  photoprism:\n    image: photoprism/photoprism:latest\n    restart: unless-stopped\n    depends_on: [db]\n    environment:\n      PHOTOPRISM_ADMIN_PASSWORD: {$adminPass}\n      PHOTOPRISM_SITE_URL: https://{$domain}/\n      PHOTOPRISM_DATABASE_DRIVER: mysql\n      PHOTOPRISM_DATABASE_SERVER: db:3306\n      PHOTOPRISM_DATABASE_NAME: photoprism\n      PHOTOPRISM_DATABASE_USER: photoprism\n      PHOTOPRISM_DATABASE_PASSWORD: {$dbPass}\n    volumes:\n      - photoprism_data:/photoprism/storage\n      - photoprism_originals:/photoprism/originals\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  db_data:\n  photoprism_data:\n  photoprism_originals:\n",
+
+            'meilisearch' => "version: '3.8'\nservices:\n  meilisearch:\n    image: getmeili/meilisearch:latest\n    restart: unless-stopped\n    environment:\n      MEILI_MASTER_KEY: " . ($p['master_key'] ?? bin2hex(random_bytes(16))) . "\n      MEILI_ENV: production\n    volumes:\n      - meili_data:/meili_data\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  meili_data:\n",
+
+            'wikijs' => "version: '3.8'\nservices:\n  db:\n    image: postgres:16-alpine\n    restart: unless-stopped\n    environment:\n      POSTGRES_DB: wiki\n      POSTGRES_USER: wiki\n      POSTGRES_PASSWORD: {$dbPass}\n    volumes:\n      - db_data:/var/lib/postgresql/data\n  wiki:\n    image: ghcr.io/requarks/wiki:2\n    restart: unless-stopped\n    depends_on: [db]\n    environment:\n      DB_TYPE: postgres\n      DB_HOST: db\n      DB_PORT: '5432'\n      DB_USER: wiki\n      DB_PASS: {$dbPass}\n      DB_NAME: wiki\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  db_data:\n",
+
+            'vikunja' => "version: '3.8'\nservices:\n  db:\n    image: mariadb:10.11\n    restart: unless-stopped\n    environment:\n      MYSQL_ROOT_PASSWORD: {$dbPass}\n      MYSQL_DATABASE: vikunja\n      MYSQL_USER: vikunja\n      MYSQL_PASSWORD: {$dbPass}\n    volumes:\n      - db_data:/var/lib/mysql\n  vikunja:\n    image: vikunja/vikunja:latest\n    restart: unless-stopped\n    depends_on: [db]\n    environment:\n      VIKUNJA_DATABASE_HOST: db\n      VIKUNJA_DATABASE_PASSWORD: {$dbPass}\n      VIKUNJA_DATABASE_TYPE: mysql\n      VIKUNJA_DATABASE_USER: vikunja\n      VIKUNJA_DATABASE_DATABASE: vikunja\n      VIKUNJA_SERVICE_JWTSECRET: " . bin2hex(random_bytes(16)) . "\n      VIKUNJA_SERVICE_FRONTENDURL: https://{$domain}/\n    volumes:\n      - vikunja_files:/app/vikunja/files\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  db_data:\n  vikunja_files:\n",
+
+            'mattermost' => "version: '3.8'\nservices:\n  db:\n    image: postgres:16-alpine\n    restart: unless-stopped\n    environment:\n      POSTGRES_USER: mattermost\n      POSTGRES_PASSWORD: {$dbPass}\n      POSTGRES_DB: mattermost\n    volumes:\n      - db_data:/var/lib/postgresql/data\n  mattermost:\n    image: mattermost/mattermost-team-edition:latest\n    restart: unless-stopped\n    depends_on: [db]\n    environment:\n      MM_SQLSETTINGS_DRIVERNAME: postgres\n      MM_SQLSETTINGS_DATASOURCE: postgres://mattermost:{$dbPass}@db:5432/mattermost?sslmode=disable\n      MM_SERVICESETTINGS_SITEURL: https://{$domain}\n    volumes:\n      - mm_data:/mattermost/data\n      - mm_logs:/mattermost/logs\n      - mm_config:/mattermost/config\n    labels:\n      - 'novacpx.domain={$domain}'\nvolumes:\n  db_data:\n  mm_data:\n  mm_logs:\n  mm_config:\n",
 
             default => throw new RuntimeException("No compose template for: $appKey"),
         };
