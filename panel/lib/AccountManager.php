@@ -87,6 +87,7 @@ class AccountManager {
     }
 
     public static function terminate(int $acctId): void {
+        require_once NOVACPX_LIB . '/DatabaseManager.php';
         $db   = DB::getInstance();
         $acct = $db->fetchOne("SELECT * FROM accounts WHERE id = ?", [$acctId]);
         if (!$acct) throw new RuntimeException("Account not found");
