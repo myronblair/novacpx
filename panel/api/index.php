@@ -9,14 +9,22 @@ define('NOVACPX_API',  __DIR__);
 define('NOVACPX_LIB',  NOVACPX_ROOT . '/lib');
 
 header('Content-Type: application/json');
+
+// Global exception handler — prevents uncaught exceptions from crashing PHP-FPM (502)
+set_exception_handler(function (Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => $e->getMessage(), 'errors' => []]);
+    exit;
+});
+
 $_ver = file_get_contents(NOVACPX_ROOT . '/VERSION')
      ?: file_get_contents('/opt/novacpx-src/VERSION')
      ?: '1.0.0';
 header('X-NovaCPX-Version: ' . trim($_ver));
 
-// CORS for same-origin panel requests (ports 8880/8881/8882/8883)
+// CORS for same-origin panel requests (ports 8880/8881/8882/8883 and HTTPS via reverse proxy on 443)
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (preg_match('#^https?://[^/]+:(888[0-3])$#', $origin)) {
+if (preg_match('#^https?://[^/]+(:(888[0-3]))?$#', $origin)) {
     header("Access-Control-Allow-Origin: $origin");
     header('Access-Control-Allow-Credentials: true');
     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');

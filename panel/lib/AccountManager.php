@@ -25,41 +25,50 @@ class AccountManager {
         $docRoot  = "{$homeDir}/public_html";
         $password = $data['password'] ?? bin2hex(random_bytes(8));
 
-        // Create Linux user
+        // Create Linux user and home directory first
         self::shell("useradd -m -d {$homeDir} -s /sbin/nologin -G www-data " . escapeshellarg($username));
-        self::shell("echo " . escapeshellarg("{$username}:{$password}") . " | chpasswd");
+        self::shell("echo " . escapeshellarg("{$username}:{$password}") . " | sudo chpasswd");
         self::shell("sudo mkdir -p {$docRoot} {$homeDir}/logs {$homeDir}/tmp");
         self::shell("sudo chown -R {$username}:www-data {$homeDir}");
-        self::shell("sudo chmod 750 {$homeDir}"); self::shell("sudo chmod 775 {$docRoot}");
+        self::shell("sudo chmod 750 {$homeDir}");
+        self::shell("sudo chmod 775 {$docRoot}");
 
-        // Default index page
-        file_put_contents("{$docRoot}/index.html",
-            "<html><body style='font-family:sans-serif;text-align:center;padding:4rem'><h1>Welcome to {$domain}</h1><p>Hosted by NovaCPX</p></body></html>"
-        );
+        // Default index page (write as root via sudo tee)
+        $html = "<html><body style='font-family:sans-serif;text-align:center;padding:4rem'><h1>Welcome to {$domain}</h1><p>Hosted by NovaCPX</p></body></html>";
+        self::shell("sudo tee " . escapeshellarg("{$docRoot}/index.html") . " > /dev/null << 'HTMLEOF'\n{$html}\nHTMLEOF");
 
-        // Save account to DB
-        $acctId = (int)$db->insert(
-            "INSERT INTO accounts (user_id, username, domain, home_dir, package_id, php_version, web_server) VALUES (?,?,?,?,?,?,?)",
-            [$userId, $username, $domain, $homeDir, $pkgId ?: null, $phpVer, $webSrv]
-        );
+        // Wrap all DB writes in a transaction so partial failures leave no orphans
+        $db->beginTransaction();
+        try {
+            $acctId = (int)$db->insert(
+                "INSERT INTO accounts (user_id, username, domain, home_dir, package_id, php_version, web_server) VALUES (?,?,?,?,?,?,?)",
+                [$userId, $username, $domain, $homeDir, $pkgId ?: null, $phpVer, $webSrv]
+            );
 
-        // Save domain
-        $db->insert(
-            "INSERT INTO domains (account_id, domain, type, document_root) VALUES (?,?,?,?)",
-            [$acctId, $domain, 'main', $docRoot]
-        );
+            $db->insert(
+                "INSERT INTO domains (account_id, domain, type, document_root) VALUES (?,?,?,?)",
+                [$acctId, $domain, 'main', $docRoot]
+            );
 
-        // Create web vhost
-        VhostManager::create($username, $domain, $docRoot, $phpVer);
+            // Create web vhost
+            VhostManager::create($username, $domain, $docRoot, $phpVer);
 
-        // Create DNS zone
-        DNSManager::createZone($acctId, $domain);
+            // Create DNS zone
+            DNSManager::createZone($acctId, $domain);
 
-        // Auto-provision SPF, DKIM, DMARC records
-        self::provisionEmailDNS($acctId, $domain);
+            // Auto-provision SPF, DKIM, DMARC records
+            self::provisionEmailDNS($acctId, $domain);
 
-        // Create PHP-FPM pool
-        PHPManager::createPool($username, $phpVer);
+            // Create PHP-FPM pool
+            PHPManager::createPool($username, $phpVer);
+
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            // Clean up Linux user if DB failed
+            self::shell("userdel -r " . escapeshellarg($username) . " 2>/dev/null || true");
+            throw $e;
+        }
 
         novacpx_log('info', "Account created: $username ($domain)");
         return ['account_id' => $acctId, 'username' => $username, 'domain' => $domain, 'home_dir' => $homeDir];
