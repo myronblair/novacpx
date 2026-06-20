@@ -70,7 +70,7 @@ match ($action) {
         foreach ($required as $f) { if (empty($body[$f])) Response::error("$f is required"); }
 
         if (!filter_var($body['email'], FILTER_VALIDATE_EMAIL)) Response::error("Invalid email address");
-        if ($db->fetchOne("SELECT id FROM users WHERE email = ?", [$body['email']])) Response::error("Email already in use by another account");
+        if ($db->fetchOne("SELECT id FROM users WHERE email = ? AND role = 'user'", [$body['email']])) Response::error("Email already in use by another account");
         if ($db->fetchOne("SELECT id FROM users WHERE username = ?", [$body['username']])) Response::error("Username already taken");
 
         // Insert user first — AccountManager::create() wraps everything else in its own transaction
