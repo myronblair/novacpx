@@ -65,8 +65,9 @@ class AccountManager {
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
-            // Clean up Linux user if DB failed
+            // Clean up Linux user and PHP-FPM pool so orphaned configs can't crash php-fpm
             self::shell("userdel -r " . escapeshellarg($username) . " 2>/dev/null || true");
+            PHPManager::removePool($username);
             throw $e;
         }
 
