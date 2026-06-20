@@ -69,23 +69,34 @@ match ($action) {
         $required = ['username','domain','email','password'];
         foreach ($required as $f) { if (empty($body[$f])) Response::error("$f is required"); }
 
-        // Create user account
-        $userId = (int)$db->insert(
-            "INSERT INTO users (username, password, email, role, status, reseller_id) VALUES (?,?,?,?,?,?)",
-            [
-                $body['username'],
-                password_hash($body['password'], PASSWORD_BCRYPT),
-                $body['email'],
-                'user',
-                'active',
-                $user['role'] === 'reseller' ? $user['uid'] : null,
-            ]
-        );
-        $body['user_id'] = $userId;
+        if (!filter_var($body['email'], FILTER_VALIDATE_EMAIL)) Response::error("Invalid email address");
+        if ($db->fetchOne("SELECT id FROM users WHERE email = ?", [$body['email']])) Response::error("Email already in use by another account");
+        if ($db->fetchOne("SELECT id FROM users WHERE username = ?", [$body['username']])) Response::error("Username already taken");
 
-        $result = AccountManager::create($body);
+        // Wrap user creation + account provisioning in a single transaction
+        $db->beginTransaction();
+        try {
+            $userId = (int)$db->insert(
+                "INSERT INTO users (username, password, email, role, status, reseller_id) VALUES (?,?,?,?,?,?)",
+                [
+                    $body['username'],
+                    password_hash($body['password'], PASSWORD_BCRYPT),
+                    $body['email'],
+                    'user',
+                    'active',
+                    $user['role'] === 'reseller' ? $user['uid'] : null,
+                ]
+            );
+            $body['user_id'] = $userId;
+
+            $result = AccountManager::create($body);
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            throw $e;
+        }
+
         audit('account.create', $body['domain'], $result);
-        // Send welcome email to user + admin notification
         Notifier::accountCreated(array_merge($body, ['email' => $body['email']]), $body['password']);
         Response::success($result, 'Account created successfully');
     })(),
