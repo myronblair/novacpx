@@ -56,7 +56,15 @@ window.Nova = (() => {
       return { success: false, message: 'Network error — check your connection' };
     }
     _barDone();
-    if (res.status === 401) { return { success: false, message: 'Session expired — please log in again' }; }
+    if (res.status === 401) {
+      const text401 = await res.text();
+      try {
+        const j = JSON.parse(text401);
+        // Login failures return the real message; other 401s mean the session expired
+        if (endpoint === 'auth' && action === 'login') return j;
+        return { success: false, message: j.message || 'Session expired — please log in again' };
+      } catch { return { success: false, message: 'Session expired — please log in again' }; }
+    }
     if (res.status === 429) {
       const reset = res.headers.get('X-RateLimit-Reset');
       const wait  = reset ? Math.max(0, Math.ceil(Number(reset) - Date.now() / 1000)) : 60;
