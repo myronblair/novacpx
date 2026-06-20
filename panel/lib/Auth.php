@@ -151,6 +151,11 @@ class Auth {
      */
     public static function portalUrl(string $role, string $path = '/'): string {
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        // No port in HTTP_HOST means the request came through a reverse proxy on 443 — stay on same host
+        if (!preg_match('/:\d+$/', $host)) {
+            return "https://{$host}{$path}";
+        }
+        // Direct access — redirect to the correct panel port
         $hostname = preg_replace('/:\d+$/', '', $host);
         $port = match($role) {
             'admin'    => PORT_ADMIN,
