@@ -225,6 +225,9 @@ server {
 }
 NGXCONF
   ln -sf "$PANEL_WEB_CONF" /etc/nginx/sites-enabled/novacpx
+  # Allow www-data to manage customer vhost configs
+  chown root:www-data /etc/nginx/sites-available /etc/nginx/sites-enabled
+  chmod 775 /etc/nginx/sites-available /etc/nginx/sites-enabled
 
 else
   apt-get install -y -qq apache2 libapache2-mod-fcgid >> "$LOG" 2>&1
@@ -721,7 +724,25 @@ www-data ALL=(root) NOPASSWD: /bin/systemctl start php*-fpm
 www-data ALL=(root) NOPASSWD: /bin/systemctl stop php*-fpm
 # Web config file management (scoped paths only)
 www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/nginx/conf.d/*
+www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/nginx/sites-available/*
+www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/nginx/sites-enabled/*
 www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/apache2/conf-enabled/*
+www-data ALL=(root) NOPASSWD: /bin/ln -sf /etc/nginx/sites-available/* /etc/nginx/sites-enabled/*
+www-data ALL=(root) NOPASSWD: /bin/rm /etc/nginx/sites-available/novacpx-*
+www-data ALL=(root) NOPASSWD: /bin/rm /etc/nginx/sites-enabled/novacpx-*
+# Account management (user creation and home directories)
+www-data ALL=(root) NOPASSWD: /usr/sbin/useradd
+www-data ALL=(root) NOPASSWD: /usr/sbin/userdel
+www-data ALL=(root) NOPASSWD: /usr/sbin/usermod
+www-data ALL=(root) NOPASSWD: /usr/sbin/chpasswd
+www-data ALL=(root) NOPASSWD: /bin/mkdir
+www-data ALL=(root) NOPASSWD: /bin/chown
+www-data ALL=(root) NOPASSWD: /bin/chmod
+# SSL and DKIM
+www-data ALL=(root) NOPASSWD: /usr/bin/certbot
+www-data ALL=(root) NOPASSWD: /usr/bin/opendkim-genkey
+www-data ALL=(root) NOPASSWD: /usr/sbin/rndc reload
+www-data ALL=(root) NOPASSWD: /usr/sbin/named-checkzone *
 SUDOERS
 chmod 440 /etc/sudoers.d/novacpx-firewall
 log "Sudoers rules installed"
