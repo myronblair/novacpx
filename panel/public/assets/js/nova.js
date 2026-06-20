@@ -221,6 +221,40 @@ window.Nova = (() => {
   return { api, toast, modal, confirm, initNav, loadPage, progressBar, bytes, relTime, badge, serviceDot, escHtml, loading, loadingDone };
 })();
 
+// #48 Collapsible sidebar nav — shared across all panels
+document.addEventListener('DOMContentLoaded', () => {
+  const STORE = 'ncpx_nav_collapsed';
+  const state = JSON.parse(localStorage.getItem(STORE) || '{}');
+
+  document.querySelectorAll('.sidebar-section').forEach(section => {
+    const label = section.querySelector('.sidebar-section-label');
+    if (!label) return;
+
+    // Add chevron icon
+    const chevron = document.createElement('i');
+    chevron.className = 'nav-chevron';
+    chevron.textContent = '▼';
+    label.appendChild(chevron);
+
+    const key = label.textContent.replace('▼','').trim();
+
+    // Restore saved state — default Overview open, others open
+    if (state[key]) section.classList.add('collapsed');
+
+    // Keep active page's section always open
+    const hasActive = section.querySelector('.sidebar-link.active');
+    if (hasActive) section.classList.remove('collapsed');
+
+    label.addEventListener('click', () => {
+      // Don't collapse if it contains the active link
+      if (section.querySelector('.sidebar-link.active')) return;
+      section.classList.toggle('collapsed');
+      state[key] = section.classList.contains('collapsed');
+      localStorage.setItem(STORE, JSON.stringify(state));
+    });
+  });
+});
+
 // #26 Mobile sidebar toggle — shared across all panels
 document.addEventListener('DOMContentLoaded', () => {
   const toggle  = document.getElementById('sidebar-toggle');
