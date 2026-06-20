@@ -118,6 +118,8 @@ php_value[max_execution_time]  = 30
     }
 
     private static function reloadFPM(string $ver): void {
-        shell_exec("sudo systemctl reload php{$ver}-fpm 2>/dev/null || true");
+        // Run reload in background so it doesn't block/kill the current PHP-FPM worker.
+        // The short sleep ensures the pool config is fully written before reload picks it up.
+        exec("(sleep 1 && sudo systemctl reload php{$ver}-fpm) </dev/null >/dev/null 2>&1 &");
     }
 }
