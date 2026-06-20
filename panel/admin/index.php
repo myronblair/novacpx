@@ -8,7 +8,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NovaCPX Admin</title>
-<link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
+<link rel="icon" type="image/svg+xml" href="/assets/img/nova-favicon.svg">
 <link rel="stylesheet" href="/assets/css/nova.css">
 </head>
 <body>

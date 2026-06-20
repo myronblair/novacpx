@@ -73,26 +73,25 @@ match ($action) {
         if ($db->fetchOne("SELECT id FROM users WHERE email = ?", [$body['email']])) Response::error("Email already in use by another account");
         if ($db->fetchOne("SELECT id FROM users WHERE username = ?", [$body['username']])) Response::error("Username already taken");
 
-        // Wrap user creation + account provisioning in a single transaction
-        $db->beginTransaction();
-        try {
-            $userId = (int)$db->insert(
-                "INSERT INTO users (username, password, email, role, status, reseller_id) VALUES (?,?,?,?,?,?)",
-                [
-                    $body['username'],
-                    password_hash($body['password'], PASSWORD_BCRYPT),
-                    $body['email'],
-                    'user',
-                    'active',
-                    $user['role'] === 'reseller' ? $user['uid'] : null,
-                ]
-            );
-            $body['user_id'] = $userId;
+        // Insert user first — AccountManager::create() wraps everything else in its own transaction
+        $userId = (int)$db->insert(
+            "INSERT INTO users (username, password, email, role, status, reseller_id) VALUES (?,?,?,?,?,?)",
+            [
+                $body['username'],
+                password_hash($body['password'], PASSWORD_BCRYPT),
+                $body['email'],
+                'user',
+                'active',
+                $user['role'] === 'reseller' ? $user['uid'] : null,
+            ]
+        );
+        $body['user_id'] = $userId;
 
+        try {
             $result = AccountManager::create($body);
-            $db->commit();
         } catch (Throwable $e) {
-            $db->rollBack();
+            // Roll back the user insert if account provisioning failed
+            $db->execute("DELETE FROM users WHERE id = ?", [$userId]);
             throw $e;
         }
 
