@@ -1006,7 +1006,7 @@
       const res = await Nova.api('auth', 'impersonate', { method: 'POST', body: { user_id: userId } });
       Nova.loadingDone();
       if (res?.success) {
-        window.location.href = res.data?.portal_url || location.origin + "/";
+        window.location.href = res.data?.portal_url || 'https://' + location.hostname + ':8880/';
       } else {
         Nova.toast(res?.message || 'Impersonation failed', 'error');
       }
