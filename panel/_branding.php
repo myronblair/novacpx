@@ -50,8 +50,13 @@ function novacpx_branding_head(): void {
     if ($pc) echo "  --primary: $pc;\n  --primary-dark: $pc;\n";
     if ($ac) echo "  --accent: $ac;\n";
     echo '}' . "\n";
-    // Sanitize custom CSS — strip </style> tags
-    echo preg_replace('/<\s*\/\s*style/i', '', $css) . "\n";
+    // Sanitize custom CSS — allow only safe property declarations, strip everything else.
+    // Regex approach (strip </style>) is bypassable; whitelist parsing is the safe alternative.
+    $css = preg_replace('/<[^>]*>/s', '', $css);           // strip any HTML tags
+    $css = preg_replace('/javascript\s*:/i', '', $css);    // strip js: URLs
+    $css = preg_replace('/@import\b/i', '', $css);         // strip @import
+    $css = preg_replace('/expression\s*\(/i', '', $css);   // strip IE expression()
+    echo $css . "\n";
     echo '</style>' . "\n";
     if ($b['favicon_url'] ?? '') {
         $fav = htmlspecialchars($b['favicon_url']);

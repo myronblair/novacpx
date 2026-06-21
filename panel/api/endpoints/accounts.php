@@ -71,9 +71,12 @@ match ($action) {
 
         if (!filter_var($body['email'], FILTER_VALIDATE_EMAIL)) Response::error("Invalid email address");
         if ($db->fetchOne("SELECT id FROM users WHERE email = ? AND role = 'user'", [$body['email']])) Response::error("Email already in use by another account");
+        // Check both tables — users for the login row, accounts for the hosting slot
         if ($db->fetchOne("SELECT id FROM users WHERE username = ?", [$body['username']])) Response::error("Username already taken");
+        if ($db->fetchOne("SELECT id FROM accounts WHERE username = ?", [$body['username']])) Response::error("Username already taken");
 
-        // Insert user first — AccountManager::create() wraps everything else in its own transaction
+        // Wrap user insert + provisioning in a transaction so cleanup is atomic
+        $db->beginTransaction();
         $userId = (int)$db->insert(
             "INSERT INTO users (username, password, email, role, status, reseller_id) VALUES (?,?,?,?,?,?)",
             [
@@ -89,9 +92,9 @@ match ($action) {
 
         try {
             $result = AccountManager::create($body);
+            $db->commit();
         } catch (Throwable $e) {
-            // Roll back the user insert if account provisioning failed
-            $db->execute("DELETE FROM users WHERE id = ?", [$userId]);
+            $db->rollBack();
             throw $e;
         }
 

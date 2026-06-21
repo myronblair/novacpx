@@ -13,7 +13,11 @@ header('Content-Type: application/json');
 // Global exception handler — prevents uncaught exceptions from crashing PHP-FPM (502)
 set_exception_handler(function (Throwable $e) {
     http_response_code(500);
-    echo json_encode(['success' => false, 'message' => $e->getMessage(), 'errors' => []]);
+    // Never expose internal exception messages (may contain SQL, paths, credentials)
+    $safe = ($e instanceof \InvalidArgumentException || $e instanceof \RuntimeException)
+        ? $e->getMessage()
+        : 'An internal error occurred.';
+    echo json_encode(['success' => false, 'message' => $safe, 'errors' => []]);
     exit;
 });
 
@@ -22,9 +26,18 @@ $_ver = file_get_contents(NOVACPX_ROOT . '/VERSION')
      ?: '1.0.0';
 header('X-NovaCPX-Version: ' . trim($_ver));
 
-// CORS for same-origin panel requests (ports 8880/8881/8882/8883 and HTTPS via reverse proxy on 443)
+// CORS — only allow same-host origins on the panel ports or the known proxy hostnames
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (preg_match('#^https?://[^/]+(:(888[0-3]))?$#', $origin)) {
+$_allowedHosts = ['novacpx.orbishosting.com', 'admin.novacpx.orbishosting.com',
+                  'reseller.novacpx.orbishosting.com', 'panel.novacpx.orbishosting.com',
+                  'web.orbishosting.com'];
+$_originHost = parse_url($origin, PHP_URL_HOST) ?? '';
+$_originPort = (int)(parse_url($origin, PHP_URL_PORT) ?? 0);
+$_panelPorts  = [PORT_USER ?? 8880, PORT_RESELLER ?? 8881, PORT_ADMIN ?? 8882, PORT_WEBMAIL ?? 8883];
+if ($origin && (
+    in_array($_originHost, $_allowedHosts, true) ||
+    (in_array($_originPort, $_panelPorts, true) && filter_var($_originHost, FILTER_VALIDATE_IP))
+)) {
     header("Access-Control-Allow-Origin: $origin");
     header('Access-Control-Allow-Credentials: true');
     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');

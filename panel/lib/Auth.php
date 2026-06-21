@@ -150,18 +150,35 @@ class Auth {
      * Used by login redirect so each role lands on the right port
      */
     public static function portalUrl(string $role, string $path = '/'): string {
-        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-        // No port in HTTP_HOST means the request came through a reverse proxy on 443 — stay on same host
-        if (!preg_match('/:\d+$/', $host)) {
-            return "https://{$host}{$path}";
-        }
-        // Direct access — redirect to the correct panel port
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+
+        // Allowlist of trusted hostnames — prevents open redirect via Host header injection
+        $allowed = [
+            'novacpx.orbishosting.com',
+            'admin.novacpx.orbishosting.com',
+            'reseller.novacpx.orbishosting.com',
+            'panel.novacpx.orbishosting.com',
+            'web.orbishosting.com',
+        ];
         $hostname = preg_replace('/:\d+$/', '', $host);
+
+        // Trusted proxy (no port) — stay on same host
+        if ($host && !preg_match('/:\d+$/', $host) && in_array($hostname, $allowed, true)) {
+            return "https://{$hostname}{$path}";
+        }
+
+        // Direct port access — validate hostname is a known server IP or allowed host
         $port = match($role) {
             'admin'    => PORT_ADMIN,
             'reseller' => PORT_RESELLER,
             default    => PORT_USER,
         };
-        return "https://{$hostname}:{$port}{$path}";
+        // Only redirect to localhost/LAN IPs on direct panel access
+        if ($hostname && (filter_var($hostname, FILTER_VALIDATE_IP) || in_array($hostname, $allowed, true))) {
+            return "https://{$hostname}:{$port}{$path}";
+        }
+
+        // Fallback — safe relative path with no host (works for same-origin redirects)
+        return $path;
     }
 }
