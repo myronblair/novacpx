@@ -30,7 +30,7 @@ info() { echo -e "${BLUE}[→]${NC} $*" | tee -a "$LOG"; }
 step() { echo -e "\n${BOLD}━━━ $* ━━━${NC}" | tee -a "$LOG"; }
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
-WEB_SERVER="apache"
+WEB_SERVER="nginx"
 INSTALL_MYSQL=true
 INSTALL_POSTGRES=true
 
@@ -722,6 +722,9 @@ www-data ALL=(root) NOPASSWD: /bin/systemctl reload php*-fpm
 www-data ALL=(root) NOPASSWD: /bin/systemctl restart php*-fpm
 www-data ALL=(root) NOPASSWD: /bin/systemctl start php*-fpm
 www-data ALL=(root) NOPASSWD: /bin/systemctl stop php*-fpm
+www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/php/*/fpm/pool.d/*
+www-data ALL=(root) NOPASSWD: /bin/rm -f /etc/php/*/fpm/pool.d/*.conf
+www-data ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/php/*/fpm/pool.d/*.conf
 # Web config file management (scoped paths only)
 www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/nginx/conf.d/*
 www-data ALL=(root) NOPASSWD: /usr/bin/tee /etc/nginx/sites-available/*
@@ -757,8 +760,31 @@ cat > /etc/cron.d/novacpx <<CRON
 0    2 * * * root     /usr/local/bin/novacpx-backup >> /var/log/novacpx/backup.log 2>&1
 */1  * * * * root     /usr/local/bin/novacpx-dns-sync >> /var/log/novacpx/dns.log 2>&1
 CRON
+
+# PHP-FPM pool cleanup + deferred reload (runs every minute as root)
+# Removes orphaned pool configs for deleted Linux users before reloading,
+# preventing php-fpm from failing to start due to missing user references.
+(crontab -l 2>/dev/null | grep -v "novacpx-fpm-reload"; echo '* * * * * for f in /etc/php/*/fpm/pool.d/*.conf; do [[ "$f" == *"www.conf"* ]] && continue; u=$(basename "$f" .conf); id "$u" &>/dev/null || rm -f "$f"; done; for flag in /tmp/novacpx-fpm-reload-*; do [ -f "$flag" ] && ver=$(basename "$flag" | sed s/novacpx-fpm-reload-//) && rm -f "$flag" && systemctl reload php${ver}-fpm 2>/dev/null; done') | crontab -
 mkdir -p /var/log/novacpx
 log "Cron jobs installed"
+
+# ── Disable conflicting web servers ───────────────────────────────────────────
+step "Disabling Conflicting Web Servers"
+if [[ "$WEB_SERVER" == "nginx" ]]; then
+  systemctl stop apache2 2>/dev/null || true
+  systemctl disable apache2 2>/dev/null || true
+  # Replace nginx default site with a 444 connection-close so unmatched
+  # vhosts don't accidentally serve Apache's default HTML page
+  cat > /etc/nginx/sites-available/default <<'NGINXDEFAULT'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+NGINXDEFAULT
+  log "Apache2 disabled; nginx default site set to return 444"
+fi
 
 # ── Restart services ──────────────────────────────────────────────────────────
 step "Starting All Services"
