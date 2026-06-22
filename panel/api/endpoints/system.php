@@ -1057,5 +1057,22 @@ BASH;
         exit;
     })(),
 
-    default => Response::error("Unknown system action: $action", 404),
+
+    'read-log' => (function() {
+        Auth::getInstance()->require('admin');
+        $log  = preg_replace('/[^a-z0-9-]/', '', $_GET['log'] ?? 'panel');
+        $map  = [
+            'panel'        => '/var/log/novacpx/panel.log',
+            'deploy'       => '/var/log/novacpx/deploy.log',
+            'nginx-error'  => '/var/log/novacpx/nginx-error.log',
+            'nginx-access' => '/var/log/novacpx/nginx-access.log',
+            'mail'         => '/var/log/mail.log',
+            'stats'        => '/var/log/novacpx/stats-collector.log',
+        ];
+        $path = $map[$log] ?? '/var/log/novacpx/panel.log';
+        $raw  = file_exists($path) ? trim(shell_exec('tail -100 ' . escapeshellarg($path)) ?: '') : '';
+        Response::success(['content' => $raw, 'log' => $log]);
+    })(),
+
+        default => Response::error("Unknown system action: $action", 404),
 };

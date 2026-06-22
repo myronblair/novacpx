@@ -1401,26 +1401,68 @@
 
   // ── Web Server ────────────────────────────────────────────────────────────
   async function webServer() {
-    const r = await Nova.api('system', 'stats');
-    const svcs = r?.data?.services || {};
-    const webSvc = Object.keys(svcs).find(k => k.includes('apache') || k.includes('nginx')) || 'apache2';
+    const [statsR, phpR] = await Promise.all([
+      Nova.api('system','stats'),
+      Nova.api('php','global-config'),
+    ]);
+    const svcs   = statsR?.data?.services || {};
+    const uptime = statsR?.data?.uptime   || '—';
+    const cpu    = statsR?.data?.cpu?.pct ?? '—';
+    const ram    = statsR?.data?.ram?.pct ?? '—';
+    const phpCfg = phpR?.data || {};
+
+    window.wsLoadLog = async (log) => {
+      const r = await Nova.api('system','read-log',{params:{log}});
+      const el = document.getElementById('ws-log-out');
+      if (el) { el.textContent = r?.data?.content || '(empty)'; el.scrollTop = el.scrollHeight; }
+    };
+
     return `
-<div class="card">
-  <div class="card-header"><span class="card-title">Web Server Management</span></div>
-  <div style="padding:1.5rem">
-    <div class="stats-grid" style="margin-bottom:1.5rem">
-      ${Object.entries(svcs).map(([s,st]) => `<div class="stat-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
-          <strong style="word-break:break-all">${s}</strong><span data-svc-status="${s}">${Nova.badge(st,st==='active'?'green':'red')}</span>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:.35rem">
-          <button class="btn btn-xs" onclick="adminServiceAction('${s}','restart')">Restart</button>
-          <button class="btn btn-xs" onclick="adminServiceAction('${s}','start')">Start</button>
-          <button class="btn btn-xs btn-danger" onclick="adminServiceAction('${s}','stop')">Stop</button>
-        </div>
-      </div>`).join('')}
+<div class="page-header mb-2"><h2 class="page-title">Web Server</h2></div>
+<div class="stats-grid mb-3">
+  <div class="stat-card"><div class="stat-label">CPU</div><div class="stat-value">${cpu}%</div></div>
+  <div class="stat-card"><div class="stat-label">RAM</div><div class="stat-value">${ram}%</div></div>
+  <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value stat-sm">${uptime}</div></div>
+  <div class="stat-card"><div class="stat-label">PHP</div><div class="stat-value stat-sm">${phpCfg.version||'8.3'}</div></div>
+</div>
+
+<div class="grid-2 mb-3">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Services</span></div>
+    <div class="card-body">
+      ${Object.entries(svcs).map(([s,st]) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid var(--border)">
+          <span style="font-weight:500">${s} ${Nova.badge(st,st==='active'?'green':'red')}</span>
+          <div style="display:flex;gap:.35rem">
+            <button class="btn btn-xs" onclick="adminServiceAction('${s}','restart')">↺ Restart</button>
+            <button class="btn btn-xs" onclick="adminServiceAction('${s}','reload')">⟳ Reload</button>
+            <button class="btn btn-xs btn-danger" onclick="adminServiceAction('${s}','stop')">■ Stop</button>
+          </div>
+        </div>`).join('')}
     </div>
   </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">PHP Defaults</span></div>
+    <div class="card-body">
+      ${[['Version',phpCfg.version||'8.3'],['Memory Limit',phpCfg.memory_limit||'256M'],
+         ['Upload Max',phpCfg.upload_max_filesize||'64M'],['Max Exec Time',(phpCfg.max_execution_time||30)+'s'],
+         ['Post Max',phpCfg.post_max_size||'64M']].map(([k,v])=>`
+        <div style="display:flex;justify-content:space-between;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.85rem">
+          <span style="color:var(--text-muted)">${k}</span><strong>${v}</strong>
+        </div>`).join('')}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Log Viewer</span>
+    <div style="display:flex;gap:.35rem;margin-left:auto">
+      ${[['nginx-error','Nginx Error'],['nginx-access','Nginx Access'],['panel','Panel'],['deploy','Deploy']].map(([l,n])=>
+        `<button class="btn btn-xs" onclick="wsLoadLog('${l}')">${n}</button>`).join('')}
+    </div>
+  </div>
+  <pre id="ws-log-out" style="background:var(--bg);padding:1rem;font-size:.78rem;height:220px;overflow:auto;margin:0;border-radius:0 0 var(--radius) var(--radius);color:var(--text-muted)">← Click a log above to view it</pre>
 </div>`;
   }
 
@@ -2406,7 +2448,12 @@ ${dbs.map(d=>`<tr>
 </tbody></table>` : '<div class="empty" style="padding:2rem">No databases yet.</div>';
 
     return `
-<div class="page-header"><h2 class="page-title">Database Engine Manager</h2></div>
+<div class="page-header mb-2"><h2 class="page-title">Database Manager</h2></div>
+<div style="display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap">
+  <a href="/phpmyadmin" target="_blank" class="btn btn-sm">🐬 phpMyAdmin (MySQL)</a>
+  <a href="/adminer.php" target="_blank" class="btn btn-sm">🗄️ Adminer (MySQL)</a>
+  <a href="/adminer.php?pgsql=" target="_blank" class="btn btn-sm">🐘 Adminer (PostgreSQL)</a>
+</div>
 
 <div class="grid-3 gap-2" style="margin-bottom:1.5rem">
   ${engineCard('mysql',    'MySQL',      '🐬')}
@@ -2433,6 +2480,7 @@ ${dbs.map(d=>`<tr>
     <div class="grid-2 gap-2">
       ${toolCard('phpmyadmin', 'phpMyAdmin', '🛢', `http://${location.hostname}/phpmyadmin`)}
       ${toolCard('pgadmin',    'pgAdmin 4',  '🐘', `http://${location.hostname}/pgadmin4`)}
+      ${toolCard('adminer',    'Adminer',    '🗄️',  `http://${location.hostname}/adminer.php`)}
     </div>
   </div>
 </div>
@@ -2609,37 +2657,71 @@ ${dbs.map(d=>`<tr>
 
   // ── Mail Server ────────────────────────────────────────────────────────────
   async function mailServer() {
-    const r = await Nova.api('system','stats');
-    const svcs = r?.data?.services || {};
-    const mailStatus = svcs['postfix'] || 'unknown';
-    const doveStatus = svcs['dovecot'] || 'unknown';
+    const [statsR, domainsR] = await Promise.all([
+      Nova.api('system','stats'),
+      Nova.api('email','domains'),
+    ]);
+    const svcs = statsR?.data?.services || {};
+    const mailSvcs = ['postfix','dovecot','rspamd','opendkim'].filter(s => svcs[s]);
+    const domains  = domainsR?.data || [];
+
+    window.msLoadLog = async () => {
+      const r = await Nova.api('system','read-log',{params:{log:'mail'}});
+      const el = document.getElementById('ms-log-out');
+      if (el) { el.textContent = r?.data?.content || '(empty)'; el.scrollTop = el.scrollHeight; }
+    };
+
     return `
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
+<div class="page-header mb-2"><h2 class="page-title">Mail Server</h2></div>
+<div class="grid-2 mb-3">
   <div class="card">
-    <div class="card-header"><span class="card-title">Mail Services</span></div>
-    <div style="padding:1.25rem">
-      ${[['postfix',mailStatus],['dovecot',doveStatus]].map(([s,st]) => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--border)">
-          <span>${s} <span data-svc-status="${s}">${Nova.badge(st,st==='active'?'green':'red')}</span></span>
-          <div style="display:flex;gap:.5rem">
-            <button class="btn btn-xs" onclick="adminServiceAction('${s}','restart')">Restart</button>
-            <button class="btn btn-xs" onclick="adminServiceAction('${s}','reload')">Reload</button>
+    <div class="card-header"><span class="card-title">Services</span></div>
+    <div class="card-body">
+      ${mailSvcs.length ? mailSvcs.map(s => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid var(--border)">
+          <span style="font-weight:500">${s} ${Nova.badge(svcs[s],svcs[s]==='active'?'green':'red')}</span>
+          <div style="display:flex;gap:.35rem">
+            <button class="btn btn-xs" onclick="adminServiceAction('${s}','restart')">↺ Restart</button>
+            <button class="btn btn-xs" onclick="adminServiceAction('${s}','reload')">⟳ Reload</button>
           </div>
-        </div>`).join('')}
+        </div>`).join('') : '<p class="text-muted">No mail services detected</p>'}
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><span class="card-title">Mail Queue</span></div>
-    <div style="padding:1.25rem">
+    <div class="card-header">
+      <span class="card-title">Mail Queue</span>
+      <button class="btn btn-xs btn-warning" style="margin-left:auto" onclick="Nova.confirm('Flush all queued mail?',()=>adminServiceAction('postfix','flush'))">Flush</button>
+    </div>
+    <div class="card-body">
       <button class="btn btn-sm" onclick="adminViewMailQueue()">View Queue</button>
-      <button class="btn btn-sm btn-warning" style="margin-top:.5rem" onclick="Nova.confirm('Flush mail queue?',()=>adminServiceAction('postfix','flush'))">Flush Queue</button>
+      <div id="ms-queue-out" style="margin-top:.75rem;font-size:.82rem;color:var(--text-muted)"></div>
     </div>
   </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header">
+    <span class="card-title">Virtual Mail Domains (${domains.length})</span>
+  </div>
+  ${domains.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Domain</th><th>Account</th><th>Email Accounts</th></tr></thead><tbody>
+    ${domains.map(d=>`<tr><td><strong>${Nova.escHtml(d.domain)}</strong></td><td>${Nova.escHtml(d.username||'—')}</td><td>${d.email_count||0}</td></tr>`).join('')}
+  </tbody></table></div>` : '<div class="card-body text-muted">No mail domains yet — created automatically when hosting accounts are set up.</div>'}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Mail Log</span>
+    <button class="btn btn-xs" style="margin-left:auto" onclick="msLoadLog()">Load Log</button>
+  </div>
+  <pre id="ms-log-out" style="background:var(--bg);padding:1rem;font-size:.78rem;height:180px;overflow:auto;margin:0;color:var(--text-muted)">← Click Load Log to view recent mail activity</pre>
 </div>`;
   }
   window.adminViewMailQueue = async () => {
     const r = await Nova.api('system','service',{method:'POST',body:{service:'mailq',command:'status'}});
-    Nova.modal('Mail Queue', `<pre style="background:var(--bg);padding:1rem;font-size:.8rem;overflow:auto;max-height:400px">${r?.data?.output || 'Queue is empty'}</pre>`);
+    const out = r?.data?.output || 'Queue is empty';
+    const el = document.getElementById('ms-queue-out');
+    if (el) el.innerHTML = `<pre style="margin:0">${Nova.escHtml(out)}</pre>`;
+    else Nova.modal('Mail Queue', `<pre style="background:var(--bg);padding:1rem;font-size:.8rem;overflow:auto;max-height:400px">${Nova.escHtml(out)}</pre>`);
   };
 
   // ── FTP Server ────────────────────────────────────────────────────────────
@@ -2653,23 +2735,36 @@ ${dbs.map(d=>`<tr>
     const svcName = ftpConf === 'vsftpd' ? 'vsftpd' : (ftpConf === 'pureftpd' ? 'pure-ftpd' : 'proftpd');
     const label   = ftpConf === 'vsftpd' ? 'vsftpd' : (ftpConf === 'pureftpd' ? 'Pure-FTPd' : 'ProFTPD');
     const status  = svcs[svcName] || 'unknown';
+    const ftpR = await Nova.api('ftp','list',{params:{account_id:0}});
+    const ftpAccts = ftpR?.data || [];
+
     return `
-<div class="card">
+<div class="page-header mb-2"><h2 class="page-title">FTP Server</h2></div>
+<div class="card mb-3">
   <div class="card-header">
-    <span class="card-title">FTP Server (${label})</span>
-    <span data-svc-status="${svcName}">${Nova.badge(status, status==='active'?'green':'red')}</span>
-    <div style="display:flex;gap:.5rem;margin-left:auto">
-      <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','restart')">Restart</button>
-      <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','reload')">Reload</button>
+    <span class="card-title">${label}</span>
+    ${Nova.badge(status, status==='active'?'green':'red')}
+    <div style="display:flex;gap:.35rem;margin-left:auto">
+      <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','restart')">↺ Restart</button>
+      <button class="btn btn-sm" onclick="adminServiceAction('${svcName}','reload')">⟳ Reload</button>
     </div>
   </div>
-  <div style="padding:1.25rem">
-    <div style="color:var(--muted);font-size:.85rem">
-      <p>Active FTP server: <strong>${label}</strong> — change in <a href="#" onclick="adminPage('server-options')">Server Options</a>.</p>
-      <p style="margin-top:.5rem">FTP connections use SFTP on port 22 or passive FTP on ports 20/21.</p>
-      <p style="margin-top:.5rem">Per-account FTP management is available in each account's FTP page.</p>
-    </div>
+  <div class="card-body" style="font-size:.85rem;color:var(--text-muted)">
+    Active server: <strong>${label}</strong> — change in <a href="#" onclick="adminPage('server-options')">Server Options</a>.
+    Passive FTP ports 20/21 · SFTP on port 22.
   </div>
+</div>
+<div class="card">
+  <div class="card-header"><span class="card-title">All FTP Accounts (${ftpAccts.length})</span></div>
+  ${ftpAccts.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Username</th><th>Account</th><th>Directory</th><th>Permissions</th></tr></thead><tbody>
+    ${ftpAccts.map(f=>`<tr>
+      <td><strong>${Nova.escHtml(f.username)}</strong></td>
+      <td style="font-size:.82rem">${Nova.escHtml(f.account_domain||String(f.account_id)||'—')}</td>
+      <td style="font-size:.75rem;font-family:monospace">${Nova.escHtml(f.home_dir||'—')}</td>
+      <td>${Nova.badge(f.permissions||'rw','blue')}</td>
+    </tr>`).join('')}
+  </tbody></table></div>`
+  : '<div class="card-body text-muted">No FTP accounts yet — created from each account's FTP page.</div>'}
 </div>`;
   }
 

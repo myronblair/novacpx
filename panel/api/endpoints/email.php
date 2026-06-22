@@ -98,5 +98,21 @@ match ($action) {
         Response::success(null, 'Autoresponder deleted');
     })(),
 
+
+    'domains' => (function() use ($db) {
+        Auth::getInstance()->require('admin', 'reseller');
+        $user = Auth::getInstance()->user();
+        $clause = $user['role'] === 'reseller' ? "AND a.user_id IN (SELECT id FROM users WHERE reseller_id=".(int)$user['uid'].")" : "";
+        $rows = $db->fetchAll(
+            "SELECT d.domain, a.username, a.id as account_id,
+                    (SELECT COUNT(*) FROM email_accounts WHERE account_id = a.id) as email_count
+             FROM dns_zones d
+             JOIN accounts a ON a.id = d.account_id
+             WHERE 1=1 $clause
+             ORDER BY d.domain"
+        );
+        Response::success($rows);
+    })(),
+
     default => Response::error("Unknown email action: $action", 404),
 };
