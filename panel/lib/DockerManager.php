@@ -190,7 +190,11 @@ SH;
 
     public function removeImage(string $imageId): string {
         if (!preg_match('/^[a-zA-Z0-9:._\-\/]+$/', $imageId)) throw new RuntimeException("Invalid image ID");
-        return trim(shell_exec("sudo docker rmi " . escapeshellarg($imageId) . " 2>&1") ?? '');
+        $out = trim(shell_exec("sudo docker rmi " . escapeshellarg($imageId) . " 2>&1") ?? '');
+        if (stripos($out, "Error") !== false || stripos($out, "conflict") !== false) {
+            throw new \RuntimeException($out);
+        }
+        return $out;
     }
 
     // ── Volumes & Networks ────────────────────────────────────────────────────

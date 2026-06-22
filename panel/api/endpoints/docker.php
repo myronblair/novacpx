@@ -265,5 +265,28 @@ match ($action) {
         Response::success($result, ucfirst($appKey) . ' launched successfully');
     })(),
 
+    'sync-orphans' => (function() use ($dm, $isAdmin) {
+        if (!$isAdmin) Response::error('Admin only', 403);
+        $result = shell_exec('docker ps -a --format "{{json .}}" 2>/dev/null') ?? '';
+        $db     = \DB::getInstance();
+        $added  = 0;
+        foreach (explode("\n", trim($result)) as $line) {
+            if (!$line) continue;
+            $c = json_decode($line, true);
+            if (!$c) continue;
+            $cid  = $c['ID'] ?? '';
+            $name = ltrim($c['Names'] ?? '', '/');
+            $img  = $c['Image'] ?? '';
+            $st   = $c['State'] ?? 'unknown';
+            if (!$cid) continue;
+            $ex = $db->fetchOne('SELECT id FROM docker_containers WHERE container_id=?', [$cid]);
+            if (!$ex) {
+                $db->execute('INSERT INTO docker_containers (container_id,name,image,status,account_id,created_at) VALUES (?,?,?,?,0,datetime("now"))', [$cid,$name,$img,$st]);
+                $added++;
+            }
+        }
+        Response::success(['added' => $added], "Synced $added orphaned containers");
+    })(),
+
     default => Response::error("Unknown docker action: $action", 404),
 };
