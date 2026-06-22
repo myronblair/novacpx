@@ -943,7 +943,7 @@ BASH;
         Auth::getInstance()->require('admin');
         $tool   = $body['tool']   ?? '';
         $action = $body['action'] ?? '';
-        if (!in_array($tool,   ['phpmyadmin','pgadmin'])) { echo 'data:'.json_encode(['error'=>'Invalid tool'])."\n\n"; exit; }
+        if (!in_array($tool,   ['phpmyadmin','pgadmin','adminer'])) { echo 'data:'.json_encode(['error'=>'Invalid tool'])."\n\n"; exit; }
         if (!in_array($action, ['install','reinstall','remove'])) { echo 'data:'.json_encode(['error'=>'Invalid action'])."\n\n"; exit; }
 
         header('Content-Type: text/event-stream');
@@ -975,7 +975,22 @@ BASH;
 
         $env = 'sudo env DEBIAN_FRONTEND=noninteractive';
 
-        if ($tool === 'phpmyadmin') {
+        if ($tool === 'adminer') {
+            $adminerPath = NOVACPX_ROOT . '/adminer.php';
+            if ($action === 'remove') {
+                $sse("▶ Removing Adminer…\n");
+                $run('sudo rm -f ' . escapeshellarg($adminerPath));
+                $sse("  ✓ Removed!\n");
+            } else {
+                $sse("▶ Downloading Adminer…\n");
+                $out = shell_exec('curl -sL https://www.adminer.org/latest.php -o ' . escapeshellarg($adminerPath) . ' 2>&1');
+                if (is_file($adminerPath) && filesize($adminerPath) > 100000) {
+                    $sse("  ✓ Adminer installed at /adminer.php (" . round(filesize($adminerPath)/1024) . " KB)\n");
+                } else {
+                    $sse("  ✗ Download failed: $out\n");
+                }
+            }
+        } else if ($tool === 'phpmyadmin') {
             if ($action === 'remove') {
                 $sse("▶ Removing phpMyAdmin…\n");
                 $run("$env apt-get remove -y phpmyadmin 2>&1");
