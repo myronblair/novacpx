@@ -364,6 +364,7 @@ function renderRNav() {
       resellerNav(link.dataset.page);
     });
   });
+  if (typeof _initCollapsibleNav === 'function') _initCollapsibleNav();
 }
 
 window.resellerNav = (page) => {

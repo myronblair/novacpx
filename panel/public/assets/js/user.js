@@ -985,7 +985,7 @@ function renderNav() {
         </a>`).join('')}
     </div>`).join('');
 
-  nav.querySelectorAll('[data-page]').forEach(link => {
+  nav.querySelectorAll("[data-page]").forEach(link => {
     link.addEventListener('click', e => {
       e.preventDefault();
       if (window.innerWidth <= 768) {
@@ -996,6 +996,7 @@ function renderNav() {
       userNav(link.dataset.page);
     });
   });
+  if (typeof _initCollapsibleNav === 'function') _initCollapsibleNav();
 }
 
 window.userNav = (page) => {

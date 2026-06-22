@@ -222,15 +222,15 @@ window.Nova = (() => {
 })();
 
 // #48 Collapsible sidebar nav — shared across all panels
-document.addEventListener('DOMContentLoaded', () => {
+// Exported as window.Nova.initCollapsibleNav so panel JS can call it after dynamic nav render
+function _initCollapsibleNav() {
   const STORE = 'ncpx_nav_collapsed';
   const state = JSON.parse(localStorage.getItem(STORE) || '{}');
 
   document.querySelectorAll('.sidebar-section').forEach(section => {
     const label = section.querySelector('.sidebar-section-label');
-    if (!label) return;
+    if (!label || label.querySelector('.nav-chevron')) return; // already initialized
 
-    // Add chevron icon
     const chevron = document.createElement('i');
     chevron.className = 'nav-chevron';
     chevron.textContent = '▼';
@@ -238,22 +238,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const key = label.textContent.replace('▼','').trim();
 
-    // Restore saved state — default Overview open, others open
     if (state[key]) section.classList.add('collapsed');
 
-    // Keep active page's section always open
     const hasActive = section.querySelector('.sidebar-link.active');
     if (hasActive) section.classList.remove('collapsed');
 
     label.addEventListener('click', () => {
-      // Don't collapse if it contains the active link
       if (section.querySelector('.sidebar-link.active')) return;
       section.classList.toggle('collapsed');
       state[key] = section.classList.contains('collapsed');
       localStorage.setItem(STORE, JSON.stringify(state));
     });
   });
-});
+}
+// Run on DOMContentLoaded for admin panel (static nav), expose globally for dynamic panels
+document.addEventListener('DOMContentLoaded', _initCollapsibleNav);
+window._initCollapsibleNav = _initCollapsibleNav;
 
 // #26 Mobile sidebar toggle — shared across all panels
 document.addEventListener('DOMContentLoaded', () => {
