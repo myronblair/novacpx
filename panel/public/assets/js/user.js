@@ -970,6 +970,8 @@ const navGroups = [
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="4" height="4"/><rect x="7" y="9" width="4" height="4"/><rect x="12" y="9" width="4" height="4"/><rect x="7" y="4" width="4" height="4"/><path d="M22 11c0 5-3.9 9-10 9-8 0-10-7-10-7"/></svg>' },
   ]},
   { label: 'Account', items: [
+    { id: 'account-settings', label: 'Settings',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
     { id: 'change-password', label: 'Change Password',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
   ]},
@@ -1010,6 +1012,7 @@ window.userNav = (page) => {
   const allItems = navGroups.flatMap(g => g.items);
   // Extra pages not in nav groups
   const extraPages = {
+    'account-settings': accountSettings,
     'subdomains':     userSubdomains,
     'parked-domains': userParked,
   };
@@ -1392,4 +1395,123 @@ window.submitParked = async () => {
   const res = await Nova.api('domains','add-alias',{method:'POST',body:{domain}});
   if (res?.success) { Nova.toast(res.message,'success'); document.querySelector('.modal-overlay')?.remove(); loadParkedList(); }
   else Nova.toast(res?.message||'Failed','error');
+};
+
+// ══ #38 ACCOUNT SETTINGS PAGE ═════════════════════════════════════════════
+async function accountSettings(el) {
+  Nova.loadPage('account-settings', 'Account Settings', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem" id="acct-settings-grid">
+      <div class="loading" style="grid-column:1/-1">Loading…</div>
+    </div>`);
+
+  const [usageRes, pkgRes, acctRes] = await Promise.all([
+    Nova.api('accounts', 'usage'),
+    Nova.api('packages', 'my'),
+    Nova.api('accounts', 'me'),
+  ]);
+
+  const u  = usageRes?.data  || {};
+  const p  = pkgRes?.data    || {};
+  const a  = acctRes?.data   || {};
+  const el2 = document.getElementById('acct-settings-grid');
+  if (!el2) return;
+
+  el2.innerHTML = `
+    <!-- Account Info -->
+    <div class="card" style="grid-column:1/-1">
+      <div class="card-header"><h3 class="card-title">Account Information</h3></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;padding:.75rem 0">
+        ${[
+          ['Username',   a.username||'—'],
+          ['Primary Domain', a.domain||'—'],
+          ['Package',    p.name||'Default'],
+          ['Status',     a.status ? Nova.badge(a.status, a.status==='active'?'green':'yellow') : '—'],
+          ['PHP Version', a.php_version||'8.3'],
+          ['Created',    (a.created_at||'').split('T')[0]||'—'],
+        ].map(([k,v])=>`<div style="background:var(--bg3);border-radius:6px;padding:.75rem">
+          <div style="font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.25rem">${k}</div>
+          <div style="font-weight:600;font-size:.9rem">${v}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Resource Usage -->
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Resource Usage</h3></div>
+      ${[
+        ['Disk',      u.disk_used_mb||0,  u.disk_limit_mb,  'MB'],
+        ['Email',     u.email_count||0,   u.email_limit,    'accounts'],
+        ['Databases', u.db_count||0,      u.db_limit,       'databases'],
+        ['FTP',       u.ftp_count||0,     u.ftp_limit,      'accounts'],
+        ['Domains',   u.domain_count||0,  u.domain_limit,   'domains'],
+      ].map(([name,used,limit,unit])=>{
+        const pct = limit>0 ? Math.min(100,Math.round(used/limit*100)) : 0;
+        const col = pct>90?'var(--red)':pct>70?'var(--yellow)':'var(--primary)';
+        return `<div style="margin-bottom:.75rem">
+          <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:.3rem">
+            <span>${name}</span>
+            <span style="color:var(--text-muted)">${used}${limit>0?` / ${limit} ${unit}`:` ${unit}`}</span>
+          </div>
+          ${limit>0?`<div style="height:5px;background:var(--bg3);border-radius:3px">
+            <div style="height:100%;width:${pct}%;background:${col};border-radius:3px;transition:width .3s"></div>
+          </div>`:''}
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- PHP Settings -->
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">PHP Configuration</h3></div>
+      <div style="display:grid;gap:.75rem;padding:.25rem 0">
+        <div>
+          <label class="form-label">PHP Version</label>
+          <select id="as-php-ver" class="form-control form-control-sm">
+            ${['8.3','8.2','8.1','8.0','7.4'].map(v=>`<option value="${v}"${(a.php_version||'8.3')===v?' selected':''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div><label class="form-label">Memory Limit</label>
+          <select id="as-mem" class="form-control form-control-sm">
+            ${['128M','256M','512M','1G'].map(v=>`<option value="${v}"${v==='256M'?' selected':''}>${ v}</option>`).join('')}
+          </select>
+        </div>
+        <div><label class="form-label">Max Upload Size</label>
+          <select id="as-upload" class="form-control form-control-sm">
+            ${['32M','64M','128M','256M'].map(v=>`<option value="${v}"${v==='64M'?' selected':''}>${ v}</option>`).join('')}
+          </select>
+        </div>
+        <div><label class="form-label">Max Execution Time (sec)</label>
+          <select id="as-exec" class="form-control form-control-sm">
+            ${['30','60','120','300'].map(v=>`<option value="${v}"${v==='30'?' selected':''}>${ v}s</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveAccountPHP()">Save PHP Settings</button>
+      </div>
+    </div>
+
+    <!-- Security & Access -->
+    <div class="card" style="grid-column:1/-1">
+      <div class="card-header"><h3 class="card-title">Security & Access</h3></div>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="userNav('change-password')">🔑 Change Password</button>
+        <button class="btn btn-sm" onclick="userNav('ssl')">🔒 SSL / TLS Certificates</button>
+        <button class="btn btn-sm" onclick="userNav('twofa')">📱 Two-Factor Auth</button>
+      </div>
+    </div>
+  `;
+}
+window.accountSettings = accountSettings;
+
+window.saveAccountPHP = async () => {
+  const body = {
+    php_version: document.getElementById('as-php-ver')?.value,
+    memory_limit: document.getElementById('as-mem')?.value,
+    upload_max_filesize: document.getElementById('as-upload')?.value,
+    post_max_size: document.getElementById('as-upload')?.value,
+    max_execution_time: parseInt(document.getElementById('as-exec')?.value),
+  };
+  Nova.loading('Saving…');
+  const res = await Nova.api('php', 'update-config', { method: 'POST', body });
+  Nova.loadingDone();
+  if (res?.success) Nova.toast('PHP settings saved', 'success');
+  else Nova.toast(res?.message || 'Failed', 'error');
 };

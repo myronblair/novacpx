@@ -33,8 +33,18 @@ class AccountManager {
         self::shell("sudo chmod 750 {$homeDir}");
         self::shell("sudo chmod 775 {$docRoot}");
 
-        // Default index page (write as root via sudo tee)
-        $html = "<html><body style='font-family:sans-serif;text-align:center;padding:4rem'><h1>Welcome to {$domain}</h1><p>Hosted by NovaCPX</p></body></html>";
+        // Default index page — use custom template from settings if set, else built-in
+        $customTpl = null;
+        try {
+            $db2 = DB::getInstance();
+            $tplRow = $db2->fetchOne("SELECT value FROM settings WHERE key='default_index_template'");
+            $customTpl = $tplRow ? trim($tplRow['value']) : null;
+        } catch (Throwable $e) {}
+
+        $html = $customTpl
+            ? str_replace(['{domain}', '{username}'], [$domain, $username], $customTpl)
+            : "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Welcome to {$domain}</title>\n<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e2e4f0;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}.wrap{padding:3rem 2rem}.domain{font-size:2rem;font-weight:700;background:linear-gradient(135deg,#6366f1,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:1rem}.sub{color:#8b90a8;font-size:1rem;margin-bottom:2rem}.badge{display:inline-block;padding:.4rem 1rem;border:1px solid #2e3350;border-radius:6px;font-size:.8rem;color:#8b90a8}</style>\n</head>\n<body><div class=\"wrap\">\n<div class=\"domain\">{$domain}</div>\n<p class=\"sub\">Your website is ready. Upload your files to get started.</p>\n<span class=\"badge\">Hosted by NovaCPX</span>\n</div></body></html>";
+
         self::shell("sudo tee " . escapeshellarg("{$docRoot}/index.html") . " > /dev/null << 'HTMLEOF'\n{$html}\nHTMLEOF");
 
         // Wrap all DB writes in a transaction so partial failures leave no orphans

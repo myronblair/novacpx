@@ -4534,7 +4534,21 @@ async function serverOptions() {
     <button class="btn btn-primary btn-sm" onclick="soSaveNS()">Save Nameservers</button>
     <div id="so-ns-results" style="margin-top:1rem"></div>
   </div>
-</div>`;
+</div>
+
+  <!-- Default Index Page Template (#39) -->
+  <div class="card" style="grid-column:1/-1">
+    <div class="card-header"><span class="card-title">Default Index Page Template</span></div>
+    <div class="card-body">
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:.75rem">
+        HTML shown when a new hosting account is created. Use <code>{domain}</code> and <code>{username}</code> as placeholders. Leave blank to use the built-in styled template.
+      </p>
+      <textarea id="so-index-tpl" class="form-control" rows="6" style="font-family:monospace;font-size:.82rem;margin-bottom:.75rem"
+        placeholder="Leave blank for built-in template...">${Nova.escHtml(opts.default_index_template||'')}</textarea>
+      <button class="btn btn-primary btn-sm" onclick="soSaveIndexTemplate()">Save Template</button>
+      <button class="btn btn-ghost btn-sm" style="margin-left:.5rem" onclick="document.getElementById('so-index-tpl').value=''">Reset to Default</button>
+    </div>
+  </div>`;
 }
 
 window.soSave = (key, inputId, label) => {
@@ -4603,6 +4617,12 @@ window.soSaveNS = async () => {
   await Nova.api('system', 'save-option', { method:'POST', body:{ key:'ns1_hostname', value:ns1 } });
   await Nova.api('system', 'save-option', { method:'POST', body:{ key:'ns2_hostname', value:ns2 } });
   Nova.toast('Nameservers saved', 'success');
+};
+
+window.soSaveIndexTemplate = async () => {
+  const tpl = document.getElementById('so-index-tpl')?.value || '';
+  const res = await Nova.api('system','save-option',{method:'POST',body:{key:'default_index_template',value:tpl}});
+  Nova.toast(res?.success ? 'Default template saved' : 'Save failed', res?.success?'success':'error');
 };
 
 window.soCheckNS = async () => {
