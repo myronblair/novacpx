@@ -62,14 +62,6 @@ require_once dirname(__DIR__) . '/_branding.php';
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
           Create Account
         </a>
-        <a href="#" class="sidebar-link" data-page="subdomains" onclick="window.adminSubdomains()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/><path d="M18 15l3 3-3 3"/></svg>
-          Subdomains
-        </a>
-        <a href="#" class="sidebar-link" data-page="parked-domains" onclick="window.adminParked()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-          Parked Domains
-        </a>
       </div>
 
       <div class="sidebar-section">
