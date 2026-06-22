@@ -1609,7 +1609,7 @@ SH;
         $logFile = escapeshellarg("/tmp/novacpx-stack-{$stackId}.log");
         $compose = escapeshellarg("{$dir}/docker-compose.yml");
         shell_exec("nohup sudo docker compose -f {$compose} up -d > {$logFile} 2>&1 &");
-        $this->db->execute("UPDATE docker_compose_stacks SET status='starting' WHERE id=?", [$stackId]);
+        $this->db->execute("UPDATE docker_compose_stacks SET status='pending' WHERE id=?", [$stackId]);
         novacpx_log('info', "DockerManager: launching {$appKey} for account {$accountId} on {$domain} (async)");
         return ['stack_id' => $stackId, 'dir' => $dir, 'output' => 'Launching in background — refresh in a moment to see status'];
     }
