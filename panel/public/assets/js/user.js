@@ -1404,15 +1404,16 @@ async function accountSettings(el) {
       <div class="loading" style="grid-column:1/-1">Loading…</div>
     </div>`);
 
-  const [usageRes, pkgRes, acctRes] = await Promise.all([
-    Nova.api('accounts', 'usage'),
-    Nova.api('packages', 'my'),
-    Nova.api('accounts', 'me'),
+  const [usageRes, phpRes] = await Promise.all([
+    Nova.api('stats', 'account'),
+    Nova.api('php', 'config'),
   ]);
 
   const u  = usageRes?.data  || {};
-  const p  = pkgRes?.data    || {};
-  const a  = acctRes?.data   || {};
+  const p  = {};
+  const a  = { username: u.username || '—', domain: u.domain || '—',
+               php_version: phpRes?.data?.php_version || '8.3',
+               status: 'active', created_at: '' };
   const el2 = document.getElementById('acct-settings-grid');
   if (!el2) return;
 
@@ -1439,11 +1440,11 @@ async function accountSettings(el) {
     <div class="card">
       <div class="card-header"><h3 class="card-title">Resource Usage</h3></div>
       ${[
-        ['Disk',      u.disk_used_mb||0,  u.disk_limit_mb,  'MB'],
-        ['Email',     u.email_count||0,   u.email_limit,    'accounts'],
-        ['Databases', u.db_count||0,      u.db_limit,       'databases'],
-        ['FTP',       u.ftp_count||0,     u.ftp_limit,      'accounts'],
-        ['Domains',   u.domain_count||0,  u.domain_limit,   'domains'],
+        ['Disk',      u.disk_mb||0,       u.disk_limit,     'MB'],
+        ['Email',     u.emails||0,         u.email_limit,    'accounts'],
+        ['Databases', u.databases||0,      u.db_limit,       'databases'],
+        ['FTP',       u.ftp||0,            u.ftp_limit,      'accounts'],
+        ['Domains',   u.domains||0,        u.domain_limit,   'domains'],
       ].map(([name,used,limit,unit])=>{
         const pct = limit>0 ? Math.min(100,Math.round(used/limit*100)) : 0;
         const col = pct>90?'var(--red)':pct>70?'var(--yellow)':'var(--primary)';
