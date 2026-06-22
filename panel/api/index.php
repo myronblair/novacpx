@@ -33,7 +33,7 @@ $_allowedHosts = ['novacpx.orbishosting.com', 'admin.novacpx.orbishosting.com',
                   'web.orbishosting.com'];
 $_originHost = parse_url($origin, PHP_URL_HOST) ?? '';
 $_originPort = (int)(parse_url($origin, PHP_URL_PORT) ?? 0);
-$_panelPorts  = [PORT_USER ?? 8880, PORT_RESELLER ?? 8881, PORT_ADMIN ?? 8882, PORT_WEBMAIL ?? 8883];
+$_panelPorts  = [8880, 8881, 8882, 8883]; // hardcoded — Core.php not loaded yet
 if ($origin && (
     in_array($_originHost, $_allowedHosts, true) ||
     (in_array($_originPort, $_panelPorts, true) && filter_var($_originHost, FILTER_VALIDATE_IP))
