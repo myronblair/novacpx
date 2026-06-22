@@ -2764,7 +2764,7 @@ ${dbs.map(d=>`<tr>
       <td>${Nova.badge(f.permissions||'rw','blue')}</td>
     </tr>`).join('')}
   </tbody></table></div>`
-  : '<div class="card-body text-muted">No FTP accounts yet — created from each account's FTP page.</div>'}
+  : '<div class="card-body text-muted">No FTP accounts yet — created from each account&#39;s FTP page.</div>'}
 </div>`;
   }
 
