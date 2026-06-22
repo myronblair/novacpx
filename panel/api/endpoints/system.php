@@ -924,6 +924,8 @@ BASH;
                       || is_dir('/usr/share/phpmyadmin');
         $pgaInstalled  = (int)trim(shell_exec("dpkg -l pgadmin4 2>/dev/null | grep -c '^ii'") ?: '0') > 0
                       || is_file('/usr/pgadmin4/bin/pgadmin4') || is_dir('/usr/pgadmin4');
+        $adminerInstalled = is_file(NOVACPX_ROOT . '/adminer.php');
+        $adminerVer       = $adminerInstalled ? 'bundled' : '';
         $pmaVer = $pmaInstalled
             ? trim(shell_exec("dpkg -l phpmyadmin 2>/dev/null | awk '/^ii/{print $3}' | head -1") ?: '')
             : '';
@@ -931,8 +933,9 @@ BASH;
             ? trim(shell_exec("pgadmin4 --version 2>/dev/null | grep -oP '[0-9]+\\.[0-9]+' | head -1") ?: '')
             : '';
         Response::success([
-            'phpmyadmin' => ['installed' => $pmaInstalled, 'version' => $pmaVer],
+            'phpmyadmin' => ['installed' => $pmaInstalled, 'version' => $pmaVer, 'url' => '/phpmyadmin'],
             'pgadmin'    => ['installed' => $pgaInstalled, 'version' => $pgaVer],
+            'adminer'    => ['installed' => $adminerInstalled, 'version' => $adminerVer, 'url' => '/adminer.php'],
         ]);
     })(),
 

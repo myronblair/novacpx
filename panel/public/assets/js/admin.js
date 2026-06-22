@@ -2384,6 +2384,8 @@ ${ips.length ? `
     const actE  = engRes?.data?.active_engine || 'mysql';
     const dbs   = dbRes?.data || [];
     const tools = toolsRes?.data || {};
+    const pgDbs = (dbs||[]).filter(d => d.db_type === 'pgsql' || d.db_type === 'postgresql');
+    const myDbs = (dbs||[]).filter(d => !d.db_type || d.db_type === 'mysql' || d.db_type === 'mariadb');
 
     const engineCard = (id, label, icon) => {
       const e = eng[id] || {};
@@ -2415,6 +2417,7 @@ ${ips.length ? `
       const t = tools[id] || {};
       const statusColor = t.installed ? 'green' : 'default';
       const statusText  = t.installed ? 'Installed' : 'Not Installed';
+      const openUrl     = t.url || url;
       return `
 <div class="card">
   <div class="card-header">
@@ -2429,7 +2432,7 @@ ${ips.length ? `
         : `
         <button class="btn btn-xs" onclick="dbToolAction('${id}','reinstall')">Reinstall</button>
         <button class="btn btn-xs btn-danger" onclick="dbToolAction('${id}','remove')">Remove</button>
-        <a href="${url}" target="_blank" class="btn btn-xs btn-ghost">Open ↗</a>`
+        <a href="${openUrl}" target="_blank" class="btn btn-xs btn-ghost">Open ↗</a>`
       }
     </div>
   </div>
@@ -2478,16 +2481,28 @@ ${dbs.map(d=>`<tr>
   <div class="card-header"><span class="card-title">Database Admin Tools</span></div>
   <div class="card-body" style="padding-bottom:.5rem">
     <div class="grid-2 gap-2">
-      ${toolCard('phpmyadmin', 'phpMyAdmin', '🛢', `http://${location.hostname}/phpmyadmin`)}
-      ${toolCard('pgadmin',    'pgAdmin 4',  '🐘', `http://${location.hostname}/pgadmin4`)}
-      ${toolCard('adminer',    'Adminer',    '🗄️',  `http://${location.hostname}/adminer.php`)}
+      ${toolCard('phpmyadmin', 'phpMyAdmin',         '🐬', `http://${location.hostname}/phpmyadmin`)}
+      ${toolCard('adminer',    'Adminer (MySQL/PG)', '🗄️', `http://${location.hostname}/adminer.php`)}
+      ${toolCard('pgadmin',    'pgAdmin 4',          '🐘', `http://${location.hostname}/pgadmin4`)}
     </div>
   </div>
 </div>
 
-<div class="card">
-  <div class="card-header"><span class="card-title">All Databases</span><span class="text-muted" style="font-size:.8rem">${dbs.length} total</span></div>
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">
+    <span class="card-title">MySQL / MariaDB Databases</span>
+    <span class="text-muted" style="font-size:.8rem;margin-left:.5rem">${myDbs.length} databases</span>
+  </div>
   ${dbTable}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">&#x1F418; PostgreSQL Databases</span>
+    <span class="text-muted" style="font-size:.8rem;margin-left:.5rem">${pgDbs.length} databases</span>
+    <a href="/adminer.php?pgsql=" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:auto">Open in Adminer &#x2197;</a>
+  </div>
+  <div class="card-body text-muted">No PostgreSQL databases in NovaCPX yet. Use <a href="/adminer.php?pgsql=" target="_blank">Adminer</a> to manage PostgreSQL directly.</div>
 </div>`;
   }
 
