@@ -4195,10 +4195,15 @@ async function docker() {
 <div id="docker-tab-content"><div class="loading">Loading…</div></div>`;
 }
 
-async function dockerLoadTab(tab) {
+// Refresh without clearing the list first (keeps current content visible while loading)
+async function dockerLoadTabKeep(tab) {
+  await dockerLoadTab(tab, true);
+}
+
+async function dockerLoadTab(tab, keepContent = false) {
   const tc = document.getElementById('docker-tab-content');
   if (!tc) return;
-  tc.innerHTML = '<div class="loading">Loading…</div>';
+  if (!keepContent) tc.innerHTML = '<div class="loading">Loading…</div>';
 
   if (tab === 'containers') {
     const r = await Nova.api('docker', 'containers');
@@ -4212,7 +4217,7 @@ ${rows.length === 0 ? '<div class="card"><div class="card-body text-muted" style
 <div style="overflow-x:auto"><table class="table"><thead><tr>
   <th>Name</th><th>Image</th><th>Status</th><th>Account</th><th>Created</th><th>Actions</th>
 </tr></thead><tbody>
-${rows.map(c => `<tr>
+${rows.map(c => `<tr data-cid="${Nova.escHtml(c.container_id||'')}">
   <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(c.name)}</td>
   <td style="font-size:.82rem">${Nova.escHtml(c.image)}</td>
   <td>${Nova.badge(c.status, c.status==='running'?'green':c.status==='stopped'?'red':'yellow')}</td>
@@ -4367,15 +4372,25 @@ window.dockerAdminLaunchApp = async (preselect) => {
 };
 
 window.dockerContainerAct = async (cid, action) => {
+  // Optimistic UI — update the row immediately so user sees feedback
+  const row = document.querySelector(`tr[data-cid="${cid}"]`);
+  if (row) {
+    const badge = row.querySelector('.badge');
+    if (badge) { badge.textContent = action === 'stop' ? 'stopping…' : action === 'start' ? 'starting…' : 'restarting…'; badge.className = 'badge badge-yellow'; }
+    row.querySelectorAll('button').forEach(b => b.disabled = true);
+  }
   const r = await Nova.api('docker', 'container-action', { method: 'POST', body: { container_id: cid, action } });
   Nova.toast(r?.success ? `Container ${action}ed` : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-  if (r?.success) dockerLoadTab('containers');
+  // Reload tab to show real status (don't clear first — keep current list visible)
+  if (r?.success || r !== null) dockerLoadTabKeep('containers');
 };
 
-window.dockerRemove = (cid) => Nova.confirm('Remove this container?', async () => {
-  const r = await Nova.api('docker', 'container-remove', { method: 'DELETE', body: { container_id: cid, force: true } });
+window.dockerRemove = (cid) => Nova.confirm('Force remove this container?', async () => {
+  const row = document.querySelector(`tr[data-cid="${cid}"]`);
+  if (row) row.style.opacity = '0.4';
+  const r = await Nova.api('docker', 'container-remove', { method: 'POST', body: { container_id: cid, force: true } });
   Nova.toast(r?.success ? 'Removed' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-  if (r?.success) dockerLoadTab('containers');
+  if (r?.success || r !== null) dockerLoadTabKeep('containers');
 }, true);
 
 window.dockerLogs = async (cid, name) => {
