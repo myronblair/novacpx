@@ -189,11 +189,11 @@
 <div class="card" style="margin-top:1.5rem">
   <div class="card-header"><span class="card-title">24-Hour History</span><span class="text-muted" style="font-size:.8rem;margin-left:.5rem">${hist.length} samples</span></div>
   <div class="card-body">
-    ${hist.length === 0 ? '<p class="text-muted" style="text-align:center;padding:2rem">No history yet — collected every 5 minutes.</p>' : '<canvas id="dash-hist-chart" height="70"></canvas>'}
+    ${hist.length === 0 ? '<p class="text-muted" style="text-align:center;padding:2rem">No history yet — collected every 5 min.</p>' : '<canvas id="dash-hist-chart" height="70"></canvas>'}
   </div>
 </div>`;
+    setTimeout(() => { const canvas = document.getElementById('dash-hist-chart'); if (!canvas || !hist.length) return; if (window.Chart) { initStatsChart(canvas, hist); } else { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'; sc.onload = () => initStatsChart(canvas, hist); document.head.appendChild(sc); } }, 150);
   }
-  setTimeout(() => { const c = document.getElementById('dash-hist-chart'); if (!c || !hist.length) return; if (!window.Chart) { const s2 = document.createElement('script'); s2.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'; s2.onload = () => initStatsChart(c, hist); document.head.appendChild(s2); } else { initStatsChart(c, hist); } }, 150);
 
   // ── Server Status ──────────────────────────────────────────────────────────
 
