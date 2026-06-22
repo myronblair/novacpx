@@ -113,14 +113,12 @@
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
   async function dashboard() {
-    const [stats, version, histRes] = await Promise.all([
+    const [stats, version] = await Promise.all([
       Nova.api('system', 'stats'),
       Nova.api('system', 'version'),
-      Nova.api('stats', 'server'),
     ]);
-    const s    = stats?.data   || {};
-    const v    = version?.data || {};
-    const hist = histRes?.data?.history || [];
+    const s = stats?.data || {};
+    const v = version?.data || {};
 
     document.getElementById('server-ip').textContent = '';
 
@@ -184,18 +182,53 @@
       </div>
     </div>
   </div>
-</div>
-
-<div class="card" style="margin-top:1.5rem">
-  <div class="card-header"><span class="card-title">24-Hour History</span><span class="text-muted" style="font-size:.8rem;margin-left:.5rem">${hist.length} samples</span></div>
-  <div class="card-body">
-    ${hist.length === 0 ? '<p class="text-muted" style="text-align:center;padding:2rem">No history yet — collected every 5 min.</p>' : '<canvas id="dash-hist-chart" height="70"></canvas>'}
-  </div>
 </div>`;
-    setTimeout(() => { const canvas = document.getElementById('dash-hist-chart'); if (!canvas || !hist.length) return; if (window.Chart) { initStatsChart(canvas, hist); } else { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'; sc.onload = () => initStatsChart(canvas, hist); document.head.appendChild(sc); } }, 150);
   }
 
   // ── Server Status ──────────────────────────────────────────────────────────
+  async function serverStatus() {
+    const [liveRes, histRes] = await Promise.all([
+      Nova.api('system', 'stats'),
+      Nova.api('stats', 'server'),
+    ]);
+    const s    = liveRes?.data || {};
+    const hist = histRes?.data?.history || [];
+
+    const html = `
+<div class="page-header"><h2 class="page-title">Server Status</h2>
+  <button class="btn btn-ghost btn-sm" onclick="adminPage('server-status')">↻ Refresh</button>
+</div>
+<div class="stats-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card"><div class="stat-label">CPU</div><div class="stat-value ${(s.cpu?.pct||0)>80?'stat-red':'stat-green'}">${s.cpu?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.cpu?.pct||0)}</div></div>
+  <div class="stat-card"><div class="stat-label">RAM</div><div class="stat-value ${(s.ram?.pct||0)>80?'stat-red':'stat-blue'}">${s.ram?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.ram?.pct||0)}</div></div>
+  <div class="stat-card"><div class="stat-label">Disk</div><div class="stat-value ${(s.disk?.pct||0)>85?'stat-red':'stat-yellow'}">${s.disk?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.disk?.pct||0)}</div></div>
+  <div class="stat-card"><div class="stat-label">Load Avg</div><div class="stat-value" style="font-size:1rem;padding-top:.4rem">${(s.cpu?.load||[0]).map(v=>v.toFixed(2)).join(' / ')}</div><div class="stat-sub">Uptime: ${s.uptime||'—'}</div></div>
+</div>
+<div class="card">
+  <div class="card-header"><span class="card-title">24-Hour History</span><span class="text-muted" style="font-size:.8rem">${hist.length} samples</span></div>
+  <div class="card-body">
+    ${hist.length === 0
+      ? '<p class="text-muted" style="text-align:center;padding:2rem">No history yet — stats are collected every 5 minutes.<br>Check that the collector cron is running: <code>*/5 * * * * root /usr/bin/php /opt/novacpx/bin/collect-stats.php</code></p>'
+      : '<canvas id="stats-chart" height="80"></canvas>'}
+  </div>
+</div>`;
+
+    // Can't return html and async render chart — use a trick: render then init chart
+    setTimeout(() => {
+      const canvas = document.getElementById('stats-chart');
+      if (!canvas || !hist.length) return;
+      if (!window.Chart) {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+        s.onload = () => initStatsChart(canvas, hist);
+        document.head.appendChild(s);
+      } else {
+        initStatsChart(canvas, hist);
+      }
+    }, 100);
+
+    return html;
+  }
 
   function initStatsChart(canvas, hist) {
     const labels = hist.map(r => {
