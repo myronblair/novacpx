@@ -4399,10 +4399,10 @@ window.dockerLogs = async (cid, name) => {
   Nova.modal(`Logs: ${name}`, `<pre style="max-height:400px;overflow:auto;font-size:.78rem;white-space:pre-wrap">${Nova.escHtml(logs)}</pre>`);
 };
 
-window.dockerImgRemove = (id) => Nova.confirm('Remove this image?', async () => {
-  const r = await Nova.api('docker', 'image-remove', { method: 'DELETE', body: { image_id: id } });
+window.dockerImgRemove = (id) => Nova.confirm('Remove this image? Stop any containers using it first.', async () => {
+  const r = await Nova.api('docker', 'image-remove', { method: 'POST', body: { image_id: id } });
   Nova.toast(r?.success ? 'Image removed' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-  if (r?.success) dockerLoadTab('images');
+  dockerLoadTabKeep('images');
 }, true);
 
 window.dockerPullModal = () => {
