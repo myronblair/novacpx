@@ -100,6 +100,8 @@
     backups,
     cloudflare,
     'server-options': serverOptions,
+    'subdomains': window.adminSubdomains,
+    'parked-domains': window.adminParked,
     notifications,
     settings,
   };
@@ -4618,4 +4620,66 @@ ${results.map(z=>`<tr>
   <td>${z.ok ? Nova.badge('OK','green') : Nova.badge('Mismatch','red')}</td>
 </tr>`).join('')}
 </tbody></table></div>`;
+};
+
+// ══ ADMIN SUBDOMAINS PAGE ═════════════════════════════════════════════════
+window.adminSubdomains = async function() {
+  Nova.loadPage('subdomains', window._novaPages); document.getElementById('page-title').textContent='All Subdomains'; document.getElementById('page-content').innerHTML=`, 'All Subdomains', `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <p class="text-muted" style="margin:0">All subdomains across all hosting accounts.</p>
+    </div>
+    <div class="card"><div id="admin-sub-list"><div class="loading">Loading…</div></div></div>`);
+  `;
+  const el = document.getElementById('admin-sub-list');
+  const res = await Nova.api('accounts','list',{params:{per_page:200}});
+  if (!res?.success || !res.data?.length) { el.innerHTML='<div class="empty">No accounts</div>'; return; }
+  const accts = res.data;
+  let rows = [];
+  for (const acct of accts) {
+    const dr = await Nova.api('domains','list',{params:{account_id:acct.id}});
+    if (!dr?.success) continue;
+    dr.data.filter(d=>d.type==='subdomain').forEach(d => rows.push({...d, account_username: acct.username, account_domain: acct.domain}));
+  }
+  if (!rows.length) { el.innerHTML='<div class="empty">No subdomains found.</div>'; return; }
+  el.innerHTML = `<table class="table"><thead><tr><th>Account</th><th>Subdomain</th><th>SSL</th><th>Created</th><th></th></tr></thead><tbody>
+    ${rows.map(d=>`<tr>
+      <td>${d.account_username}</td>
+      <td><strong>${d.domain}</strong></td>
+      <td>${d.ssl_enabled ? '<span class="badge badge-green">SSL</span>' : '—'}</td>
+      <td style="font-size:.78rem">${(d.created_at||'').split('T')[0]}</td>
+      <td></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+};
+
+// ══ ADMIN PARKED DOMAINS PAGE ═════════════════════════════════════════════
+window.adminParked = async function() {
+  document.querySelectorAll('.sidebar-link').forEach(l=>l.classList.remove('active'));
+  document.querySelector('[data-page="parked-domains"]')?.classList.add('active');
+  document.getElementById('page-title').textContent = 'Parked Domains';
+  document.getElementById('page-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <p class="text-muted" style="margin:0">All parked/alias domains across all accounts.</p>
+    </div>
+    <div class="card"><div id="admin-park-list"><div class="loading">Loading…</div></div></div>`);
+  `;
+  const el = document.getElementById('admin-park-list');
+  const res = await Nova.api('accounts','list',{params:{per_page:200}});
+  if (!res?.success || !res.data?.length) { el.innerHTML='<div class="empty">No accounts</div>'; return; }
+  let rows = [];
+  for (const acct of res.data) {
+    const dr = await Nova.api('domains','list',{params:{account_id:acct.id}});
+    if (!dr?.success) continue;
+    const main = dr.data.find(d=>d.type==='main');
+    dr.data.filter(d=>d.type==='parked'||d.type==='alias').forEach(d => rows.push({...d, account_username: acct.username, main_domain: main?.domain||acct.domain}));
+  }
+  if (!rows.length) { el.innerHTML='<div class="empty">No parked domains found.</div>'; return; }
+  el.innerHTML = `<table class="table"><thead><tr><th>Account</th><th>Parked Domain</th><th>Points To</th><th>Created</th></tr></thead><tbody>
+    ${rows.map(d=>`<tr>
+      <td>${d.account_username}</td>
+      <td><strong>${d.domain}</strong></td>
+      <td style="color:var(--text-muted);font-size:.82rem">${d.main_domain}</td>
+      <td style="font-size:.78rem">${(d.created_at||'').split('T')[0]}</td>
+    </tr>`).join('')}
+  </tbody></table>`;
 };

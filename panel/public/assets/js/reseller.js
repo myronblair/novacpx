@@ -325,6 +325,11 @@ const rNavGroups = [
     { id: 'packages', label: 'Packages',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
   ]},
+  { id: 'subdomains', label: 'Subdomains',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/><path d="M18 15l3 3-3 3"/></svg>' },
+    { id: 'parked-domains', label: 'Parked Domains',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>' },
+  ]},
   { label: 'DNS', items: [
     { id: 'dns', label: 'DNS Zones',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>' },
@@ -361,6 +366,8 @@ function renderRNav() {
         document.getElementById('sidebar-overlay')?.classList.remove('open');
         document.body.style.overflow = '';
       }
+      const extras = {'subdomains': window.resellerSubdomains, 'parked-domains': window.resellerParked};
+      if (extras[link.dataset.page]) { extras[link.dataset.page](); _rActivePage = link.dataset.page; return; }
       resellerNav(link.dataset.page);
     });
   });
@@ -698,4 +705,55 @@ window.rWlSave = async () => {
   Nova.loadingDone();
   Nova.toast(r?.success ? 'Branding saved — reload to see changes' : (r?.message || 'Save failed'),
              r?.success ? 'success' : 'error');
+};
+
+// ══ RESELLER SUBDOMAINS PAGE ══════════════════════════════════════════════
+window.resellerSubdomains = async function() {
+  document.getElementById('page-title').textContent = 'Subdomains';
+  document.getElementById('page-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <p class="text-muted" style="margin:0">Subdomains across your customers' accounts.</p>
+    </div>
+    <div class="card"><div id="rsub-list"><div class="loading">Loading…</div></div></div>`;
+  const el = document.getElementById('rsub-list');
+  const res = await Nova.api('accounts','list',{params:{per_page:200}});
+  if (!res?.success || !res.data?.length) { el.innerHTML='<div class="empty">No accounts</div>'; return; }
+  let rows = [];
+  for (const acct of res.data) {
+    const dr = await Nova.api('domains','list',{params:{account_id:acct.id}});
+    if (!dr?.success) continue;
+    dr.data.filter(d=>d.type==='subdomain').forEach(d=>rows.push({...d,acct_username:acct.username}));
+  }
+  if (!rows.length) { el.innerHTML='<div class="empty">No subdomains found.</div>'; return; }
+  el.innerHTML = `<table class="table"><thead><tr><th>Account</th><th>Subdomain</th><th>SSL</th><th>Created</th></tr></thead><tbody>
+    ${rows.map(d=>`<tr><td>${d.acct_username}</td><td><strong>${d.domain}</strong></td>
+      <td>${d.ssl_enabled?'<span class="badge badge-green">SSL</span>':'—'}</td>
+      <td style="font-size:.78rem">${(d.created_at||'').split('T')[0]}</td></tr>`).join('')}
+  </tbody></table>`;
+};
+
+// ══ RESELLER PARKED DOMAINS PAGE ══════════════════════════════════════════
+window.resellerParked = async function() {
+  document.getElementById('page-title').textContent = 'Parked Domains';
+  document.getElementById('page-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <p class="text-muted" style="margin:0">Parked domains across your customers' accounts.</p>
+    </div>
+    <div class="card"><div id="rpark-list"><div class="loading">Loading…</div></div></div>`;
+  const el = document.getElementById('rpark-list');
+  const res = await Nova.api('accounts','list',{params:{per_page:200}});
+  if (!res?.success || !res.data?.length) { el.innerHTML='<div class="empty">No accounts</div>'; return; }
+  let rows = [];
+  for (const acct of res.data) {
+    const dr = await Nova.api('domains','list',{params:{account_id:acct.id}});
+    if (!dr?.success) continue;
+    const main = dr.data.find(d=>d.type==='main');
+    dr.data.filter(d=>d.type==='parked'||d.type==='alias').forEach(d=>rows.push({...d,acct_username:acct.username,main_domain:main?.domain||acct.domain}));
+  }
+  if (!rows.length) { el.innerHTML='<div class="empty">No parked domains found.</div>'; return; }
+  el.innerHTML = `<table class="table"><thead><tr><th>Account</th><th>Parked Domain</th><th>Points To</th><th>Created</th></tr></thead><tbody>
+    ${rows.map(d=>`<tr><td>${d.acct_username}</td><td><strong>${d.domain}</strong></td>
+      <td style="color:var(--text-muted);font-size:.82rem">${d.main_domain}</td>
+      <td style="font-size:.78rem">${(d.created_at||'').split('T')[0]}</td></tr>`).join('')}
+  </tbody></table>`;
 };

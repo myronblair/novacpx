@@ -937,8 +937,13 @@ const navGroups = [
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>' },
   ]},
   { label: 'Hosting', items: [
-    { id: 'domains', label: 'Domains',
+        { id: 'domains', label: 'Domains',
+
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>' },
+    { id: 'subdomains', label: 'Subdomains',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/><path d="M18 15l3 3-3 3"/></svg>' },
+    { id: 'parked-domains', label: 'Parked Domains',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>' },
     { id: 'email', label: 'Email',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' },
     { id: 'databases', label: 'Databases',
@@ -1003,6 +1008,11 @@ window.userNav = (page) => {
   _activePage = page;
   renderNav();
   const allItems = navGroups.flatMap(g => g.items);
+  // Extra pages not in nav groups
+  const extraPages = {
+    'subdomains':     userSubdomains,
+    'parked-domains': userParked,
+  };
   const item = allItems.find(n => n.id === page);
   const titleEl = document.getElementById('page-title');
   if (titleEl && item) titleEl.textContent = item.label;
@@ -1275,3 +1285,111 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderNav();
   window.userNav('dashboard');
 });
+
+// ══ SUBDOMAINS PAGE ════════════════════════════════════════════════════════
+async function userSubdomains() {
+  Nova.loadPage('subdomains', 'Subdomains', `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <p class="text-muted" style="margin:0">Create subdomains on your hosted domains.</p>
+      <button class="btn btn-primary btn-sm" onclick="addSubdomain()">+ Add Subdomain</button>
+    </div>
+    <div class="card"><div id="subdomains-list"><div class="loading">Loading…</div></div></div>`);
+  loadSubdomainsList();
+}
+
+async function loadSubdomainsList() {
+  const el = document.getElementById('subdomains-list');
+  if (!el) return;
+  const res = await Nova.api('domains', 'list');
+  if (!res?.success) { el.innerHTML = '<div class="empty">No domains found</div>'; return; }
+  const rows = res.data.filter(d => d.type === 'subdomain');
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty">No subdomains yet. Click <strong>+ Add Subdomain</strong> to create one.</div>';
+    return;
+  }
+  el.innerHTML = `<table class="table"><thead><tr>
+    <th>Subdomain</th><th>Document Root</th><th>SSL</th><th>Created</th><th>Actions</th>
+  </tr></thead><tbody>${rows.map(d => `<tr>
+    <td><strong>${d.domain}</strong></td>
+    <td style="font-size:.78rem;color:var(--text-muted)">${d.document_root||'—'}</td>
+    <td>${d.ssl_enabled ? Nova.badge('SSL','green') : '<span class="text-muted" style="font-size:.78rem">None</span>'}</td>
+    <td style="font-size:.78rem">${d.created_at?.split('T')[0]||d.created_at||''}</td>
+    <td><button class="btn btn-xs btn-danger" onclick="removeDomainEntry(${d.id},'${d.domain}')">Remove</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+window.userSubdomains = userSubdomains;
+
+window.addSubdomain = () => {
+  Nova.modal('Add Subdomain', `
+    <div class="form-group">
+      <label class="form-label">Subdomain prefix</label>
+      <input id="sd-prefix" class="form-control" placeholder="e.g. blog">
+      <small class="text-muted">Creates <em>blog.yourdomain.com</em></small>
+    </div>`, `<button class="btn btn-primary" onclick="submitSubdomain()">Create</button>`);
+};
+
+window.submitSubdomain = async () => {
+  const sub = document.getElementById('sd-prefix')?.value?.trim();
+  if (!sub) { Nova.toast('Enter a subdomain prefix','error'); return; }
+  const res = await Nova.api('domains', 'add-subdomain', { method: 'POST', body: { subdomain: sub } });
+  if (res?.success) { Nova.toast(res.message,'success'); document.querySelector('.modal-overlay')?.remove(); loadSubdomainsList(); }
+  else Nova.toast(res?.message||'Failed','error');
+};
+
+window.removeDomainEntry = (id, domain) => {
+  Nova.confirm(`Remove ${domain}? This will delete its vhost and directory.`, async () => {
+    const res = await Nova.api('domains','remove',{method:'POST',body:{id}});
+    if (res?.success) { Nova.toast('Removed','success'); loadSubdomainsList(); loadParkedList(); }
+    else Nova.toast(res?.message||'Failed','error');
+  }, true);
+};
+
+// ══ PARKED DOMAINS PAGE ════════════════════════════════════════════════════
+async function userParked() {
+  Nova.loadPage('parked-domains', 'Parked Domains', `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <p class="text-muted" style="margin:0">Parked domains point additional domains to your account's main content.</p>
+      <button class="btn btn-primary btn-sm" onclick="addParked()">+ Park Domain</button>
+    </div>
+    <div class="card"><div id="parked-list"><div class="loading">Loading…</div></div></div>`);
+  loadParkedList();
+}
+
+async function loadParkedList() {
+  const el = document.getElementById('parked-list');
+  if (!el) return;
+  const res = await Nova.api('domains','list');
+  if (!res?.success) { el.innerHTML = '<div class="empty">No domains</div>'; return; }
+  const rows = res.data.filter(d => d.type === 'parked' || d.type === 'alias');
+  const main = res.data.find(d => d.type === 'main');
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty">No parked domains yet. Click <strong>+ Park Domain</strong> to add one.</div>`;
+    return;
+  }
+  el.innerHTML = `<table class="table"><thead><tr>
+    <th>Parked Domain</th><th>Points To</th><th>Created</th><th>Actions</th>
+  </tr></thead><tbody>${rows.map(d=>`<tr>
+    <td><strong>${d.domain}</strong></td>
+    <td style="font-size:.78rem;color:var(--text-muted)">${main?.domain||'—'}</td>
+    <td style="font-size:.78rem">${d.created_at?.split('T')[0]||d.created_at||''}</td>
+    <td><button class="btn btn-xs btn-danger" onclick="removeDomainEntry(${d.id},'${d.domain}')">Remove</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+window.userParked = userParked;
+
+window.addParked = () => {
+  Nova.modal('Park a Domain', `
+    <div class="form-group">
+      <label class="form-label">Domain name</label>
+      <input id="pd-domain" class="form-control" placeholder="e.g. example.com">
+      <small class="text-muted">This domain will serve the same content as your primary domain.</small>
+    </div>`, `<button class="btn btn-primary" onclick="submitParked()">Park Domain</button>`);
+};
+
+window.submitParked = async () => {
+  const domain = document.getElementById('pd-domain')?.value?.trim();
+  if (!domain) { Nova.toast('Enter a domain','error'); return; }
+  const res = await Nova.api('domains','add-alias',{method:'POST',body:{domain}});
+  if (res?.success) { Nova.toast(res.message,'success'); document.querySelector('.modal-overlay')?.remove(); loadParkedList(); }
+  else Nova.toast(res?.message||'Failed','error');
+};
