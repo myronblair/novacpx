@@ -390,11 +390,13 @@ BASH;
             if ($active) $services[$svc] = $active;
         }
 
-        // Persist to DB for history
-        $db->execute(
-            "INSERT INTO server_stats (cpu_usage,ram_usage,disk_usage,load_avg) VALUES (?,?,?,?)",
-            [$cpuPct, $ramPct, $diskPct, $load[0]]
-        );
+        // Persist to DB for history (non-fatal — don't let lock errors kill the stats response)
+        try {
+            $db->execute(
+                "INSERT INTO server_stats (cpu_usage,ram_usage,disk_usage,load_avg) VALUES (?,?,?,?)",
+                [$cpuPct, $ramPct, $diskPct, $load[0]]
+            );
+        } catch (Throwable $_) {}
 
         Response::success([
             'cpu'       => ['pct' => $cpuPct, 'load' => $load],
