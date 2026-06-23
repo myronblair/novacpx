@@ -75,7 +75,7 @@
   // ── Page definitions ───────────────────────────────────────────────────────
   const pages = {
     dashboard,
-    'server-status': serverStatus,
+    'server-status': dashboard,
     accounts,
     resellers,
     packages,
@@ -113,12 +113,14 @@
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
   async function dashboard() {
-    const [stats, version] = await Promise.all([
+    const [stats, version, histRes] = await Promise.all([
       Nova.api('system', 'stats'),
       Nova.api('system', 'version'),
+      Nova.api('stats', 'server'),
     ]);
-    const s = stats?.data || {};
-    const v = version?.data || {};
+    const s    = stats?.data   || {};
+    const v    = version?.data || {};
+    const hist = histRes?.data?.history || [];
 
     document.getElementById('server-ip').textContent = '';
 
@@ -182,53 +184,24 @@
       </div>
     </div>
   </div>
+</div>
+
+<div class="card" style="margin-top:1.5rem">
+  <div class="card-header">
+    <span class="card-title">24-Hour History</span>
+    <span class="text-muted" style="font-size:.8rem;margin-left:.5rem">${hist.length} samples</span>
+    <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="adminPage('dashboard')">&#x21BB;</button>
+  </div>
+  <div class="card-body">
+    ${hist.length === 0
+      ? '<p class="text-muted" style="text-align:center;padding:2rem">No history yet — collected every 5 minutes.</p>'
+      : '<canvas id="dash-hist-chart" height="70"></canvas>'}
+  </div>
 </div>`;
+    setTimeout(()=>{const c=document.getElementById('dash-hist-chart');if(!c||!hist.length)return;if(window.Chart){initStatsChart(c,hist);}else{const s2=document.createElement('script');s2.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';s2.onload=()=>initStatsChart(c,hist);document.head.appendChild(s2);}},150);
   }
 
   // ── Server Status ──────────────────────────────────────────────────────────
-  async function serverStatus() {
-    const [liveRes, histRes] = await Promise.all([
-      Nova.api('system', 'stats'),
-      Nova.api('stats', 'server'),
-    ]);
-    const s    = liveRes?.data || {};
-    const hist = histRes?.data?.history || [];
-
-    const html = `
-<div class="page-header"><h2 class="page-title">Server Status</h2>
-  <button class="btn btn-ghost btn-sm" onclick="adminPage('server-status')">↻ Refresh</button>
-</div>
-<div class="stats-grid" style="margin-bottom:1.5rem">
-  <div class="stat-card"><div class="stat-label">CPU</div><div class="stat-value ${(s.cpu?.pct||0)>80?'stat-red':'stat-green'}">${s.cpu?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.cpu?.pct||0)}</div></div>
-  <div class="stat-card"><div class="stat-label">RAM</div><div class="stat-value ${(s.ram?.pct||0)>80?'stat-red':'stat-blue'}">${s.ram?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.ram?.pct||0)}</div></div>
-  <div class="stat-card"><div class="stat-label">Disk</div><div class="stat-value ${(s.disk?.pct||0)>85?'stat-red':'stat-yellow'}">${s.disk?.pct??0}%</div><div class="mt-1">${Nova.progressBar(s.disk?.pct||0)}</div></div>
-  <div class="stat-card"><div class="stat-label">Load Avg</div><div class="stat-value" style="font-size:1rem;padding-top:.4rem">${(s.cpu?.load||[0]).map(v=>v.toFixed(2)).join(' / ')}</div><div class="stat-sub">Uptime: ${s.uptime||'—'}</div></div>
-</div>
-<div class="card">
-  <div class="card-header"><span class="card-title">24-Hour History</span><span class="text-muted" style="font-size:.8rem">${hist.length} samples</span></div>
-  <div class="card-body">
-    ${hist.length === 0
-      ? '<p class="text-muted" style="text-align:center;padding:2rem">No history yet — stats are collected every 5 minutes.<br>Check that the collector cron is running: <code>*/5 * * * * root /usr/bin/php /opt/novacpx/bin/collect-stats.php</code></p>'
-      : '<canvas id="stats-chart" height="80"></canvas>'}
-  </div>
-</div>`;
-
-    // Can't return html and async render chart — use a trick: render then init chart
-    setTimeout(() => {
-      const canvas = document.getElementById('stats-chart');
-      if (!canvas || !hist.length) return;
-      if (!window.Chart) {
-        const s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
-        s.onload = () => initStatsChart(canvas, hist);
-        document.head.appendChild(s);
-      } else {
-        initStatsChart(canvas, hist);
-      }
-    }, 100);
-
-    return html;
-  }
 
   function initStatsChart(canvas, hist) {
     const labels = hist.map(r => {
@@ -2384,8 +2357,6 @@ ${ips.length ? `
     const actE  = engRes?.data?.active_engine || 'mysql';
     const dbs   = dbRes?.data || [];
     const tools = toolsRes?.data || {};
-    const pgDbs = (dbs||[]).filter(d => d.db_type === 'pgsql' || d.db_type === 'postgresql');
-    const myDbs = (dbs||[]).filter(d => !d.db_type || d.db_type === 'mysql' || d.db_type === 'mariadb');
 
     const engineCard = (id, label, icon) => {
       const e = eng[id] || {};
@@ -2417,7 +2388,6 @@ ${ips.length ? `
       const t = tools[id] || {};
       const statusColor = t.installed ? 'green' : 'default';
       const statusText  = t.installed ? 'Installed' : 'Not Installed';
-      const openUrl     = t.url || url;
       return `
 <div class="card">
   <div class="card-header">
@@ -2432,7 +2402,7 @@ ${ips.length ? `
         : `
         <button class="btn btn-xs" onclick="dbToolAction('${id}','reinstall')">Reinstall</button>
         <button class="btn btn-xs btn-danger" onclick="dbToolAction('${id}','remove')">Remove</button>
-        <a href="${openUrl}" target="_blank" class="btn btn-xs btn-ghost">Open ↗</a>`
+        <a href="${url}" target="_blank" class="btn btn-xs btn-ghost">Open ↗</a>`
       }
     </div>
   </div>
@@ -2481,28 +2451,16 @@ ${dbs.map(d=>`<tr>
   <div class="card-header"><span class="card-title">Database Admin Tools</span></div>
   <div class="card-body" style="padding-bottom:.5rem">
     <div class="grid-2 gap-2">
-      ${toolCard('phpmyadmin', 'phpMyAdmin',         '🐬', `http://${location.hostname}/phpmyadmin`)}
-      ${toolCard('adminer',    'Adminer (MySQL/PG)', '🗄️', `http://${location.hostname}/adminer.php`)}
-      ${toolCard('pgadmin',    'pgAdmin 4',          '🐘', `http://${location.hostname}/pgadmin4`)}
+      ${toolCard('phpmyadmin', 'phpMyAdmin', '🛢', `http://${location.hostname}/phpmyadmin`)}
+      ${toolCard('pgadmin',    'pgAdmin 4',  '🐘', `http://${location.hostname}/pgadmin4`)}
+      ${toolCard('adminer',    'Adminer',    '🗄️',  `http://${location.hostname}/adminer.php`)}
     </div>
   </div>
 </div>
 
-<div class="card" style="margin-bottom:1.5rem">
-  <div class="card-header">
-    <span class="card-title">MySQL / MariaDB Databases</span>
-    <span class="text-muted" style="font-size:.8rem;margin-left:.5rem">${myDbs.length} databases</span>
-  </div>
-  ${dbTable}
-</div>
-
 <div class="card">
-  <div class="card-header">
-    <span class="card-title">&#x1F418; PostgreSQL Databases</span>
-    <span class="text-muted" style="font-size:.8rem;margin-left:.5rem">${pgDbs.length} databases</span>
-    <a href="/adminer.php?pgsql=" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:auto">Open in Adminer &#x2197;</a>
-  </div>
-  <div class="card-body text-muted">No PostgreSQL databases in NovaCPX yet. Use <a href="/adminer.php?pgsql=" target="_blank">Adminer</a> to manage PostgreSQL directly.</div>
+  <div class="card-header"><span class="card-title">All Databases</span><span class="text-muted" style="font-size:.8rem">${dbs.length} total</span></div>
+  ${dbTable}
 </div>`;
   }
 
