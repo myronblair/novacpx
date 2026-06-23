@@ -50,9 +50,10 @@ match ($action) {
             "UPDATE packages SET name=?, disk_mb=?, bandwidth_mb=?, max_domains=?, max_subdomains=?,
              max_addon_domains=?, max_parked_domains=?, max_email=?, max_ftp=?, max_databases=?, php_version=?, ssl_enabled=? WHERE id=?",
             [
-                $body['name'], $body['disk_mb'], $body['bandwidth_mb'], $body['max_domains'],
-                $body['max_subdomains'], $body['max_addon_domains'], $body['max_parked_domains'],
-                $body['max_email'], $body['max_ftp'], $body['max_databases'],
+                $body['name'] ?? '', $body['disk_mb'] ?? 0, $body['bandwidth_mb'] ?? 0,
+                $body['max_domains'] ?? 0, $body['max_subdomains'] ?? 0,
+                $body['max_addon_domains'] ?? 0, $body['max_parked_domains'] ?? 0,
+                $body['max_email'] ?? 0, $body['max_ftp'] ?? 0, $body['max_databases'] ?? 0,
                 $body['php_version'] ?? '8.3', $body['ssl_enabled'] ?? 1, $id,
             ]
         );
