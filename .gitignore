@@ -8,3 +8,5 @@ VERSION
 node_modules/
 .DS_Store
 Thumbs.db
+panel/public/adminer.php
+panel/public/adminer.php
