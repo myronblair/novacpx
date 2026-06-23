@@ -252,11 +252,10 @@ SH;
         }
         if (!is_dir($dir)) throw new RuntimeException("Failed to create stack directory: {$dir}");
         file_put_contents("{$dir}/docker-compose.yml", $composeYaml);
-        $this->db->execute(
+        $id = (int)$this->db->insert(
             "INSERT INTO docker_compose_stacks (account_id, name, stack_dir, compose_file, status) VALUES (?,?,?,?,'pending')",
             [$accountId, $safeName, $dir, $composeYaml]
         );
-        $id = $this->db->fetchOne("SELECT LAST_INSERT_ID() as id")['id'];
         novacpx_log('info', "DockerManager: created stack {$safeName}");
         return ['id' => $id, 'dir' => $dir];
     }
@@ -291,7 +290,10 @@ SH;
         $this->db->execute(
             "INSERT INTO docker_quotas (user_id, max_containers, max_memory_mb, max_cpus)
              VALUES (?,?,?,?)
-             ON DUPLICATE KEY UPDATE max_containers=VALUES(max_containers), max_memory_mb=VALUES(max_memory_mb), max_cpus=VALUES(max_cpus)",
+             ON CONFLICT(user_id) DO UPDATE SET
+               max_containers=excluded.max_containers,
+               max_memory_mb=excluded.max_memory_mb,
+               max_cpus=excluded.max_cpus",
             [$userId, $maxContainers, $maxMemoryMb, $maxCpus]
         );
     }

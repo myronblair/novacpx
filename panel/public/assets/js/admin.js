@@ -124,7 +124,7 @@
 
     document.getElementById('server-ip').textContent = '';
 
-    return `
+    const html = `
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-label">CPU Usage</div>
@@ -198,7 +198,9 @@
       : '<canvas id="dash-hist-chart" height="70"></canvas>'}
   </div>
 </div>`;
+    // setTimeout BEFORE return so it actually executes (after return is dead code)
     setTimeout(()=>{const c=document.getElementById('dash-hist-chart');if(!c||!hist.length)return;if(window.Chart){initStatsChart(c,hist);}else{const s2=document.createElement('script');s2.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';s2.onload=()=>initStatsChart(c,hist);document.head.appendChild(s2);}},150);
+    return html;
   }
 
   // ── Server Status ──────────────────────────────────────────────────────────

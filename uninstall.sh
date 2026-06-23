@@ -70,8 +70,12 @@ log "Cron jobs"
 [[ -d /etc/postfix ]] && cp -a /etc/postfix "$BACKUP_DIR/configs/postfix" 2>/dev/null || true
 [[ -d /etc/dovecot ]] && cp -a /etc/dovecot "$BACKUP_DIR/configs/dovecot" 2>/dev/null || true
 
-# Compress backup
-tar -czf "$BACKUP_ARCHIVE" -C "$(dirname $BACKUP_DIR)" "$(basename $BACKUP_DIR)" 2>/dev/null
+# Compress backup — abort if tar fails rather than silently delete unbackedup files
+tar -czf "$BACKUP_ARCHIVE" -C "$(dirname $BACKUP_DIR)" "$(basename $BACKUP_DIR)" || {
+    echo -e "${RED}[✗]${NC} Backup archive creation FAILED. Uninstall aborted to protect your data."
+    echo "    Staging dir preserved at: $BACKUP_DIR"
+    exit 1
+}
 rm -rf "$BACKUP_DIR"
 BACKUP_SIZE=$(du -sh "$BACKUP_ARCHIVE" | cut -f1)
 log "Backup archive: $BACKUP_ARCHIVE ($BACKUP_SIZE)"
@@ -131,7 +135,8 @@ systemctl reload php8.3-fpm 2>/dev/null || true
 step "Removing systemd units"
 for svc in novacpx-web; do
     systemctl stop "$svc" 2>/dev/null; systemctl disable "$svc" 2>/dev/null
-    rm -f "/etc/systemd/system/${svc}.service" "/etc/systemd/system/${svc}.service.d"
+    rm -f "/etc/systemd/system/${svc}.service"
+    rm -rf "/etc/systemd/system/${svc}.service.d"
     log "Removed: $svc"
 done
 systemctl daemon-reload

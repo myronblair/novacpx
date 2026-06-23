@@ -51,7 +51,10 @@ if [[ "$SKIP_GIT" != "--no-git" ]] && [[ -n "$PAT" ]]; then
     cd /opt/novacpx-src 2>/dev/null || { warn "novacpx-src not found, skipping"; true; }
     if [[ -d /opt/novacpx-src/.git ]]; then
         git remote set-url origin "$NOVACPX_REPO" 2>/dev/null
-        git pull origin main 2>&1 | tail -3 | while read l; do log "  $l"; done
+        # Capture exit code separately — pipeline masks it via while loop
+        GIT_OUT=$(git pull origin main 2>&1) && GIT_OK=1 || GIT_OK=0
+        echo "$GIT_OUT" | tail -3 | while read l; do log "  $l"; done
+        [[ "$GIT_OK" == "0" ]] && { warn "git pull failed — deploying existing local code"; }
         rsync -a --delete --exclude=".git" --exclude="api/config.php" \
           /opt/novacpx-src/panel/public/ /srv/novacpx/public/ 2>/dev/null
         rsync -a --delete --exclude="config.php" \
@@ -79,24 +82,8 @@ fi
 log "4. Fixing webacct hosting account..."
 DB=/var/lib/novacpx/panel.db
 
-# Clean orphaned user record (user exists in DB but Linux user doesn't)
-if id "webacct" &>/dev/null; then
-    ok "webacct Linux user exists"
-else
-    warn "webacct Linux user missing — cleaning DB and recreating..."
-    # Remove orphaned DB record
-    sqlite3 "$DB" "DELETE FROM users WHERE username='webacct' AND id NOT IN (SELECT user_id FROM accounts WHERE username='webacct');" 2>/dev/null || true
-    sqlite3 "$DB" "DELETE FROM users WHERE username='webacct' AND role='user';" 2>/dev/null || true
-
-    # Create via PHP
-    php8.3 /tmp/_nova_create_webacct.php >> "$LOG" 2>&1 || true
-fi
-
-# Ensure account exists in DB
-ACCT_EXISTS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM accounts WHERE username='webacct';" 2>/dev/null || echo "0")
-if [[ "$ACCT_EXISTS" == "0" ]]; then
-    warn "webacct account not in DB — creating..."
-    cat > /tmp/_nova_create_webacct.php << 'PHPEOF'
+# Write the PHP helper ONCE here, before any call to it
+cat > /tmp/_nova_create_webacct.php << 'PHPEOF'
 <?php
 define('NOVACPX_ROOT', '/srv/novacpx/public');
 define('NOVACPX_API', NOVACPX_ROOT.'/api');
@@ -118,6 +105,21 @@ $uid = (int)$db->insert(
 $r = AccountManager::create(['username'=>'webacct','domain'=>'web.orbishosting.com','password'=>'Joker1974!!!','user_id'=>$uid,'php_version'=>'8.3']);
 echo "Created: ".json_encode($r)."\n";
 PHPEOF
+
+# Clean orphaned user record (Linux user missing but DB record exists)
+if id "webacct" &>/dev/null; then
+    ok "webacct Linux user exists"
+else
+    warn "webacct Linux user missing — cleaning DB and recreating..."
+    sqlite3 "$DB" "DELETE FROM users WHERE username='webacct' AND id NOT IN (SELECT user_id FROM accounts WHERE username='webacct');" 2>/dev/null || true
+    sqlite3 "$DB" "DELETE FROM users WHERE username='webacct' AND role='user';" 2>/dev/null || true
+    php8.3 /tmp/_nova_create_webacct.php >> "$LOG" 2>&1 || true
+fi
+
+# Ensure account exists in DB
+ACCT_EXISTS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM accounts WHERE username='webacct';" 2>/dev/null || echo "0")
+if [[ "$ACCT_EXISTS" == "0" ]]; then
+    warn "webacct account not in DB — creating..."
     php8.3 /tmp/_nova_create_webacct.php >> "$LOG" 2>&1 && ok "Account created" || warn "Account creation failed — check log"
 fi
 
