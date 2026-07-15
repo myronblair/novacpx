@@ -133,7 +133,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >> "$LOG" 2>&1
 apt-get upgrade -y -qq >> "$LOG" 2>&1
 apt-get install -y -qq curl wget gnupg2 lsb-release ca-certificates \
-  software-properties-common apt-transport-https unzip git \
+  software-properties-common apt-transport-https zip unzip git \
   sudo cron logrotate ufw fail2ban sshpass sqlite3 >> "$LOG" 2>&1
 log "System packages updated"
 

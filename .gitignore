@@ -10,3 +10,4 @@ node_modules/
 Thumbs.db
 panel/public/adminer.php
 panel/public/adminer.php
+*.bak-*

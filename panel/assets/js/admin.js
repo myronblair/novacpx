@@ -98,6 +98,7 @@
     twofa,
     updates,
     backups,
+    'file-manager': fileManager,
     cloudflare,
     'server-options': serverOptions,
     notifications,
@@ -4618,4 +4619,279 @@ ${results.map(z=>`<tr>
   <td>${z.ok ? Nova.badge('OK','green') : Nova.badge('Mismatch','red')}</td>
 </tr>`).join('')}
 </tbody></table></div>`;
+};
+
+/* ── File Manager (admin: root filesystem access) ──────────────────────────
+ * Backed by /api/files/*. Admin sessions have no linked hosting account, so
+ * the endpoint's baseDir resolves to '/' — full filesystem path traversal,
+ * bounded only by the OS permissions of the PHP-FPM pool user (www-data).
+ */
+let _fmPath = '/';
+
+function fmBreadcrumb(path) {
+  const parts = path.split('/').filter(Boolean);
+  let acc = '';
+  const crumbs = [`<a href="#" onclick="fmNav('/');return false" style="color:var(--primary)">/</a>`];
+  for (const p of parts) {
+    acc += '/' + p;
+    const esc = acc.replace(/'/g, "\\'");
+    crumbs.push(`<a href="#" onclick="fmNav('${esc}');return false" style="color:var(--primary)">${Nova.escHtml(p)}</a>`);
+  }
+  return crumbs.join(' / ');
+}
+
+async function fmTableHtml(path) {
+  const res = await Nova.api('files', 'list', { params: { path } });
+  if (!res?.success) return `<div class="empty" style="padding:2rem">${Nova.escHtml(res?.message || 'Error loading directory')}</div>`;
+  const items = res.data.items || [];
+  const parent = path === '/' ? null : (path.replace(/\/[^/]+$/, '') || '/');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th style="width:2rem"></th><th>Name</th><th>Owner</th><th>Perms</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+    <tbody>
+      ${parent !== null ? `<tr><td></td><td colspan="6"><a href="#" onclick="fmNav('${parent.replace(/'/g, "\\'")}');return false" style="color:var(--primary)">.. (parent directory)</a></td></tr>` : ''}
+      ${items.map(f => {
+        const p = f.path.replace(/'/g, "\\'");
+        const nameEsc = Nova.escHtml(f.name);
+        return `<tr>
+        <td><input type="checkbox" class="fm-sel" value="${Nova.escHtml(f.path)}"></td>
+        <td>${f.type === 'dir'
+          ? `<a href="#" onclick="fmNav('${p}');return false" style="color:var(--sky)">📁 ${nameEsc}</a>${f.link ? ' <span class="text-muted text-sm">(symlink)</span>' : ''}`
+          : `📄 ${nameEsc}${f.link ? ' <span class="text-muted text-sm">(symlink)</span>' : ''}`}</td>
+        <td class="text-muted text-sm">${Nova.escHtml(f.owner)}:${Nova.escHtml(f.group)}</td>
+        <td><code style="font-size:.8rem">${f.perms}</code></td>
+        <td class="text-muted text-sm">${f.size || '—'}</td>
+        <td class="text-muted text-sm">${f.modified}</td>
+        <td style="display:flex;gap:.2rem;flex-wrap:wrap">
+          ${f.type === 'file' ? `<button class="btn btn-xs" onclick="fmEdit('${p}','${nameEsc}')">Edit</button>` : ''}
+          ${f.type === 'file' ? `<a class="btn btn-xs" href="/api/files/download?path=${encodeURIComponent(f.path)}">↓</a>` : ''}
+          ${f.type === 'file' && /\.(zip|tar|gz|tgz)$/i.test(f.name) ? `<button class="btn btn-xs" onclick="fmExtract('${p}')">Extract</button>` : ''}
+          <button class="btn btn-xs" onclick="fmRename('${p}','${nameEsc}')">Ren</button>
+          <button class="btn btn-xs" onclick="fmChmod('${p}','${f.perms}')">Perm</button>
+          <button class="btn btn-xs" onclick="fmChown('${p}','${Nova.escHtml(f.owner)}','${Nova.escHtml(f.group)}')">Own</button>
+          <button class="btn btn-xs btn-danger" onclick="fmDelete('${p}','${nameEsc}')">Del</button>
+        </td>
+      </tr>`;
+      }).join('')}
+      ${!items.length ? `<tr><td colspan="7" class="text-muted" style="text-align:center;padding:1.5rem">Empty directory</td></tr>` : ''}
+    </tbody>
+  </table></div>`;
+}
+
+async function fileManager() {
+  _fmPath = '/';
+  const tableHtml = await fmTableHtml(_fmPath);
+  return `
+<div class="page-header mb-3">
+  <h2 class="page-title">File Manager</h2>
+  <div style="display:flex;gap:.5rem">
+    <button class="btn btn-sm" onclick="fmMkdir()">+ Folder</button>
+    <button class="btn btn-sm" onclick="fmUpload()">↑ Upload</button>
+    <button class="btn btn-sm" onclick="fmCompressSelected()">🗜 Compress Selected</button>
+    <button class="btn btn-ghost btn-sm" onclick="fmRefresh()">↻ Refresh</button>
+  </div>
+</div>
+<div class="card mb-2">
+  <div style="padding:.6rem 1rem;border-bottom:1px solid var(--border);font-family:monospace;font-size:.82rem" id="fm-breadcrumb">${fmBreadcrumb(_fmPath)}</div>
+  <div id="fm-table-wrap">${tableHtml}</div>
+</div>
+<div id="fm-editor" style="display:none;margin-top:1rem"></div>
+<p class="text-muted text-sm">File operations run as the web server's own OS user (www-data) — some root-owned system files may be visible here but not readable or writable.</p>`;
+}
+
+window.fmNav = async (path) => {
+  _fmPath = path;
+  const wrap = document.getElementById('fm-table-wrap');
+  const crumb = document.getElementById('fm-breadcrumb');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading…</div>';
+  if (crumb) crumb.innerHTML = fmBreadcrumb(path);
+  wrap.innerHTML = await fmTableHtml(path);
+};
+window.fmRefresh = () => fmNav(_fmPath);
+
+window.fmEdit = async (path, name) => {
+  const res = await Nova.api('files', 'read', { params: { path } });
+  if (!res?.success) { Nova.toast(res?.message || 'Cannot read file', 'error'); return; }
+  const ed = document.getElementById('fm-editor');
+  ed.style.display = 'block';
+  ed.innerHTML = `<div class="card">
+    <div class="card-header"><span class="card-title">Editing: ${Nova.escHtml(name)}</span>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn btn-sm btn-primary" onclick="fmSave('${path.replace(/'/g, "\\'")}')">Save</button>
+        <button class="btn btn-sm" onclick="document.getElementById('fm-editor').style.display='none'">Close</button>
+      </div>
+    </div>
+    <textarea id="fm-code" style="width:100%;min-height:420px;font-family:monospace;font-size:.85rem;padding:1rem;background:var(--bg);color:var(--text);border:none;resize:vertical">${res.data.content.replace(/</g, '&lt;')}</textarea>
+  </div>`;
+  ed.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+window.fmSave = (path) => {
+  const content = document.getElementById('fm-code')?.value || '';
+  fmGuard(path, 'save', async (confirm_dangerous) => {
+    const res = await Nova.api('files', 'write', { method: 'POST', body: { path, content, confirm_dangerous } });
+    if (res?.success) Nova.toast('Saved', 'success'); else Nova.toast(res?.message || 'Save failed', 'error');
+  });
+};
+window.fmDelete = (path, name) => {
+  Nova.confirm(`Delete ${name}? This cannot be undone.`, () => {
+    fmGuard(path, 'delete', async (confirm_dangerous) => {
+      const res = await Nova.api('files', 'delete', { method: 'POST', body: { path, confirm_dangerous } });
+      if (res?.success) { Nova.toast('Deleted', 'success'); fmNav(_fmPath); }
+      else Nova.toast(res?.message, 'error');
+    });
+  }, true);
+};
+window.fmMkdir = () => {
+  Nova.modal('New Folder', `<div class="form-group"><label class="form-label">Folder Name</label><input id="fm-dname" class="form-control"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="fmSubmitMkdir()">Create</button>`);
+};
+window.fmSubmitMkdir = () => {
+  const name = document.getElementById('fm-dname')?.value || '';
+  if (!name) return;
+  const path = (_fmPath === '/' ? '' : _fmPath) + '/' + name;
+  document.querySelector('.modal-overlay')?.remove();
+  fmGuard(path, 'create a folder in', async (confirm_dangerous) => {
+    const res = await Nova.api('files', 'mkdir', { method: 'POST', body: { path, confirm_dangerous } });
+    if (res?.success) { Nova.toast('Created', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message, 'error');
+  });
+};
+window.fmRename = (path, name) => {
+  const dir = path.replace(/\/[^/]+$/, '') || '/';
+  Nova.modal('Rename', `<div class="form-group"><label class="form-label">New Name</label><input id="fm-newname" class="form-control" value="${Nova.escHtml(name)}"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="fmSubmitRename('${path.replace(/'/g, "\\'")}','${dir.replace(/'/g, "\\'")}')">Rename</button>`);
+};
+window.fmSubmitRename = (path, dir) => {
+  const newname = document.getElementById('fm-newname')?.value || '';
+  const to = (dir === '/' ? '' : dir) + '/' + newname;
+  document.querySelector('.modal-overlay')?.remove();
+  fmGuard([path, to], 'rename', async (confirm_dangerous) => {
+    const res = await Nova.api('files', 'rename', { method: 'POST', body: { from: path, to, confirm_dangerous } });
+    if (res?.success) { Nova.toast('Renamed', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message, 'error');
+  });
+};
+window.fmChmod = (path, current) => {
+  Nova.modal('Change Permissions', `<div class="form-group"><label class="form-label">Permissions (octal, e.g. 755)</label><input id="fm-perms" class="form-control" value="${current}" maxlength="4"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="fmSubmitChmod('${path.replace(/'/g, "\\'")}')">Update</button>`);
+};
+window.fmSubmitChmod = (path) => {
+  const perms = document.getElementById('fm-perms')?.value || '755';
+  document.querySelector('.modal-overlay')?.remove();
+  fmGuard(path, 'change permissions on', async (confirm_dangerous) => {
+    const res = await Nova.api('files', 'chmod', { method: 'POST', body: { path, perms, confirm_dangerous } });
+    if (res?.success) { Nova.toast('Updated', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message, 'error');
+  });
+};
+window.fmChown = (path, owner, group) => {
+  Nova.modal('Change Ownership', `
+    <div class="form-group"><label class="form-label">Owner (user)</label><input id="fm-owner" class="form-control" value="${Nova.escHtml(owner)}"></div>
+    <div class="form-group"><label class="form-label">Group</label><input id="fm-group" class="form-control" value="${Nova.escHtml(group)}"></div>
+    <p class="text-muted text-sm">Only succeeds if the web server's OS user has permission to change ownership to the target user/group.</p>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="fmSubmitChown('${path.replace(/'/g, "\\'")}')">Update</button>`);
+};
+window.fmSubmitChown = (path) => {
+  const owner = document.getElementById('fm-owner')?.value || '';
+  const group = document.getElementById('fm-group')?.value || '';
+  document.querySelector('.modal-overlay')?.remove();
+  fmGuard(path, 'change ownership on', async (confirm_dangerous) => {
+    const res = await Nova.api('files', 'chown', { method: 'POST', body: { path, owner, group, confirm_dangerous } });
+    if (res?.success) { Nova.toast('Ownership updated', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message || 'chown failed', 'error');
+  });
+};
+window.fmUpload = () => {
+  Nova.modal('Upload File', `<div class="form-group"><label class="form-label">Select File</label><input id="fm-upfile" type="file" class="form-control"></div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="fmSubmitUpload()">Upload</button>`);
+};
+window.fmSubmitUpload = () => {
+  const fileInput = document.getElementById('fm-upfile');
+  if (!fileInput?.files[0]) return;
+  document.querySelector('.modal-overlay')?.remove();
+  fmGuard(_fmPath, 'upload a file into', async (confirm_dangerous) => {
+    const fd = new FormData();
+    fd.append('file', fileInput.files[0]);
+    fd.append('path', _fmPath);
+    fd.append('confirm_dangerous', confirm_dangerous ? '1' : '');
+    const res = await fetch(`/api/files/upload?path=${encodeURIComponent(_fmPath)}`, { method: 'POST', credentials: 'include', body: fd }).then(r => r.json());
+    if (res?.success) { Nova.toast('Uploaded', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message || 'Upload failed', 'error');
+  });
+};
+window.fmExtract = (path) => {
+  Nova.confirm(`Extract this archive into the current directory?`, () => {
+    fmGuard(_fmPath, 'extract an archive into', async (confirm_dangerous) => {
+      const res = await Nova.api('files', 'extract', { method: 'POST', body: { path, dest: _fmPath, confirm_dangerous } });
+      if (res?.success) { Nova.toast('Extracted', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message, 'error');
+    });
+  });
+};
+window.fmCompressSelected = () => {
+  const sel = Array.from(document.querySelectorAll('.fm-sel:checked')).map(c => c.value);
+  if (!sel.length) { Nova.toast('Select at least one file or folder first', 'error'); return; }
+  window._fmCompressPaths = sel;
+  Nova.modal('Compress Selected', `<div class="form-group"><label class="form-label">Archive Name</label><input id="fm-arcname" class="form-control" value="archive.zip"></div>
+    <p class="text-muted text-sm">${sel.length} item(s) selected</p>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" onclick="fmSubmitCompress()">Compress</button>`);
+};
+window.fmSubmitCompress = () => {
+  const paths = window._fmCompressPaths || [];
+  const name = document.getElementById('fm-arcname')?.value || 'archive.zip';
+  const dest = (_fmPath === '/' ? '' : _fmPath) + '/' + name;
+  document.querySelector('.modal-overlay')?.remove();
+  fmGuard(dest, 'create an archive in', async (confirm_dangerous) => {
+    const res = await Nova.api('files', 'compress', { method: 'POST', body: { paths, dest, confirm_dangerous } });
+    if (res?.success) { Nova.toast('Archive created', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message, 'error');
+  });
+};
+
+/* ── File Manager: system/security-critical path guard ─────────────────────
+ * Mirrors the server-side zone list in files.php's is_dangerous_path(). This
+ * client-side copy is only for showing the warning early — the server enforces
+ * it regardless (rejects with dangerous_path:true unless confirm_dangerous is set),
+ * so this can't be bypassed by skipping the modal.
+ */
+const FM_DANGEROUS_ZONES = ['/etc','/boot','/root','/sys','/proc','/dev','/run',
+  '/lib','/lib64','/usr/lib','/usr/lib64','/bin','/sbin','/usr/bin','/usr/sbin','/var/lib','/snap'];
+
+function fmIsDangerous(path) {
+  return FM_DANGEROUS_ZONES.some(z => path === z || path.startsWith(z + '/'));
+}
+
+// Wraps an action: if any of the given paths fall in a dangerous zone, shows a warning
+// modal requiring a checkbox + typed "CONFIRM" before calling doIt(true). Otherwise
+// calls doIt(false) immediately. doIt receives the confirm_dangerous flag to include in the API body.
+function fmGuard(paths, actionLabel, doIt) {
+  const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
+  const hit = list.find(fmIsDangerous);
+  if (!hit) { doIt(false); return; }
+  window._fmGuardCallback = () => doIt(true);
+  Nova.modal('⚠️ System File Warning', `
+    <p style="color:#ef4444;font-weight:600;margin-bottom:.5rem">You are about to ${Nova.escHtml(actionLabel)} a path in a system/security-critical location:</p>
+    <p style="font-family:monospace;background:var(--bg);padding:.5rem .75rem;border-radius:4px;font-size:.85rem">${Nova.escHtml(hit)}</p>
+    <p class="text-muted text-sm" style="margin-top:.75rem">Editing, deleting, or changing permissions/ownership outside the web server's own files (www-data) can break running services, lock out access to this server, or open a security hole. This is not easily undone.</p>
+    <div class="form-group" style="margin-top:1rem">
+      <label style="display:flex;gap:.5rem;align-items:center;font-weight:normal">
+        <input type="checkbox" id="fm-danger-ack" style="width:auto">
+        I understand the risk and want to proceed anyway
+      </label>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Type <code>CONFIRM</code> to continue</label>
+      <input id="fm-danger-type" class="form-control" placeholder="CONFIRM" autocomplete="off">
+    </div>`,
+    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-danger" onclick="fmGuardProceed()">Proceed Anyway</button>`
+  );
+}
+window.fmGuardProceed = () => {
+  const ack   = document.getElementById('fm-danger-ack')?.checked;
+  const typed = (document.getElementById('fm-danger-type')?.value || '').trim();
+  if (!ack || typed !== 'CONFIRM') { Nova.toast('Check the box and type CONFIRM exactly to proceed', 'error'); return; }
+  document.querySelector('.modal-overlay')?.remove();
+  const cb = window._fmGuardCallback;
+  window._fmGuardCallback = null;
+  if (cb) cb();
 };
