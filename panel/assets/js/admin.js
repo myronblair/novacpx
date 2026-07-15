@@ -4861,6 +4861,18 @@ window.fmSubmitUpload = () => {
       if (pctEl) pctEl.textContent = pct + '%';
       if (bytesEl) bytesEl.textContent = fmFormatBytes(e.loaded) + ' / ' + fmFormatBytes(e.total);
     });
+    // Reaching 100% here only means the browser finished SENDING the bytes — the
+    // server (nginx + PHP) still has to receive/move the file, which for large
+    // files can take a genuine extra stretch with no further upload events. Make
+    // that explicit so it doesn't look frozen.
+    xhr.upload.addEventListener('load', () => {
+      const pctEl = document.getElementById('fm-upload-pct');
+      const bytesEl = document.getElementById('fm-upload-bytes');
+      const bar = document.getElementById('fm-upload-bar');
+      if (bar) bar.style.background = '#f59e0b';
+      if (pctEl) pctEl.textContent = 'Finishing up…';
+      if (bytesEl) bytesEl.textContent = 'Upload sent — waiting for the server to finish saving the file. Large files can take a few extra minutes here. Do not close or reload this page.';
+    });
 
     xhr.onload = () => {
       let res = null;
