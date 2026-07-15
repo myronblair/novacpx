@@ -4802,21 +4802,84 @@ window.fmSubmitChown = (path) => {
   });
 };
 window.fmUpload = () => {
-  Nova.modal('Upload File', `<div class="form-group"><label class="form-label">Select File</label><input id="fm-upfile" type="file" class="form-control"></div>`,
-    `<button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-     <button class="btn btn-primary" onclick="fmSubmitUpload()">Upload</button>`);
+  Nova.modal('Upload File', `
+    <div id="fm-upload-form">
+      <div class="form-group"><label class="form-label">Select File</label><input id="fm-upfile" type="file" class="form-control"></div>
+    </div>
+    <div id="fm-upload-progress" style="display:none">
+      <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.35rem">
+        <span id="fm-upload-filename"></span>
+        <span id="fm-upload-pct">0%</span>
+      </div>
+      <div style="background:var(--bg);border-radius:4px;height:10px;overflow:hidden">
+        <div id="fm-upload-bar" style="background:var(--primary,#6366f1);height:100%;width:0%;transition:width .2s"></div>
+      </div>
+      <div id="fm-upload-bytes" class="text-muted text-sm" style="margin-top:.35rem"></div>
+    </div>`,
+    `<button class="btn btn-ghost" id="fm-upload-cancel-btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+     <button class="btn btn-primary" id="fm-upload-go-btn" onclick="fmSubmitUpload()">Upload</button>`);
 };
+
+function fmFormatBytes(n) {
+  if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
+  if (n >= 1048576)    return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024)       return (n / 1024).toFixed(1) + ' KB';
+  return n + ' B';
+}
+
 window.fmSubmitUpload = () => {
   const fileInput = document.getElementById('fm-upfile');
-  if (!fileInput?.files[0]) return;
-  document.querySelector('.modal-overlay')?.remove();
-  fmGuard(_fmPath, 'upload a file into', async (confirm_dangerous) => {
+  const file = fileInput?.files[0];
+  if (!file) return;
+  fmGuard(_fmPath, 'upload a file into', (confirm_dangerous) => {
+    // Switch the modal from the file-picker to a progress view; keep it open for the whole transfer.
+    document.getElementById('fm-upload-form').style.display = 'none';
+    document.getElementById('fm-upload-progress').style.display = 'block';
+    document.getElementById('fm-upload-filename').textContent = file.name;
+    document.getElementById('fm-upload-bytes').textContent = '0 B / ' + fmFormatBytes(file.size);
+    document.getElementById('fm-upload-cancel-btn').style.display = 'none';
+    const goBtn = document.getElementById('fm-upload-go-btn');
+    goBtn.disabled = true;
+    goBtn.textContent = 'Uploading…';
+
     const fd = new FormData();
-    fd.append('file', fileInput.files[0]);
+    fd.append('file', file);
     fd.append('path', _fmPath);
     fd.append('confirm_dangerous', confirm_dangerous ? '1' : '');
-    const res = await fetch(`/api/files/upload?path=${encodeURIComponent(_fmPath)}`, { method: 'POST', credentials: 'include', body: fd }).then(r => r.json());
-    if (res?.success) { Nova.toast('Uploaded', 'success'); fmNav(_fmPath); } else Nova.toast(res?.message || 'Upload failed', 'error');
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/files/upload?path=${encodeURIComponent(_fmPath)}`, true);
+    xhr.withCredentials = true;
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (!e.lengthComputable) return;
+      const pct = Math.round((e.loaded / e.total) * 100);
+      const bar = document.getElementById('fm-upload-bar');
+      const pctEl = document.getElementById('fm-upload-pct');
+      const bytesEl = document.getElementById('fm-upload-bytes');
+      if (bar) bar.style.width = pct + '%';
+      if (pctEl) pctEl.textContent = pct + '%';
+      if (bytesEl) bytesEl.textContent = fmFormatBytes(e.loaded) + ' / ' + fmFormatBytes(e.total);
+    });
+
+    xhr.onload = () => {
+      let res = null;
+      try { res = JSON.parse(xhr.responseText); } catch (e) { /* non-JSON error page, e.g. nginx 413 */ }
+      if (xhr.status >= 200 && xhr.status < 300 && res?.success) {
+        document.querySelector('.modal-overlay')?.remove();
+        Nova.toast('Uploaded', 'success');
+        fmNav(_fmPath);
+      } else {
+        document.querySelector('.modal-overlay')?.remove();
+        const msg = res?.message || (xhr.status === 413 ? 'File too large for the server\'s current upload limit' : `Upload failed (HTTP ${xhr.status})`);
+        Nova.toast(msg, 'error');
+      }
+    };
+    xhr.onerror = () => {
+      document.querySelector('.modal-overlay')?.remove();
+      Nova.toast('Upload failed — connection error', 'error');
+    };
+    xhr.send(fd);
   });
 };
 window.fmExtract = (path) => {
