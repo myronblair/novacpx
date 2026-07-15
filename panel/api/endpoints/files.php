@@ -220,7 +220,7 @@ match ($action) {
     })(),
 
     'upload' => (function() use ($baseDir, $body) {
-        $dir = safe_path($baseDir, $body['path'] ?? '/public_html');
+        $dir = safe_path($baseDir, $body['path'] ?? $_POST['path'] ?? $_GET['path'] ?? '/public_html');
         require_dangerous_confirm($baseDir, $dir, $body);
         if (!is_dir($dir)) Response::error("Target directory not found");
         if (!is_writable($dir)) Response::error("Permission denied writing to this directory");
