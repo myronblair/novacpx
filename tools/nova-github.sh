@@ -4,7 +4,7 @@
 #        bash nova-github.sh --status            (git status + diff --stat)
 #        bash nova-github.sh --log               (last 10 commits)
 #
-# Requires: git, GitHub PAT already set on remote
+# Requires: git, GitHub PAT already set on remote (see CLAUDE.md)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -41,7 +41,9 @@ case "${1:-}" in
     git add -A
     git status --short
     echo ""
-    git commit -m "$MSG"
+    git commit -m "$MSG
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
     git push origin main
     echo ""
     echo -e "${GREEN}[✓]${NC} Pushed. Auto-deploy will trigger within ~1 min."
