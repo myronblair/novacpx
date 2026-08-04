@@ -159,6 +159,11 @@ class Auth {
             'reseller.novacpx.orbishosting.com',
             'panel.novacpx.orbishosting.com',
             'web.orbishosting.com',
+            'novacpx.tomtomenterprises.com',
+            'admin.novacpx.tomtomenterprises.com',
+            'reseller.novacpx.tomtomenterprises.com',
+            'panel.novacpx.tomtomenterprises.com',
+            'web.tomtomenterprises.com',
         ];
         $hostname = preg_replace('/:\d+$/', '', $host);
 
