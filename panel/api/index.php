@@ -30,7 +30,6 @@ header('X-NovaCPX-Version: ' . trim($_ver));
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $_allowedHosts = ['novacpx.orbishosting.com', 'admin.novacpx.orbishosting.com',
                   'reseller.novacpx.orbishosting.com', 'panel.novacpx.orbishosting.com',
-                  'web.orbishosting.com',
                   'novacpx.tomtomenterprises.com', 'admin.novacpx.tomtomenterprises.com',
                   'reseller.novacpx.tomtomenterprises.com', 'panel.novacpx.tomtomenterprises.com',
                   'web.tomtomenterprises.com'];

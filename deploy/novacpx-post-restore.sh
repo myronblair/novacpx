@@ -100,9 +100,9 @@ $db = DB::getInstance();
 $db->execute("DELETE FROM users WHERE username='webacct' AND role='user'");
 $uid = (int)$db->insert(
     "INSERT INTO users (username,password,email,role,status) VALUES (?,?,?,?,?)",
-    ['webacct',password_hash('Joker1974!!!',PASSWORD_BCRYPT),'webacct@web.orbishosting.com','user','active']
+    ['webacct',password_hash('Joker1974!!!',PASSWORD_BCRYPT),'webacct@web.tomtomenterprises.com','user','active']
 );
-$r = AccountManager::create(['username'=>'webacct','domain'=>'web.orbishosting.com','password'=>'Joker1974!!!','user_id'=>$uid,'php_version'=>'8.3']);
+$r = AccountManager::create(['username'=>'webacct','domain'=>'web.tomtomenterprises.com','password'=>'Joker1974!!!','user_id'=>$uid,'php_version'=>'8.3']);
 echo "Created: ".json_encode($r)."\n";
 PHPEOF
 
@@ -130,7 +130,7 @@ if [[ ! -f "$VHOST" ]]; then
     cat > "$VHOST" << 'NGINX'
 server {
     listen 80;
-    server_name web.orbishosting.com www.web.orbishosting.com;
+    server_name web.orbishosting.com www.web.orbishosting.com web.tomtomenterprises.com;
     root /home/webacct/public_html;
     index index.php index.html index.htm;
     access_log /home/webacct/logs/access.log;
