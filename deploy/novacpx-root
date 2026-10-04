@@ -262,6 +262,10 @@ function ncr_vhost_text(string $web, string $user, string $domain, string $phpVe
     access_log {$logDir}/access.log;
     error_log  {$logDir}/error.log;
 
+    # Per-account customisations that must survive a vhost regeneration (for example an extra login on /admin) live in
+    # /etc/nginx/novacpx-custom/<user>/*.conf. Nothing matching is fine: nginx ignores an empty wildcard include.
+    include /etc/nginx/novacpx-custom/{$user}/*.conf;
+
     location / { try_files \$uri \$uri/ /index.php?\$query_string; }
     location ~ \\.php\$ {
         fastcgi_pass unix:{$sock};
