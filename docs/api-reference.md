@@ -566,7 +566,7 @@ Return notification settings (API key masked).
 
 Save notification settings.
 
-**Body:** `{cybermail_api_key?, notify_from_email?, notify_from_name?, notify_admin_email?, notifications_enabled?}`
+**Body:** `{gmail_sender?, gmail_client_id?, gmail_client_secret?, gmail_refresh_token?, notify_from_email?, notify_from_name?, notify_admin_email?, notifications_enabled?}`
 
 ### `POST /api/system/test-notify`
 

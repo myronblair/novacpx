@@ -82,7 +82,7 @@ NovaCPX is a full-featured open-source Linux web hosting control panel. It repla
 ### Panel Configuration
 - **Settings page** — panel name, default PHP version, nameservers, update channel; all values loaded from DB, saved individually
 - **Server Options** — swap web/mail/FTP/DNS backends without touching config files
-- **Notifications** — CyberMail API for welcome emails, suspension notices, disk warnings, SSL expiry; test button in panel
+- **Notifications** — Gmail API for welcome emails, suspension notices, disk warnings, SSL expiry; test button in panel
 - **Backups** — per-account file + database backup; download or restore; optional rclone/S3 remote destination
 - **Cloudflare integration** — per-account API key; sync DNS records, toggle CDN proxy per record
 - **Nginx Proxy Manager** — Docker-based reverse proxy for additional services

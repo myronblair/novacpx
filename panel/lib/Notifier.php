@@ -1,6 +1,6 @@
 <?php
 /**
- * Email notification dispatcher via CyberMail API
+ * Email notification dispatcher (Gmail API, see GmailMailer.php)
  */
 class Notifier {
 
@@ -11,37 +11,11 @@ class Notifier {
     }
 
     private static function send(string $to, string $subject, string $html): bool {
-        $apiKey  = self::getSetting('cybermail_api_key');
-        $fromEmail = self::getSetting('notify_from_email') ?: 'noreply@novacpx.local';
-        $fromName  = self::getSetting('notify_from_name')  ?: 'NovaCPX Panel';
-
-        if (!$apiKey || !$to) return false;
-
-        $payload = json_encode([
-            'from'    => $fromEmail,
-            'to'      => $to,
-            'subject' => $subject,
-            'html'    => $html,
-            'text'    => strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $html)),
-        ]);
-
-        $ch = curl_init('https://platform.cyberpersons.com/email/v1/send');
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $payload,
-            CURLOPT_HTTPHEADER     => [
-                'Authorization: Bearer ' . $apiKey,
-                'Content-Type: application/json',
-            ],
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_SSL_VERIFYPEER => true,
-        ]);
-        $body = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        return $code === 202;
+        if (!$to) return false;
+        require_once __DIR__ . '/GmailMailer.php';
+        $r = GmailMailer::send($to, $subject, $html);
+        if (!$r['ok']) error_log('[NovaCPX Notifier] ' . $r['error']);
+        return $r['ok'];
     }
 
     private static function adminEmail(): string {

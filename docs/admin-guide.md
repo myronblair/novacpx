@@ -180,11 +180,11 @@ Configure which services NovaCPX manages:
 
 ### Notifications
 
-Configure email alerts sent via CyberMail:
+Configure email alerts sent through the Gmail API:
 
 | Field | Notes |
 |-------|-------|
-| CyberMail API Key | From platform.cyberpersons.com |
+| Gmail sender / OAuth client id / secret / refresh token | The Gmail account the panel sends as |
 | From Email | Sender address (must be a verified sender domain) |
 | From Name | Display name shown in email clients |
 | Admin Alert Email | Receives admin copies of all notifications |

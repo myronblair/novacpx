@@ -695,14 +695,28 @@
 <div class="page-header"><h2 class="page-title">Email Notifications</h2></div>
 
 <div class="card mb-2">
-  <div class="card-header"><span class="card-title">CyberMail Settings</span></div>
+  <div class="card-header"><span class="card-title">Gmail Settings</span></div>
   <div class="card-body">
     <form id="notify-form">
       <div class="grid-2">
-        <div class="form-group" style="grid-column:1/-1">
-          <label>CyberMail API Key</label>
-          <input type="password" id="nf-apikey" name="cybermail_api_key" class="form-control" placeholder="${s.cybermail_api_key_masked || 'sk_live_…'}" value="">
-          <span class="form-hint">Leave blank to keep existing key. Get your key from platform.cyberpersons.com</span>
+        <div class="form-group">
+          <label>Gmail Sender Address</label>
+          <input type="email" name="gmail_sender" class="form-control" value="${s.gmail_sender || ''}" placeholder="account@gmail.com">
+          <span class="form-hint">Mail is sent through the Gmail API as this account</span>
+        </div>
+        <div class="form-group">
+          <label>OAuth Client ID</label>
+          <input type="text" name="gmail_client_id" class="form-control" value="${s.gmail_client_id || ''}">
+        </div>
+        <div class="form-group">
+          <label>OAuth Client Secret</label>
+          <input type="password" name="gmail_client_secret" class="form-control" placeholder="${s.gmail_client_secret_masked || ''}" value="">
+          <span class="form-hint">Leave blank to keep the stored value</span>
+        </div>
+        <div class="form-group">
+          <label>OAuth Refresh Token</label>
+          <input type="password" name="gmail_refresh_token" class="form-control" placeholder="${s.gmail_refresh_token_masked || ''}" value="">
+          <span class="form-hint">Leave blank to keep the stored value</span>
         </div>
         <div class="form-group">
           <label>From Email</label>
@@ -749,7 +763,7 @@
     e.preventDefault();
     const fd   = new FormData(e.target);
     const body = Object.fromEntries(fd.entries());
-    if (!body.cybermail_api_key) delete body.cybermail_api_key;
+    ['gmail_client_secret', 'gmail_refresh_token'].forEach(k => { if (!body[k]) delete body[k]; });
     const res  = await Nova.api('system', 'save-notify-settings', { method: 'POST', body });
     if (res?.success) Nova.toast('Notification settings saved', 'success');
     else Nova.toast(res?.message || 'Save failed', 'error');
