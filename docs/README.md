@@ -128,3 +128,9 @@ NovaCPX is a Linux web hosting control panel with a three-tier architecture (Adm
 ## Source
 
 GitHub: [myronblair/novacpx](https://github.com/myronblair/novacpx) (private)
+
+---
+
+## License
+
+NovaCPX is released under the [MIT License](../LICENSE).

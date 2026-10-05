@@ -20,4 +20,4 @@ NovaCPX installs and talks to these open-source programs, each under its own lic
 
 Product and company names are trademarks of their respective owners; mentioning them (for example to say a feature works with WHMCS billing or that a certificate comes from Let's Encrypt) does not imply any affiliation.
 
-Before distributing NovaCPX, add a `LICENSE` file for the NovaCPX code itself (the repository does not have one yet) and re-check this list against `install.sh`.
+NovaCPX itself is released under the MIT License (see `LICENSE`). Re-check the list above against `install.sh` when you add a new dependency.
