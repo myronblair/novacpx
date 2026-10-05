@@ -181,6 +181,7 @@ class Auth {
             'reseller.novacpx.tomtomenterprises.com',
             'panel.novacpx.tomtomenterprises.com',
             'web.tomtomenterprises.com',
+            'dev.tomtomenterprises.com',
             'core.tomtomenterprises.com',
         ];
         $hostname = preg_replace('/:\d+$/', '', $host);
