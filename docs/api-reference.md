@@ -723,3 +723,35 @@ Return Fail2Ban jail status and banned IPs.
 Unban an IP from a jail.
 
 **Body:** `{jail, ip}`
+
+---
+
+## Site Shield
+
+### `GET /api/shield/get`
+Current rules for the caller's account (admins/resellers pass `account_id`). Password hashes are never returned.
+
+### `POST /api/shield/save`
+Replace the rules. **Body:** `{account_id?, blocked_ips:[], hotlink:{enabled, allowed:[]}, folders:[{path, realm, users:[{name, password?}]}], error_pages:{"404":"/404.html"}}`. A user without `password` keeps the stored one. nginx only.
+
+## Traffic Meter
+
+### `GET /api/traffic/summary`
+This month's usage, the package allowance and the last 30 days. Admins/resellers pass `account_id`.
+
+### `GET /api/traffic/overview`
+Admin/reseller: month usage for every account they may see.
+
+### `GET|POST /api/traffic/settings`
+Admin: `bandwidth_action` = `notify` or `suspend` (what happens at 100%).
+
+## Pulse (uptime)
+
+### `GET /api/pulse/status`
+State, response time, 24h uptime and the last 48 checks for each site of the caller's account.
+
+### `GET /api/pulse/overview`
+Admin/reseller: every monitored site they may see.
+
+### `GET|POST /api/pulse/settings`
+Admin: `{enabled, fail_count}`.

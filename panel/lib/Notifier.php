@@ -97,6 +97,38 @@ class Notifier {
         }
     }
 
+    /** Traffic Meter: a customer reached 80% or 100% of the month's bandwidth allowance. */
+    public static function bandwidthWarning(array $account, int $pct, int $allowanceMb, int $level): void {
+        if (!self::notificationsEnabled()) return;
+        $domain = htmlspecialchars((string)($account['domain'] ?? 'unknown'));
+        $email  = $account['email'] ?? '';
+        $head   = $level >= 100 ? 'Monthly traffic allowance reached' : 'Traffic allowance is running low';
+        if ($email) {
+            self::send($email, "{$head} - {$domain} ({$pct}%)",
+                "<h2>{$head}</h2><p>The site <strong>{$domain}</strong> has used <strong>{$pct}%</strong> of this month's traffic allowance ({$allowanceMb} MB).</p>"
+                . ($level >= 100 ? "<p>Contact your host to raise the allowance if your site is affected.</p>" : "<p>No action is needed yet.</p>"));
+        }
+        $admin = self::adminEmail();
+        if ($admin) {
+            self::send($admin, "NovaCPX: traffic {$pct}% - {$domain}",
+                "<p>Account <strong>{$domain}</strong> is at <strong>{$pct}%</strong> of its {$allowanceMb} MB monthly traffic allowance.</p>");
+        }
+    }
+
+    /** Pulse: a monitored site stopped answering ($down = true) or came back ($down = false). */
+    public static function siteStatus(string $domain, array $account, bool $down, string $detail, string $since): void {
+        if (!self::notificationsEnabled()) return;
+        $d      = htmlspecialchars($domain);
+        $detail = htmlspecialchars($detail);
+        $subject = $down ? "Site down: {$domain}" : "Site back up: {$domain}";
+        $body = $down
+            ? "<h2>{$d} is not responding</h2><p>{$detail}</p><p>First failed check: {$since} (server time). You will get another message when it recovers.</p>"
+            : "<h2>{$d} is back online</h2><p>It has been answering normally again since {$since} (server time).</p>";
+        if (!empty($account['email'])) self::send($account['email'], $subject, $body);
+        $admin = self::adminEmail();
+        if ($admin && $admin !== ($account['email'] ?? '')) self::send($admin, 'NovaCPX: ' . $subject, $body);
+    }
+
     public static function diskQuotaWarning(array $account, int $usedMb, int $limitMb): void {
         if (!self::notificationsEnabled()) return;
 

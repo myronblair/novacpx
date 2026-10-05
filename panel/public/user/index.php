@@ -149,6 +149,7 @@ window.NOVACPX_BRANDING = <?= json_encode([
 ]) ?>;
 </script>
 <script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
+<script src="/assets/js/site-tools.js<?= $_v('/assets/js/site-tools.js') ?>"></script>
 <script src="/assets/js/user.js<?= $_v('/assets/js/user.js') ?>"></script>
 <!-- user.js boots via DOMContentLoaded and handles all auth/init -->
 </body>

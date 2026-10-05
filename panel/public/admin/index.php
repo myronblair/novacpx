@@ -113,6 +113,18 @@ require_once dirname(__DIR__) . '/_branding.php';
       </div>
 
       <div class="sidebar-section">
+        <div class="sidebar-section-label">Usage &amp; Health</div>
+        <a href="#" class="sidebar-link" data-page="traffic-usage">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg>
+          Traffic &amp; Usage
+        </a>
+        <a href="#" class="sidebar-link" data-page="uptime">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg>
+          Site Uptime
+        </a>
+      </div>
+
+      <div class="sidebar-section">
         <div class="sidebar-section-label">Security</div>
         <a href="#" class="sidebar-link" data-page="ssl-manager">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -233,6 +245,7 @@ require_once dirname(__DIR__) . '/_branding.php';
 </div>
 
 <script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
+<script src="/assets/js/site-tools.js<?= $_v('/assets/js/site-tools.js') ?>"></script>
 <script src="/assets/js/admin.js<?= $_v('/assets/js/admin.js') ?>"></script>
 </body>
 </html>

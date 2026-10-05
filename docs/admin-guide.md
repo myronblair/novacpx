@@ -211,6 +211,17 @@ Panel-wide settings. All values are loaded from the database when the page opens
 | Secondary Nameserver | NS2 hostname |
 | Update Channel | **Stable** (main branch) or **Beta** (beta branch) — controls which GitHub branch the Updates page checks and deploys from |
 
+## Usage & Health
+
+### Traffic & Usage
+Shows every account's month-to-date traffic against its package allowance. Choose what happens at 100%: send a warning only, or warn and suspend the account. Warnings at 80% and 100% are sent once per account and month.
+
+### Site Uptime
+Shows every monitored site with its state, last answer and 24-hour uptime. Settings: monitoring on/off and how many failed checks in a row count as down (default 2).
+
+### Background tasks
+`/etc/cron.d/novacpx-tasks` (installed on every deploy by `deploy/install-tasks.sh`) runs the stats collector, the traffic meter and uptime monitor (every 5 minutes), scheduled backups (every 15 minutes) and the nightly notification checks.
+
 ## WHMCS Billing Bridge
 
 NovaCPX exposes a WHMCS-compatible server module API at `/api/whmcs/<action>`. Enable it in **Server Options** and set the API key. The WHMCS module calls these endpoints to provision, suspend, and terminate accounts automatically.

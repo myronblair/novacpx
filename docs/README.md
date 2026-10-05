@@ -1,6 +1,6 @@
 # NovaCPX — Documentation
 
-NovaCPX is a full-featured open-source Linux web hosting control panel. It replaces cPanel/Plesk with a modern three-tier architecture (Admin → Reseller → End User), runs entirely on your own server, and has no per-account licensing fees.
+NovaCPX is a Linux web hosting control panel with a three-tier architecture (Admin → Reseller → End User). It runs entirely on your own server and has no per-account licensing fees. NovaCPX is an independent project and is not affiliated with, endorsed by or derived from any other control panel; product names mentioned in these docs belong to their owners.
 
 ---
 
@@ -64,6 +64,12 @@ NovaCPX is a full-featured open-source Linux web hosting control panel. It repla
 - **Historical charts** — Chart.js graphs of CPU and RAM over time (5-minute cron samples)
 - **Service health** — Apache/Nginx/MySQL/Postfix/Dovecot/FTP/DNS status with restart controls
 - **JARVIS integration** — optional agent sends live metrics to the JARVIS AI dashboard
+
+### Site Tools (1.2)
+- **Site Shield** — per-site blocked addresses, hotlink guard, password-locked folders and custom error pages; rendered by the privileged helper into an nginx include that survives vhost regeneration, and rolled back automatically if nginx rejects it
+- **Traffic Meter** — bandwidth accounting read incrementally from each account's access log; month total vs the package allowance, warnings at 80% and 100%, optional automatic suspension
+- **Pulse** — site uptime monitor: every active site is checked every 5 minutes, down/recovered emails to the owner and the admin, 24h uptime and response-time history
+- **Scheduled backups that run** — hourly/daily/weekly/monthly schedules with a retention count; customers can set their own schedule
 
 ### Updates & Versioning
 - **Update channels** — **Stable** (main branch, major/minor releases) or **Beta** (beta branch, patch/pre-release)

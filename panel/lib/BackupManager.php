@@ -19,8 +19,10 @@ class BackupManager {
         $filepath = "{$dir}/{$filename}";
 
         // Record as pending
+        // the table's CHECK constraint names the stored types differently from the ones the API/schedules use
+        $storedType = ['files' => 'files_only', 'database' => 'db_only'][$type] ?? $type;
         $stmt = $this->db->prepare("INSERT INTO backups (account_id, filename, type, status, storage) VALUES (?,?,?,'running','local')");
-        $stmt->execute([$accountId, $filename, $type]);
+        $stmt->execute([$accountId, $filename, $storedType]);
         $backupId = $this->db->lastInsertId();
 
         try {
@@ -109,8 +111,11 @@ class BackupManager {
 
     // ── Schedule ──────────────────────────────────────────────────────────────
     public function setSchedule(int $accountId, string $frequency, string $type = 'full', int $retain = 7): bool {
+        if (!in_array($frequency, ['hourly', 'daily', 'weekly', 'monthly'], true)) throw new InvalidArgumentException('Invalid backup frequency');
+        if (!in_array($type, ['full', 'files', 'database'], true)) throw new InvalidArgumentException('Invalid backup type');
+        $retain = max(1, min(60, $retain));
         $stmt = $this->db->prepare("INSERT INTO backup_schedules (account_id, frequency, type, retain_count)
-            VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE frequency=VALUES(frequency), type=VALUES(type), retain_count=VALUES(retain_count)");
+            VALUES (?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET frequency=excluded.frequency, type=excluded.type, retain_count=excluded.retain_count");
         $stmt->execute([$accountId, $frequency, $type, $retain]);
         return true;
     }

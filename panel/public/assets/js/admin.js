@@ -92,6 +92,8 @@
     wordpress,
     docker,
     'ssl-manager': sslManager,
+    'traffic-usage': () => window.trafficAdminPage(),
+    'uptime': () => window.pulseAdminPage(),
     firewall,
     fail2ban,
     'audit-log': auditLog,

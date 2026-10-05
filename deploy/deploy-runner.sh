@@ -86,6 +86,10 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT QUEUED_BRANCH; do
   if [[ -f "$REPO_PATH/deploy/install-root-helper.sh" ]]; then
     bash "$REPO_PATH/deploy/install-root-helper.sh" >> "$LOG" 2>&1 || log "WARNING: privileged helper install failed"
   fi
+  # ...the background-task cron entries (stats, traffic meter, uptime monitor, scheduled backups)
+  if [[ -f "$REPO_PATH/deploy/install-tasks.sh" ]]; then
+    bash "$REPO_PATH/deploy/install-tasks.sh" >> "$LOG" 2>&1 || log "WARNING: background task install failed"
+  fi
   # ...and the auto-deploy poller itself (so every deployed server keeps deploying itself)
   if [[ -f "$REPO_PATH/deploy/install-autodeploy.sh" ]]; then
     bash "$REPO_PATH/deploy/install-autodeploy.sh" >> "$LOG" 2>&1 || log "WARNING: auto-deploy install failed"

@@ -114,6 +114,9 @@ const userPages = {
   stats: statsPage,
   backups,
   docker: dockerPage,
+  shield:  (el) => window.shieldPage(el),
+  traffic: (el) => window.trafficPage(el),
+  pulse:   (el) => window.pulsePage(el),
   'change-password': changePasswordPage,
 };
 
@@ -960,6 +963,12 @@ const navGroups = [
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' },
     { id: 'files', label: 'File Manager',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>' },
+    { id: 'shield', label: 'Site Shield',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
+    { id: 'traffic', label: 'Traffic',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg>' },
+    { id: 'pulse', label: 'Uptime',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg>' },
     { id: 'stats', label: 'Statistics',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>' },
   ]},

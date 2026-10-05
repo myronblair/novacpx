@@ -54,9 +54,9 @@ match ($action) {
         Response::success(null, 'Backup deleted');
     })(),
 
-    'schedule' => (function() use ($bm, $body, $accountId, $isAdmin) {
-        if (!$isAdmin) Response::error('Admin only', 403);
+    'schedule' => (function() use ($bm, $body, $accountId) {
         if (!$accountId) Response::error('account_id required');
+        assert_account_access($accountId);   // customers may schedule their own backups, resellers their customers'
         $freq   = $body['frequency'] ?? 'daily';
         $type   = $body['type']      ?? 'full';
         $retain = (int)($body['retain'] ?? 7);
@@ -66,6 +66,7 @@ match ($action) {
 
     'get-schedule' => (function() use ($bm, $accountId) {
         if (!$accountId) Response::error('account_id required');
+        assert_account_access($accountId);
         Response::success($bm->getSchedule($accountId));
     })(),
 

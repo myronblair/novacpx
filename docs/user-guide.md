@@ -194,3 +194,27 @@ To change your password:
 4. Click **Save**
 
 Your new password takes effect immediately. If you also use FTP or SSH with this account, those passwords are updated as well.
+
+## Site Shield
+
+Open **Site Shield** in the sidebar to protect your site without editing any files.
+
+- **Blocked addresses** — one IP address or range (for example `203.0.113.0/24`) per line; those visitors get an error page.
+- **Hotlink guard** — stops other websites from embedding your images, video, audio, PDFs and zip files. Add partner domains that may still use them.
+- **Password-locked folders** — pick a folder (for example `/members`), a prompt text, and one or more users with passwords (8+ characters). Visitors must sign in to open it.
+- **Custom error pages** — point 404, 403, 500 and 503 at a page inside your site.
+
+Press **Save & apply**. If the web server rejects a change, nothing is changed and the reason is shown.
+
+## Traffic
+
+**Traffic** shows how much your site served this month, your package allowance, and a 30-day chart. You get an email at 80% and 100% of the allowance. Depending on the server settings, reaching 100% can also suspend the account.
+
+## Uptime
+
+**Uptime** shows whether each of your sites is answering, its 24-hour uptime, response times and the last 48 checks. You get an email when a site stops answering and another when it recovers.
+
+## Scheduled backups
+
+Under **Backups** you can set how often a backup runs (hourly, daily, weekly, monthly), what it contains (full, files, database) and how many copies to keep.
+
