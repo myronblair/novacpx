@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-NOVACPX_VERSION="1.2.1"
+NOVACPX_VERSION="1.3.0"
 PANEL_DIR="/opt/novacpx"
 WEB_ROOT="/srv/novacpx/public"
 LOG="/var/log/novacpx-install.log"
