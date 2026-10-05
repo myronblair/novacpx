@@ -264,6 +264,9 @@ function ncr_vhost_text(string $web, string $user, string $domain, string $phpVe
 
     # Per-account customisations that must survive a vhost regeneration (for example an extra login on /admin) live in
     # /etc/nginx/novacpx-custom/<user>/*.conf. Nothing matching is fine: nginx ignores an empty wildcard include.
+    # Those files must use \$novacpx_php_sock for fastcgi_pass (never a hardcoded socket) so a PHP version switch, which
+    # regenerates this vhost with the new socket, keeps them working.
+    set \$novacpx_php_sock unix:{$sock};
     include /etc/nginx/novacpx-custom/{$user}/*.conf;
 
     location / { try_files \$uri \$uri/ /index.php?\$query_string; }

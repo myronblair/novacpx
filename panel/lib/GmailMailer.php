@@ -21,6 +21,9 @@ class GmailMailer {
         if (is_file($cache)) {
             $c = json_decode((string)@file_get_contents($cache), true);
             if (!empty($c['access_token']) && ($c['expires_at'] ?? 0) > time() + 60) return $c['access_token'];
+            // a refresh that just failed (revoked/expired token) is not retried for a minute, so a run of notifications
+            // fails fast instead of making one failing request to Google per mail
+            if (!empty($c['fail_until']) && $c['fail_until'] > time()) { $err = (string)($c['error'] ?? 'Gmail token refresh failed'); return null; }
         }
         $ch = curl_init('https://oauth2.googleapis.com/token');
         curl_setopt_array($ch, [
@@ -36,6 +39,8 @@ class GmailMailer {
         $d = json_decode((string)$resp, true);
         if ($code !== 200 || empty($d['access_token'])) {
             $err = 'Gmail token refresh failed (HTTP ' . $code . '): ' . substr((string)$resp, 0, 160);
+            @file_put_contents($cache, json_encode(['fail_until' => time() + 60, 'error' => $err]));
+            @chmod($cache, 0600);
             return null;
         }
         @file_put_contents($cache, json_encode(['access_token' => $d['access_token'], 'expires_at' => time() + (int)($d['expires_in'] ?? 3600)]));
