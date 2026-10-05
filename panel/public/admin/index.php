@@ -135,6 +135,10 @@ require_once dirname(__DIR__) . '/_branding.php';
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg>
           Account Transfer
         </a>
+        <a href="#" class="sidebar-link" data-page="terminal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 10l3 2-3 2M12 15h5"/></svg>
+          Web Terminal
+        </a>
       </div>
 
       <div class="sidebar-section">

@@ -87,6 +87,8 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT QUEUED_BRANCH; do
   if [[ -f "$REPO_PATH/deploy/install-root-helper.sh" ]]; then
     bash "$REPO_PATH/deploy/install-root-helper.sh" >> "$LOG" 2>&1 || log "WARNING: privileged helper install failed"
   fi
+  # ...and make sure plain http always lands on https (panel ports + the port-80 catch-all)
+  echo '{}' | /usr/local/sbin/novacpx-root https.enforce >> "$LOG" 2>&1 || log "WARNING: https redirect setup failed"
   # ...the background-task cron entries (stats, traffic meter, uptime monitor, scheduled backups)
   if [[ -f "$REPO_PATH/deploy/install-tasks.sh" ]]; then
     bash "$REPO_PATH/deploy/install-tasks.sh" >> "$LOG" 2>&1 || log "WARNING: background task install failed"

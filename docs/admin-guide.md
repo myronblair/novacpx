@@ -261,3 +261,16 @@ In **Packages**, the *Tools included* tick-boxes choose which optional tools (Si
 3. Add the customer's mailboxes, addon domains, cron jobs, FTP users and SSL certificate on the new server, then point DNS at it. These are listed after the import because they are not carried over; mail is not moved.
 
 If anything fails the half-built account is removed again, so the import can simply be repeated. The bundle contains the customer's database passwords, which is why the link is single-use and the bundle is deleted after the download or when the link expires. Very large sites (many gigabytes) are capped at 10 GB per transfer.
+
+### Web Terminal
+
+**Web Terminal** gives you a root shell inside the admin panel (nginx servers only). It is off until you switch it on, and it is built to be hard to misuse:
+
+- You must have two-factor authentication on for your admin login (Security > 2FA) before it can be enabled.
+- **Enable web terminal** installs the `ttyd` program, starts it, and adds `/terminal/` to the admin panel (port 8882). The shell program only listens on a private socket that nginx can reach; nothing is exposed on the network.
+- Each time, enter a fresh authenticator code and press **Unlock & open terminal**. That opens the terminal for 5 minutes (enough to connect); five wrong codes lock you out for ten minutes.
+- One session at a time. A session ends after 15 idle minutes or 4 hours. Only a real admin login works: API tokens and "Login as" sessions are refused.
+- Every session is recorded under **Recorded sessions** (kept 90 days) and the sign-ins appear in the Audit Log.
+
+**Disable** stops the service and cancels any unlock. Recordings are kept in `/var/log/novacpx/terminal/` (root only).
+
