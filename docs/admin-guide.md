@@ -262,6 +262,17 @@ In **Packages**, the *Tools included* tick-boxes choose which optional tools (Si
 
 If anything fails the half-built account is removed again, so the import can simply be repeated. The bundle contains the customer's database passwords, which is why the link is single-use and the bundle is deleted after the download or when the link expires. Very large sites (many gigabytes) are capped at 10 GB per transfer.
 
+### Update channels
+
+Each server follows one update channel (Settings > Updates):
+
+- **stable** follows the `main` branch. This is what production runs.
+- **beta** follows the `beta` branch, a pre-release line versioned `X.Y.Z-beta.N`. Put the test server on it.
+
+Both are checked every 10 minutes and deployed automatically. Switching a server from beta back to stable moves it to `main`; promote first so it does not go backwards.
+
+Release flow: build on a feature branch, merge it into `beta`, let the test server pick it up (version `1.7.0-beta.N`), test, then run `bash tools/promote-beta.sh` and push `main`. The version-bump workflow turns `1.7.0-beta.N` into the release `1.7.0`. Ordinary fixes pushed straight to `main` still get the next patch number.
+
 ### Web Terminal
 
 **Web Terminal** gives you a root shell inside the admin panel (nginx servers only). It is off until you switch it on, and it is built to be hard to misuse:
