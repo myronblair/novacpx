@@ -1740,6 +1740,35 @@ function cmd_git_forget(array $p): int {
     return 0;
 }
 
+// ───────────────────────── FTP (ProFTPD virtual users) ─────────────────────────
+
+/** Rewrite the ProFTPD virtual-user file from the panel's list and make sure ProFTPD is set up to read it. */
+function cmd_ftp_sync(array $p): int {
+    $users = $p['users'] ?? null;
+    if (!is_array($users)) refuse('users must be a list');
+    $lines = [];
+    foreach ($users as $u) {
+        if (!is_array($u)) refuse('invalid user entry');
+        $name = $u['username'] ?? null; $hash = $u['hash'] ?? null; $home = $u['home'] ?? null;
+        if (!is_string($name) || !preg_match('/^[a-z0-9_]{1,32}$/', $name)) refuse('invalid ftp username');
+        if (!is_string($hash) || !preg_match('#^\$2[aby]\$\d\d\$[A-Za-z0-9./]{53}$#', $hash)) refuse('invalid password hash');
+        if (!is_string($home) || !preg_match('#^/home/[A-Za-z0-9._-]+(/[A-Za-z0-9._ -]+)*$#', $home) || str_contains($home, '..')) refuse('invalid home directory');
+        $uid = v_int($u['uid'] ?? null, 1000, 65533, 'uid');
+        $gid = v_int($u['gid'] ?? null, 1, 65533, 'gid');
+        $lines[] = "{$name}:{$hash}:{$uid}:{$gid}:NovaCPX FTP:{$home}:/bin/false";
+    }
+    if (!is_dir('/etc/proftpd')) refuse('proftpd is not installed');
+    ncr_write_file('/etc/proftpd/novacpx-users.passwd', $lines ? implode("\n", $lines) . "\n" : '', 0600, 'root', 'root');
+    $conf = "# Managed by NovaCPX\nAuthOrder mod_auth_file.c mod_auth_unix.c\n"
+          . "AuthUserFile /etc/proftpd/novacpx-users.passwd\nRequireValidShell off\nDefaultRoot ~\n";
+    if (!is_file('/etc/proftpd/conf.d/novacpx.conf') || file_get_contents('/etc/proftpd/conf.d/novacpx.conf') !== $conf) {
+        ncr_write_file('/etc/proftpd/conf.d/novacpx.conf', $conf, 0644);
+    }
+    [$rc, $out] = ncr_run(['systemctl', 'restart', 'proftpd']);
+    if ($rc !== 0) { echo $out; return $rc; }
+    return 0;
+}
+
 // ───────────────────────── dispatch ─────────────────────────
 
 const NCR_COMMANDS = [
@@ -1760,7 +1789,7 @@ const NCR_COMMANDS = [
     'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
     'site.rules.write' => 'cmd_site_rules_write',
     'waf.write' => 'cmd_waf_write',
-    'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
+    'ftp.sync' => 'cmd_ftp_sync', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
     'mail.queue.list' => 'cmd_mail_queue_list', 'mail.queue.action' => 'cmd_mail_queue_action',
     'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
 ];

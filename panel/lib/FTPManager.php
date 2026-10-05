@@ -3,6 +3,8 @@
 /**
  * FTPManager — ProFTPD virtual user management via MySQL
  */
+require_once __DIR__ . '/Root.php';
+
 class FTPManager {
 
     public static function createAccount(int $accountId, string $username, string $password, string $homeDir, int $quotaMb = 0): int {
@@ -42,17 +44,15 @@ class FTPManager {
     }
 
     private static function syncProftpd(): void {
-        // Write ProFTPD virtual users file (passwd format)
         $db       = DB::getInstance();
         $accounts = $db->fetchAll("SELECT f.*, a.username as owner FROM ftp_accounts f JOIN accounts a ON a.id = f.account_id WHERE f.status = 'active'");
-        $passwd   = '';
+        $users    = [];
+        $gid      = self::getGid('www-data');
         foreach ($accounts as $a) {
-            $uid   = self::getUid($a['owner']);
-            $gid   = self::getGid('www-data');
-            $passwd .= "{$a['username']}:{$a['password']}:{$uid}:{$gid}:NovaCPX FTP:{$a['home_dir']}:/sbin/nologin\n";
+            $users[] = ['username' => $a['username'], 'hash' => $a['password'], 'uid' => self::getUid($a['owner']),
+                        'gid' => $gid, 'home' => $a['home_dir']];
         }
-        file_put_contents('/etc/proftpd/novacpx-users.passwd', $passwd);
-        shell_exec('systemctl reload proftpd 2>/dev/null || true');
+        Root::ok('ftp.sync', ['users' => $users]);
     }
 
     private static function getUid(string $username): int {
