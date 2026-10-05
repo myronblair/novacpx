@@ -8,7 +8,10 @@ $body    = json_decode(file_get_contents('php://input'), true) ?? [];
 $isAdmin = $currentUser['role'] === 'admin';
 
 $accountId = (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
-if ($currentUser['role'] === 'user') $accountId = $currentUser['account_id'] ?? 0;
+if ($currentUser['role'] === 'user') {
+    $accountId = (int)(DB::getInstance()->fetchOne("SELECT id FROM accounts WHERE user_id = ?", [$currentUser['uid']])['id'] ?? 0);
+}
+if ($accountId) assert_account_access($accountId);   // resellers: their own customers only
 
 // Resolve credentials — from body (for test) or from stored account creds
 $apiKey = $body['api_key'] ?? null;

@@ -880,7 +880,7 @@ async function loadBackupList() {
       ${list.map(b => `<tr>
         <td>${Nova.relTime(b.created_at)}</td>
         <td>${Nova.badge(b.type, 'blue')}</td>
-        <td>${b.size ? Nova.bytes(parseInt(b.size)) : '—'}</td>
+        <td>${parseFloat(b.size_mb) > 0 ? Nova.bytes(Math.round(parseFloat(b.size_mb) * 1048576)) : '—'}</td>
         <td>${Nova.badge(b.status, b.status==='complete'?'green':b.status==='running'?'yellow':'red')}</td>
         <td>
           ${b.status === 'complete'
