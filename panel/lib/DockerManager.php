@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * DockerManager — Docker Engine install, container lifecycle, compose stacks, app catalog
  */

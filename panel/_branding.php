@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Server-side branding loader — injected into portal <head> before JS loads.
  * Reads session cookie → looks up user's reseller → returns branding row.

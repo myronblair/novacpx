@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * WHMCS provisioning bridge (#22b)
  * Auth: X-WHMCS-Key header only (a query-string key would end up in access logs)

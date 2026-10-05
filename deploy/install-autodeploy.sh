@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # Install the NovaCPX auto-deploy poller (/usr/local/bin/novacpx-poll-deploy + /etc/cron.d/novacpx-autodeploy). Run as root; safe to re-run.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }

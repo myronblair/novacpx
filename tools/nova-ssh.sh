@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-ssh.sh — SSH into the NovaCPX VM via double-hop through PVE1
 # Usage: bash nova-ssh.sh [command]        (run command on VM)
 #        bash nova-ssh.sh                  (interactive shell on VM)

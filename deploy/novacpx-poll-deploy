@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # NovaCPX auto-deploy: every 10 minutes (cron.d/novacpx-autodeploy) look at origin/main of the source checkout and, when it has
 # commits this server has not deployed, hand them to deploy-runner.sh (pull, syntax check, rsync to the web root, migrations,
 # version record, rollback on a PHP syntax error). No inbound webhook needed, so it works the same on the DO server and on a

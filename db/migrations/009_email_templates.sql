@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 009: Email Templates
 CREATE TABLE IF NOT EXISTS email_templates (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

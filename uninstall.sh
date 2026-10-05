@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # NovaCPX Uninstaller
 # Backs up everything, then cleanly removes all NovaCPX components.
 # Usage: bash uninstall.sh [--yes]

@@ -35,5 +35,6 @@ p{color:var(--text-muted);margin-bottom:2rem;line-height:1.6}
     Go Back
   </a>
 </div>
+<footer style="position:fixed;left:0;right:0;bottom:0;text-align:center;font-size:.72rem;line-height:1.5;color:#7c7f9a;padding:1rem">Copyright &copy; 2026 TomTom Enterprises. NovaCPX is licensed under the MIT License. Third-party product names and marks are the property of their respective owners.</footer>
 </body>
 </html>

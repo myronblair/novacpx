@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Offline test for ncr_stack_policy() and the catalog template generator.
  * Needs only php-cli and docker compose (it asks `docker compose config` to normalise each file); no panel, DB or containers.

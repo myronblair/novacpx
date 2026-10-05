@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 $method = $_SERVER['REQUEST_METHOD'];
 $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 

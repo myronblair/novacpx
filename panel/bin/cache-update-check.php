@@ -1,5 +1,6 @@
 #!/usr/bin/env php
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * NovaCPX nightly update cache warmer.
  * Runs as root via cron — populates update_cache_novacpx and update_cache_os

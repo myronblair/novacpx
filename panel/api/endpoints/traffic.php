@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Traffic Meter API.
  *   GET /api/traffic/summary[?account_id=N]   this month, allowance and the last 30 days for one account

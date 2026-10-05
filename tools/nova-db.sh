@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-db.sh — Quick DB access on NovaCPX VM
 # Usage: bash nova-db.sh [query]           (run query and return result)
 #        bash nova-db.sh                   (open interactive MySQL shell)

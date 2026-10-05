@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-status.sh — Check NovaCPX VM health: SSH, panel ports, services, logs
 # Usage: bash nova-status.sh [--full]
 #   (no flags) : quick port check

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # NovaCPX Deploy Runner — runs every minute via cron
 # Processes /tmp/novacpx-deploy-queue.txt
 # Each line: repo_path|web_root|commit

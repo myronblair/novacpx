@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * EmailManager — Postfix virtual mailbox + Dovecot user management
  * Uses MySQL backend for both Postfix and Dovecot

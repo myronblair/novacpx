@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }   // command line only
 /**
  * Offline checks for deploy/novacpx-root (the privileged helper): every validator, the generated vhost / pool text and

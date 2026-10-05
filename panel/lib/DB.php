@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 class DB {
     private static ?DB $instance = null;
     private PDO $pdo;

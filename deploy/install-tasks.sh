@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # Install the panel's background-task cron entries (/etc/cron.d/novacpx-tasks). Run as root; safe to re-run.
 #
 # Older installs put the stats and notification jobs in /etc/cron.d/novacpx pointing at /srv/novacpx/public/bin/, a folder that

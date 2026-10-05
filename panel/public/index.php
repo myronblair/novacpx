@@ -1,6 +1,8 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 // NovaCPX entry point — redirect based on role or show login
 session_start();
+require_once __DIR__ . '/_branding.php';
 $redirect = $_GET['redirect'] ?? '';
 $safeRedirect = preg_match('#^/(user|reseller|admin)#', $redirect) ? $redirect : '';
 ?>
@@ -126,5 +128,6 @@ fetch('/api/auth/me', {credentials:'include'}).then(r => r.json()).then(d => {
 fetch('/api/system/version', {credentials:'include'})
   .then(r=>r.json()).then(d=>{ if(d.data?.installed_version) document.getElementById('panel-version').textContent=d.data.installed_version; });
 </script>
+<?= function_exists('novacpx_legal_footer') ? novacpx_legal_footer(true) : '' ?>
 </body>
 </html>

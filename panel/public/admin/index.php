@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 // NovaCPX Admin Panel — Datacenter/Server Manager
 if (!defined('NOVACPX_ROOT'))    define('NOVACPX_ROOT',    dirname(__DIR__));
 if (!defined('NOVACPX_VERSION')) define('NOVACPX_VERSION', trim(@file_get_contents(NOVACPX_ROOT . '/VERSION') ?: '1.0.0'));
@@ -212,6 +213,7 @@ require_once dirname(__DIR__) . '/_branding.php';
     <div class="page-content" id="page-content">
       <!-- Loaded by JS -->
     </div>
+    <?= novacpx_legal_footer() ?>
   </div>
 </div>
 
@@ -247,5 +249,6 @@ require_once dirname(__DIR__) . '/_branding.php';
 <script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
 <script src="/assets/js/site-tools.js<?= $_v('/assets/js/site-tools.js') ?>"></script>
 <script src="/assets/js/admin.js<?= $_v('/assets/js/admin.js') ?>"></script>
+<?= novacpx_legal_footer(true) ?>
 </body>
 </html>

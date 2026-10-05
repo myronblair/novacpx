@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 003: Nginx Proxy Hosts table
 CREATE TABLE IF NOT EXISTS proxy_hosts (
   id           INT AUTO_INCREMENT PRIMARY KEY,

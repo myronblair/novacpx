@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * NovaCPX Feature Registry & Toggle API
  * Features can be enabled/disabled/installed on the fly

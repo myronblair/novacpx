@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Firewall endpoint — UFW rules + Fail2Ban jail management
  * All actions require admin role.

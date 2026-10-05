@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 006: Docker tiered container management (#31-35)
 CREATE TABLE IF NOT EXISTS docker_quotas (
     id INT AUTO_INCREMENT PRIMARY KEY,

@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * NovaCPX API Router
  * All requests: /api/{endpoint}/{action}

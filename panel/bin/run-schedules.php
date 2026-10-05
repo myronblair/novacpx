@@ -1,5 +1,6 @@
 #!/usr/bin/env php
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Runs the backup schedules that are due (cron.d/novacpx-tasks, every 15 minutes). One run at a time: a long backup simply makes the
  * next tick exit immediately.

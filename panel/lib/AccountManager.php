@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * AccountManager — creates/suspends/terminates Linux hosting accounts
  * Each account = system user + home dir + vhost + DNS zone + mail domain

@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 007: server_stats table + server type settings + WHMCS key
 CREATE TABLE IF NOT EXISTS server_stats (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

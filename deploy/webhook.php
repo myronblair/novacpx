@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * NovaCPX Auto-Deploy Webhook Handler
  * Place at: https://<panel-ip>:2083/deploy/webhook.php

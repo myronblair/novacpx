@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Files endpoint — file manager (list, read, write, rename, delete, chmod, chown, upload, download, archive)
  * Strictly confined to account home directory via realpath check.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # NovaCPX Post-Restore Script v2
 # Run after any PBS/backup restore
 # Usage: /usr/local/bin/novacpx-post-restore [--no-git]

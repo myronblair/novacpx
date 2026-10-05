@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Gmail API mail transport for panel notifications (users.messages.send over HTTPS, OAuth2 refresh token).
  * Replaces the CyberMail HTTP API. Settings (table `settings`): gmail_sender, gmail_client_id,

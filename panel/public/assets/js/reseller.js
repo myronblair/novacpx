@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE). */
 /**
  * NovaCPX Reseller Panel JS
  */
@@ -325,7 +326,8 @@ const rNavGroups = [
     { id: 'packages', label: 'Packages',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
   ]},
-  { id: 'subdomains', label: 'Subdomains',
+  { label: 'Domains', items: [
+    { id: 'subdomains', label: 'Subdomains',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/><path d="M18 15l3 3-3 3"/></svg>' },
     { id: 'parked-domains', label: 'Parked Domains',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>' },

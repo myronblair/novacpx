@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 class TOTP {
     private const CHARS  = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
     private const PERIOD = 30;

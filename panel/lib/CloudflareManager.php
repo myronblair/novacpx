@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 class CloudflareManager {
     private const API = 'https://api.cloudflare.com/client/v4/';
     private PDO $db;

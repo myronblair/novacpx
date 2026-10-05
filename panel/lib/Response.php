@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 class Response {
     public static function json(array $data, int $code = 200): never {
         http_response_code($code);

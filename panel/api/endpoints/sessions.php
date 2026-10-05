@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Sessions endpoint — admin session management
  * GET  sessions/list              — all active sessions with user info

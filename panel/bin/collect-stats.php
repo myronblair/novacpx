@@ -1,5 +1,6 @@
 #!/usr/bin/env php
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * NovaCPX stats collector — runs every 5 minutes via cron
  * Cron: *\/5 * * * * root /usr/bin/php /opt/novacpx/bin/collect-stats.php

@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Cron: disk quota warnings + SSL expiry notifications
  * Cron: 0 6 * * * root /usr/bin/php /opt/novacpx/bin/notify-checks.php >> /var/log/novacpx/notify-checks.log 2>&1

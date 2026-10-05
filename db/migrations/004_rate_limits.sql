@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 004: API rate limiting table
 CREATE TABLE IF NOT EXISTS api_rate_limits (
   ip           VARCHAR(45)  NOT NULL,

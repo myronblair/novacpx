@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-test.sh — NovaCPX API endpoint test suite
 # Tests auth, common endpoints, and panel responses against the live VM
 # Usage: bash nova-test.sh [--host IP] [--admin-pass PASS]

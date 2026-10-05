@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE). */
 /* NovaCPX Design System */
 :root {
   --bg:       #0d0f17;
@@ -396,3 +397,7 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: .85em; 
 
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
 }
+
+/* Copyright notice */
+.nova-legal { font-size: .72rem; line-height: 1.5; color: var(--text-muted); text-align: center; padding: 1rem 1.25rem; margin-top: auto; border-top: 1px solid var(--border); }
+.nova-legal-fixed { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; border-top: 0; background: transparent; pointer-events: none; }

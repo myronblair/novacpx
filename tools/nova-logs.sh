@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-logs.sh — Stream/view NovaCPX logs from VM
 # Usage: bash nova-logs.sh [apache|access|install|fail2ban|all]
 #   (no arg) : apache error log (default)

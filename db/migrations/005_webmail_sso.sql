@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 005: Webmail SSO — encrypted IMAP password + SSO tokens table
 SET @col_exists = (
   SELECT COUNT(*) FROM information_schema.COLUMNS

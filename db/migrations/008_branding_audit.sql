@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 008: Reseller branding table
 
 CREATE TABLE IF NOT EXISTS reseller_branding (

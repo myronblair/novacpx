@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 require_once NOVACPX_LIB . '/Root.php';
 $db   = DB::getInstance();
 $body = json_decode(file_get_contents('php://input'), true) ?? [];

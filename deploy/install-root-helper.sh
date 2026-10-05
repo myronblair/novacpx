@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # Install the NovaCPX privileged helper and its sudoers file.
 #
 #   bash deploy/install-root-helper.sh              install /usr/local/sbin/novacpx-root + /etc/sudoers.d/novacpx-root

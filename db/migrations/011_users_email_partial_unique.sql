@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration: replace global email UNIQUE with partial index (hosting accounts only)
 -- Allows admin/reseller emails to be reused for hosting accounts
 CREATE TABLE IF NOT EXISTS users_new (

@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Site Shield API: per-account web rules (blocked addresses, hotlink guard, password-locked folders, custom error pages).
  *

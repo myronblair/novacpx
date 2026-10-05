@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-phpcheck.sh — PHP static analysis on all panel PHP files
 # Usage: bash nova-phpcheck.sh [path]     (default: ../panel)
 #        bash nova-phpcheck.sh --fix      (show errors + line context)

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # Run once after install to configure the auto-deploy system
 # Usage: bash setup-deploy.sh <github_webhook_secret>
 set -euo pipefail

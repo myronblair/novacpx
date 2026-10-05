@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * ProxyManager — manages Nginx reverse proxy for NovaCPX hosted accounts.
  * Supports local nginx (on same VM) or remote nginx (separate proxy VM via SSH).

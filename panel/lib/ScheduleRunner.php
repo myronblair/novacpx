@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * ScheduleRunner: executes the backup schedules saved in backup_schedules (they used to be stored but never run).
  * A schedule is due when it has never run or its interval has passed (with a 5 minute tolerance so a cron tick that lands a

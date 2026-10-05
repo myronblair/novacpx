@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE). */
 /**
  * NovaCPX site tools: Site Shield, Traffic Meter, Pulse (uptime).
  * Pages are plain functions; the panel scripts (user.js / admin.js) register them in their page tables.

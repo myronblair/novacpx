@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 002: Features #14-17 (WordPress, Backup, Cloudflare, TOTP)
 ALTER TABLE users ADD COLUMN totp_secret       VARCHAR(64)  DEFAULT NULL;
 ALTER TABLE users ADD COLUMN totp_enabled      TINYINT(1)   DEFAULT 0;

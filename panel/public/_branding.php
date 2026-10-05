@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Server-side branding loader — injected into portal <head> before JS loads.
  * Reads session cookie → looks up user's reseller → returns branding row.
@@ -77,4 +78,12 @@ function novacpx_logo_html(string $default_svg): string {
 function novacpx_powered_by(): bool {
     $b = novacpx_get_branding();
     return empty($b['hide_powered_by']);
+}
+
+/** Copyright notice shown at the bottom of every page ($fixed = pinned to the window bottom, for login/error pages). */
+function novacpx_legal_footer(bool $fixed = false): string {
+    $y  = (int)date('Y');
+    $yr = $y > 2026 ? '2026&ndash;' . $y : '2026';
+    return '<footer class="nova-legal' . ($fixed ? ' nova-legal-fixed' : '') . '">Copyright &copy; ' . $yr
+         . ' TomTom Enterprises. NovaCPX is licensed under the MIT License. Third-party product names and marks are the property of their respective owners.</footer>';
 }

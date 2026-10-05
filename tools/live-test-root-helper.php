@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 // Live functional test of the panel libraries against the privileged helper (deploy/novacpx-root).
 // WARNING: creates and then terminates a real test account (ncrtest1) plus a docker stack on THIS server; use a dev box or a quiet moment.
 // Copy panel/lib to /tmp/ncx-live/lib and this file to /tmp/ncx-live/, then:  sudo -u www-data php8.3 /tmp/ncx-live/live-test.php

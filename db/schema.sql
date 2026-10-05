@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- NovaCPX Database Schema v1.1.0
 -- Engine: SQLite 3.35+
 

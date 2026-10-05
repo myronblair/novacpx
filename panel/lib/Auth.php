@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 if (!class_exists('TOTP')) require_once __DIR__ . '/TOTP.php';
 
 class Auth {

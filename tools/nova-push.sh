@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-push.sh — Push a local file to the NovaCPX VM via double-hop
 # Usage: bash nova-push.sh <local_file> <remote_path>
 # Example: bash nova-push.sh panel/api/index.php /srv/novacpx/public/api/index.php

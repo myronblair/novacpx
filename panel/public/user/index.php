@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 // NovaCPX User Panel — End-user hosting dashboard
 if (!defined('NOVACPX_ROOT'))    define('NOVACPX_ROOT',    dirname(__DIR__));
 if (!defined('NOVACPX_VERSION')) define('NOVACPX_VERSION', trim(@file_get_contents(NOVACPX_ROOT . '/VERSION') ?: '1.0.0'));
@@ -109,6 +110,7 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
       </div>
     </header>
     <div class="page-content" id="page-content"></div>
+    <?= novacpx_legal_footer() ?>
   </div>
 </div>
 
@@ -152,5 +154,6 @@ window.NOVACPX_BRANDING = <?= json_encode([
 <script src="/assets/js/site-tools.js<?= $_v('/assets/js/site-tools.js') ?>"></script>
 <script src="/assets/js/user.js<?= $_v('/assets/js/user.js') ?>"></script>
 <!-- user.js boots via DOMContentLoaded and handles all auth/init -->
+<?= novacpx_legal_footer(true) ?>
 </body>
 </html>

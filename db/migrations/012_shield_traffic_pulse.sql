@@ -1,3 +1,4 @@
+-- Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 -- Migration 012: Site Shield rules, Traffic Meter (bandwidth accounting), Pulse (uptime monitor), neutral feature slugs.
 
 -- Per-account web rules (blocked addresses, hotlink guard, locked folders, error pages) as one JSON document.

@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 // NovaCPX entry point — redirect based on role or show login
 session_start();
 $redirect = $_GET['redirect'] ?? '';

@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE). */
 /**
  * NovaCPX Feature Manager
  * Loaded by admin panel's features page

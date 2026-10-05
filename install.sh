@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # NovaCPX Installer — Linux Web Hosting Control Panel
 # Supports: Ubuntu 20.04/22.04/24.04, Debian 11/12
 # Usage: curl -fsSL https://novacpx.io/install.sh | bash
@@ -6,7 +7,7 @@
 
 set -euo pipefail
 
-NOVACPX_VERSION="1.2.0"
+NOVACPX_VERSION="1.2.1"
 PANEL_DIR="/opt/novacpx"
 WEB_ROOT="/srv/novacpx/public"
 LOG="/var/log/novacpx-install.log"

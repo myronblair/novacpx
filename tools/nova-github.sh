@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-github.sh — Quick GitHub push for NovaCPX repo
 # Usage: bash nova-github.sh "commit message"   (add all, commit, push)
 #        bash nova-github.sh --status            (git status + diff --stat)
 #        bash nova-github.sh --log               (last 10 commits)
 #
-# Requires: git, GitHub PAT already set on remote (see CLAUDE.md)
+# Requires: git, GitHub PAT already set on the remote
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -41,9 +42,7 @@ case "${1:-}" in
     git add -A
     git status --short
     echo ""
-    git commit -m "$MSG
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    git commit -m "$MSG"
     git push origin main
     echo ""
     echo -e "${GREEN}[✓]${NC} Pushed. Auto-deploy will trigger within ~1 min."

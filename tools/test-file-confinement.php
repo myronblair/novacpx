@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 if (PHP_SAPI!=="cli") { http_response_code(404); exit; }   // command line only
 // Offline check of the file-manager symlink confinement (safe_path / safe_path_new): php tools/test-file-confinement.php
 $src=str_replace("

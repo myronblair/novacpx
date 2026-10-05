@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # Migrate NovaCPX panel DB from MySQL to SQLite
 # Run as root on the NovaCPX VM.
 # Usage: bash tools/migrate-to-sqlite.sh [--schema-only]

@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * Pulse API (site uptime monitor).
  *   GET /api/pulse/status[?account_id=N]   the account's sites: state, response time, 24h uptime, last 48 checks

@@ -1,5 +1,6 @@
 #!/usr/bin/env php
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * NovaCPX background tasks, every 5 minutes (cron.d/novacpx-tasks):
  *   Traffic Meter  read new access-log lines, update usage, send allowance warnings

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 # nova-deploy.sh — Full panel sync to NovaCPX VM
 # Usage: bash nova-deploy.sh [--php-check] [--restart]
 #   --php-check  : validate all PHP files before pushing (recommended)

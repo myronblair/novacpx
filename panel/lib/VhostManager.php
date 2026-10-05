@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
  * VhostManager — creates/removes Apache2 and nginx virtual host configs
  *

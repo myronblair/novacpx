@@ -1,4 +1,5 @@
 <?php
+// Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 require_once NOVACPX_LIB . '/CloudflareManager.php';
 if (!in_array($currentUser['role'], ['admin','reseller','user'])) Response::error('Forbidden', 403);
 
