@@ -4278,7 +4278,7 @@ ${rows.map(c => `<tr data-cid="${Nova.escHtml(c.container_id||'')}">
   <td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(c.name)}</td>
   <td style="font-size:.82rem">${Nova.escHtml(c.image)}</td>
   <td>${Nova.badge(c.status, c.status==='running'?'green':c.status==='stopped'?'red':'yellow')}</td>
-  <td>${c.account_id || '—'}</td>
+  <td>${Nova.escHtml(c.account_name || '—')}</td>
   <td style="font-size:.8rem">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
   <td style="white-space:nowrap">
     ${c.status==='running'
@@ -4289,7 +4289,12 @@ ${rows.map(c => `<tr data-cid="${Nova.escHtml(c.container_id||'')}">
     <button class="btn btn-xs btn-danger" onclick="dockerRemove('${Nova.escHtml(c.container_id||'')}')">Remove</button>
   </td>
 </tr>`).join('')}
-</tbody></table></div>`}`;
+</tbody></table></div>`}
+${(r?.data?.other || []).length ? `<h4 style="margin:1.5rem 0 .25rem">Other containers on this server</h4>
+<p class="text-muted text-sm" style="margin-bottom:.75rem">These were not created through the panel (for example the Portainer agent). They belong to the server itself, not to any hosting account.</p>
+<div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>Image</th><th>State</th><th>Owner</th></tr></thead><tbody>
+${r.data.other.map(o => `<tr><td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(o.name)}</td><td style="font-size:.82rem">${Nova.escHtml(o.image)}</td><td>${Nova.escHtml(o.state)}</td><td>${Nova.badge('System','gray')}</td></tr>`).join('')}
+</tbody></table></div>` : ''}`;
 
   } else if (tab === 'images') {
     const r = await Nova.api('docker', 'images');
@@ -4300,12 +4305,14 @@ ${rows.map(c => `<tr data-cid="${Nova.escHtml(c.container_id||'')}">
   <button class="btn btn-sm btn-primary" onclick="dockerPullModal()">Pull Image</button>
 </div>
 ${imgs.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:center">No images</div>' : `
-<div style="overflow-x:auto"><table class="table"><thead><tr><th>Repository</th><th>Tag</th><th>ID</th><th>Size</th><th>Actions</th></tr></thead><tbody>
+<div style="overflow-x:auto"><table class="table"><thead><tr><th>Repository</th><th>Tag</th><th>ID</th><th>Size</th><th>Belongs to</th><th>Used by</th><th>Actions</th></tr></thead><tbody>
 ${imgs.map(i => `<tr>
   <td>${Nova.escHtml(i.Repository||i.repository||'—')}</td>
   <td><code>${Nova.escHtml(i.Tag||i.tag||'latest')}</code></td>
   <td style="font-family:monospace;font-size:.78rem">${Nova.escHtml((i.ID||i.id||'').substring(7,19))}</td>
   <td>${Nova.escHtml(i.Size||i.size||'—')}</td>
+  <td>${Nova.badge(Nova.escHtml(i.owner||'Unused'), i.kind==='account'?'green':i.kind==='system'?'gray':'yellow')}</td>
+  <td style="font-size:.8rem">${Nova.escHtml(i.used_by||'—')}</td>
   <td><button class="btn btn-xs btn-danger" onclick="dockerImgRemove('${Nova.escHtml(i.ID||i.id||'')}')">Remove</button></td>
 </tr>`).join('')}
 </tbody></table></div>`}`;
@@ -4315,8 +4322,8 @@ ${imgs.map(i => `<tr>
     const vols = r?.data?.volumes || [];
     tc.innerHTML = `<strong>${vols.length} volumes</strong>
 ${vols.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:center">No volumes</div>' : `
-<div style="overflow-x:auto;margin-top:1rem"><table class="table"><thead><tr><th>Name</th><th>Driver</th><th>Scope</th></tr></thead><tbody>
-${vols.map(v=>`<tr><td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(v.Name||v.name||'')}</td><td>${Nova.escHtml(v.Driver||v.driver||'')}</td><td>${Nova.escHtml(v.Scope||v.scope||'')}</td></tr>`).join('')}
+<div style="overflow-x:auto;margin-top:1rem"><table class="table"><thead><tr><th>Name</th><th>Driver</th><th>Scope</th><th>Belongs to</th><th>Used by</th></tr></thead><tbody>
+${vols.map(v=>`<tr><td style="font-family:monospace;font-size:.82rem">${Nova.escHtml(v.Name||v.name||'')}</td><td>${Nova.escHtml(v.Driver||v.driver||'')}</td><td>${Nova.escHtml(v.Scope||v.scope||'')}</td><td>${Nova.badge(Nova.escHtml(v.owner||'Unused'), v.kind==='account'?'green':v.kind==='system'?'gray':'yellow')}</td><td style="font-size:.8rem">${Nova.escHtml(v.used_by||'—')}</td></tr>`).join('')}
 </tbody></table></div>`}`;
 
   } else if (tab === 'networks') {
@@ -4324,8 +4331,8 @@ ${vols.map(v=>`<tr><td style="font-family:monospace;font-size:.82rem">${Nova.esc
     const nets = r?.data?.networks || [];
     tc.innerHTML = `<strong>${nets.length} networks</strong>
 ${nets.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:center">No networks</div>' : `
-<div style="overflow-x:auto;margin-top:1rem"><table class="table"><thead><tr><th>Name</th><th>Driver</th><th>Scope</th><th>ID</th></tr></thead><tbody>
-${nets.map(n=>`<tr><td>${Nova.escHtml(n.Name||n.name||'')}</td><td>${Nova.escHtml(n.Driver||n.driver||'')}</td><td>${Nova.escHtml(n.Scope||n.scope||'')}</td><td style="font-family:monospace;font-size:.78rem">${Nova.escHtml((n.ID||n.id||'').substring(0,12))}</td></tr>`).join('')}
+<div style="overflow-x:auto;margin-top:1rem"><table class="table"><thead><tr><th>Name</th><th>Driver</th><th>Scope</th><th>ID</th><th>Belongs to</th><th>Used by</th></tr></thead><tbody>
+${nets.map(n=>`<tr><td>${Nova.escHtml(n.Name||n.name||'')}</td><td>${Nova.escHtml(n.Driver||n.driver||'')}</td><td>${Nova.escHtml(n.Scope||n.scope||'')}</td><td style="font-family:monospace;font-size:.78rem">${Nova.escHtml((n.ID||n.id||'').substring(0,12))}</td><td>${Nova.badge(Nova.escHtml(n.owner||'Unused'), n.kind==='account'?'green':n.kind==='system'?'gray':'yellow')}</td><td style="font-size:.8rem">${Nova.escHtml(n.used_by||'—')}</td></tr>`).join('')}
 </tbody></table></div>`}`;
 
   } else if (tab === 'stacks') {
@@ -4341,7 +4348,7 @@ ${stacks.length === 0 ? '<div class="text-muted" style="padding:2rem;text-align:
 ${stacks.map(s=>`<tr>
   <td>${Nova.escHtml(s.name)}</td>
   <td>${Nova.badge(s.status, s.status==='running'?'green':s.status==='stopped'?'red':'yellow')}</td>
-  <td>${s.account_id||'admin'}</td>
+  <td>${Nova.escHtml(s.account_name||'Panel admin')}</td>
   <td style="font-size:.8rem">${new Date(s.created_at).toLocaleDateString()}</td>
   <td style="white-space:nowrap">
     <button class="btn btn-xs btn-success" onclick="dockerStackAct(${s.id},'up')">Up</button>

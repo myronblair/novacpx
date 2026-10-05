@@ -5,6 +5,9 @@
  *   GET  /api/sweep/status[?account_id=N]       last scan + open findings
  *   POST /api/sweep/scan        {account_id?}   start a scan in the background
  *   POST /api/sweep/quarantine  {finding_id, account_id?}   move the file out of the web root (restorable)
+ *   POST /api/sweep/block       {finding_id, account_id?}   keep the file in place but make it unreadable and unrunnable (unblock puts it back)
+ *   POST /api/sweep/unblock     {finding_id, account_id?}
+ *   POST /api/sweep/quarantine-all  {account_id?}       quarantine every open high-severity finding
  *   POST /api/sweep/restore     {finding_id, account_id?}
  *   POST /api/sweep/ignore      {finding_id, account_id?}   mark as harmless (stays quiet in later scans)
  *   GET  /api/sweep/overview    admin/reseller: findings per account
@@ -63,6 +66,46 @@ match ($action) {
         $db->execute("UPDATE sweep_findings SET status = 'quarantined' WHERE id = ?", [$f['id']]);
         audit('sweep.quarantine', $a['username'], ['path' => $f['path']]);
         Response::success(null, 'File moved to quarantine');
+    })(),
+
+    'block' => (function() use ($mustBeOn, $resolveAccount, $db, $body) {
+        $a = $resolveAccount();
+        $mustBeOn($a);
+        $f = $db->fetchOne("SELECT * FROM sweep_findings WHERE id = ? AND account_id = ?", [(int)($body['finding_id'] ?? 0), $a['id']]);
+        if (!$f) Response::error('Finding not found', 404);
+        if ($f['status'] !== 'open') Response::error('This finding is not open');
+        try { Root::ok('sweep.block', ['username' => $a['username'], 'id' => (int)$f['id'], 'path' => $f['path']]); }
+        catch (RuntimeException $e) { Response::error($e->getMessage()); }
+        $db->execute("UPDATE sweep_findings SET status = 'blocked' WHERE id = ?", [$f['id']]);
+        audit('sweep.block', $a['username'], ['path' => $f['path']]);
+        Response::success(null, 'File blocked - it can no longer be read or run');
+    })(),
+
+    'unblock' => (function() use ($mustBeOn, $resolveAccount, $db, $body) {
+        $a = $resolveAccount();
+        $mustBeOn($a);
+        $f = $db->fetchOne("SELECT * FROM sweep_findings WHERE id = ? AND account_id = ?", [(int)($body['finding_id'] ?? 0), $a['id']]);
+        if (!$f) Response::error('Finding not found', 404);
+        if ($f['status'] !== 'blocked') Response::error('This file is not blocked');
+        try { Root::ok('sweep.unblock', ['username' => $a['username'], 'id' => (int)$f['id']]); }
+        catch (RuntimeException $e) { Response::error($e->getMessage()); }
+        $db->execute("UPDATE sweep_findings SET status = 'ignored' WHERE id = ?", [$f['id']]);   // unblocked on purpose: stay quiet
+        audit('sweep.unblock', $a['username'], ['path' => $f['path']]);
+        Response::success(null, 'File unblocked');
+    })(),
+
+    'quarantine-all' => (function() use ($mustBeOn, $resolveAccount, $db) {
+        $a = $resolveAccount();
+        $mustBeOn($a);
+        $n = 0; $failed = 0;
+        foreach ($db->fetchAll("SELECT * FROM sweep_findings WHERE account_id = ? AND status = 'open' AND severity = 'high'", [$a['id']]) as $f) {
+            try { Root::ok('sweep.quarantine', ['username' => $a['username'], 'id' => (int)$f['id'], 'path' => $f['path']]); }
+            catch (RuntimeException $e) { $failed++; continue; }
+            $db->execute("UPDATE sweep_findings SET status = 'quarantined' WHERE id = ?", [$f['id']]);
+            $n++;
+        }
+        audit('sweep.quarantine-all', $a['username'], ['files' => $n, 'failed' => $failed]);
+        Response::success(['quarantined' => $n, 'failed' => $failed], "{$n} file(s) moved to quarantine" . ($failed ? ", {$failed} could not be moved" : ''));
     })(),
 
     'restore' => (function() use ($mustBeOn, $resolveAccount, $db, $body) {

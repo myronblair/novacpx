@@ -782,6 +782,11 @@ function cmd_docker_list(array $p): int {
     return ncr_out(ncr_docker(array_merge($fmt, ['--format', '{{json .}}'])), false);
 }
 
+/** Every container on the host (panel-made or not) with labels, volumes and networks, so the panel can say who owns what. */
+function cmd_docker_inventory(array $p): int {
+    return ncr_out(ncr_docker(['ps', '-a', '--no-trunc', '--format', '{{json .}}']), false);
+}
+
 function cmd_docker_pull(array $p): int { return ncr_out(ncr_docker(['pull', v_image($p['image'] ?? null)], true), true); }
 
 function cmd_docker_rmi(array $p): int {
@@ -1629,6 +1634,42 @@ function cmd_sweep_quarantine(array $p): int {
     return ncr_json(['quarantined' => $rel]);
 }
 
+/** Block: the file stays where it is but nobody (not even the site) can read or run it. Original owner and mode are kept for unblock. */
+function ncr_block_state(string $user): string { return "/home/{$user}/.quarantine/blocked.json"; }
+
+function cmd_sweep_block(array $p): int {
+    $user = v_managed_user($p['username'] ?? null)['name'];
+    $id   = v_int($p['id'] ?? null, 1, PHP_INT_MAX, 'finding id');
+    [$abs, $rel] = v_account_file($user, $p['path'] ?? null);
+    $dir = "/home/{$user}/.quarantine";
+    if (is_link($dir)) refuse('quarantine is a symlink');
+    if (!is_dir($dir) && !mkdir($dir, 0700)) refuse('cannot create the quarantine folder');
+    chown($dir, 'root'); chgrp($dir, 'root'); chmod($dir, 0700);
+    $f = ncr_block_state($user);
+    $st = is_file($f) ? (json_decode((string)file_get_contents($f), true) ?: []) : [];
+    if (isset($st[(string)$id])) refuse('already blocked');
+    $st[(string)$id] = ['rel' => $rel, 'mode' => fileperms($abs) & 07777, 'uid' => fileowner($abs), 'gid' => filegroup($abs)];
+    file_put_contents($f, json_encode($st)); chmod($f, 0600);
+    chown($abs, 'root'); chgrp($abs, 'root'); chmod($abs, 0000);
+    return ncr_json(['blocked' => $rel]);
+}
+
+function cmd_sweep_unblock(array $p): int {
+    $user = v_managed_user($p['username'] ?? null)['name'];
+    $id   = v_int($p['id'] ?? null, 1, PHP_INT_MAX, 'finding id');
+    $f = ncr_block_state($user);
+    $st = is_file($f) ? (json_decode((string)file_get_contents($f), true) ?: []) : [];
+    $e = $st[(string)$id] ?? null;
+    if (!$e) refuse('this file is not blocked');
+    $abs = "/home/{$user}/" . ltrim((string)$e['rel'], '/');
+    $real = realpath($abs);
+    if ($real === false || is_link($abs) || !is_file($real) || !str_starts_with($real, "/home/{$user}/") || str_starts_with($real, "/home/{$user}/.quarantine/")) refuse('the blocked file is gone');
+    chown($real, (int)$e['uid']); chgrp($real, (int)$e['gid']); chmod($real, (int)$e['mode']);
+    unset($st[(string)$id]);
+    file_put_contents($f, json_encode($st)); chmod($f, 0600);
+    return ncr_json(['unblocked' => $e['rel']]);
+}
+
 function cmd_sweep_restore(array $p): int {
     $user = v_managed_user($p['username'] ?? null)['name'];
     $id   = v_int($p['id'] ?? null, 1, PHP_INT_MAX, 'finding id');
@@ -2039,12 +2080,12 @@ const NCR_COMMANDS = [
     'docker.action' => 'cmd_docker_action', 'docker.rm' => 'cmd_docker_rm', 'docker.logs' => 'cmd_docker_logs', 'docker.inspect' => 'cmd_docker_inspect',
     'docker.run' => 'cmd_docker_run', 'docker.list' => 'cmd_docker_list', 'docker.pull' => 'cmd_docker_pull', 'docker.rmi' => 'cmd_docker_rmi',
     'docker.install' => 'cmd_docker_install', 'docker.stack.prepare' => 'cmd_docker_stack_prepare', 'docker.stack.check' => 'cmd_docker_stack_check',
-    'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
+    'docker.inventory' => 'cmd_docker_inventory', 'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
     'site.rules.write' => 'cmd_site_rules_write',
     'waf.write' => 'cmd_waf_write',
     'ftp.sync' => 'cmd_ftp_sync', 'clamav.status' => 'cmd_clamav_status', 'clamav.install' => 'cmd_clamav_install', 'clamav.update' => 'cmd_clamav_update', 'clamav.remove' => 'cmd_clamav_remove', 'https.enforce' => 'cmd_https_enforce', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
     'mail.queue.list' => 'cmd_mail_queue_list', 'mail.queue.action' => 'cmd_mail_queue_action',
-    'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
+    'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'sweep.block' => 'cmd_sweep_block', 'sweep.unblock' => 'cmd_sweep_unblock', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
 ];
 
 function ncr_main(array $argv): int {

@@ -3,6 +3,7 @@
 /**
  * Traffic Meter API.
  *   GET /api/traffic/summary[?account_id=N]   this month, allowance and the last 30 days for one account
+ *   GET /api/traffic/account?account_id=N     admin/reseller: one account's bandwidth history and resource use
  *   GET /api/traffic/overview                 all accounts the caller may see (admin: everyone, reseller: own customers)
  *   GET/POST /api/traffic/settings            admin: what happens at 100% (notify | suspend)
  */
@@ -19,6 +20,14 @@ match ($action) {
             : (int)($body['account_id'] ?? $_GET['account_id'] ?? 0);
         assert_account_access($accountId);
         Response::success(TrafficMeter::summary($accountId));
+    })(),
+
+    'account' => (function() use ($cu) {
+        Auth::getInstance()->require('admin', 'reseller');
+        $id = (int)($_GET['account_id'] ?? 0);
+        assert_account_access($id);
+        try { Response::success(TrafficMeter::accountDetail($id)); }
+        catch (RuntimeException $e) { Response::error($e->getMessage(), 404); }
     })(),
 
     'overview' => (function() use ($cu) {
