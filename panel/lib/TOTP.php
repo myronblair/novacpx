@@ -38,10 +38,10 @@ class TOTP {
         return false;
     }
 
-    public static function qrUrl(string $secret, string $username, string $issuer = 'NovaCPX'): string {
-        $label   = rawurlencode("{$issuer}:{$username}");
-        $otpauth = "otpauth://totp/{$label}?secret={$secret}&issuer=" . rawurlencode($issuer) . "&algorithm=SHA1&digits=6&period=30";
-        return "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" . rawurlencode($otpauth);
+    /** The otpauth:// link an authenticator app understands (the browser turns it into a QR code, nothing leaves the server). */
+    public static function otpauthUri(string $secret, string $username, string $issuer = 'NovaCPX'): string {
+        $label = rawurlencode("{$issuer}:{$username}");
+        return "otpauth://totp/{$label}?secret={$secret}&issuer=" . rawurlencode($issuer) . "&algorithm=SHA1&digits=6&period=30";
     }
 
     public static function generateBackupCodes(int $count = 8): array {
