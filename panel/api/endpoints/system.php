@@ -10,6 +10,11 @@ Auth::getInstance()->require('admin', 'reseller', 'user');
 $db   = DB::getInstance();
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
 
+// The old check-update/apply-update ran git as the web user (dubious-ownership failures) and only ever followed main.
+// They now use the privileged, channel-aware path.
+if ($action === 'check-update') $action = 'check-novacpx-update';
+if ($action === 'apply-update') $action = 'apply-novacpx-update';
+
 match ($action) {
 
     // ── Version & Update Info ─────────────────────────────────────────────────
