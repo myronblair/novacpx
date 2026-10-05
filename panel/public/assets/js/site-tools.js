@@ -645,6 +645,15 @@ ${g ? `
     });
   }
 
+  window.twofaRefresh = () => {
+    if (window.adminPage) adminPage('twofa');
+    else if (window.resellerNav) resellerNav('security');
+    else if (window.userNav) userNav('security');
+  };
+  window.twofaSecurityPage = async (el) => {
+    el.innerHTML = '<div class="page-header"><h2 class="page-title">Two-Factor Authentication</h2></div>' + await window.twofaSelfCard();
+  };
+
   window.twofaSelfCard = async () => {
     const st = await Nova.api('totp', 'status');
     const on = !!st?.data?.enabled;
@@ -671,7 +680,7 @@ ${g ? `
       <p>2. Enter the 6-digit code it shows.</p>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap"><input id="twofa-code" class="form-control" style="max-width:11rem" inputmode="numeric" maxlength="6" placeholder="123456" onkeydown="if(event.key==='Enter')twofaEnable()">
       <button class="btn btn-primary" onclick="twofaEnable()">Turn on 2FA</button>
-      <button class="btn" onclick="adminPage('twofa')">Cancel</button></div>`;
+      <button class="btn" onclick="twofaRefresh()">Cancel</button></div>`;
     try {
       await twofaLoadQr();
       const qr = window.qrcode(0, 'M'); qr.addData(otpauth); qr.make();
@@ -684,7 +693,7 @@ ${g ? `
   const twofaShowCodes = (codes, title) => Nova.modal(title,
     `<p>Save these backup codes now - each works once if you lose your phone, and they will not be shown again.</p>
      <pre style="background:var(--bg);padding:1rem;font-size:1rem;user-select:all">${codes.map(esc).join('\n')}</pre>`,
-    `<button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove();adminPage('twofa')">I saved them</button>`);
+    `<button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove();twofaRefresh()">I saved them</button>`);
 
   window.twofaEnable = async () => {
     const code = (document.getElementById('twofa-code')?.value || '').trim();
@@ -705,7 +714,36 @@ ${g ? `
     if (!password) return;
     Nova.api('totp', 'disable', { method: 'POST', body: { password } }).then(res => {
       Nova.toast(res?.success ? '2FA turned off' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
-      if (res?.success && window.adminPage) adminPage('twofa');
+      if (res?.success) twofaRefresh();
     });
+  };
+  /* ══════════════════════════ Sign-in with a 2FA code (reseller and customer panels) ══════════════════════════ */
+  let _login2fa = null;
+  window.novaDoLogin = async (port) => {
+    const err = document.getElementById('li-err');
+    const codeEl = document.getElementById('li-totp');
+    const creds = (_login2fa && codeEl)
+      ? { ..._login2fa, totp_code: codeEl.value.replace(/\s+/g, '') }
+      : { username: document.getElementById('li-user')?.value, password: document.getElementById('li-pass')?.value };
+    Nova.loading('Signing in...');
+    const res = await Nova.api('auth', 'login', { method: 'POST', body: creds });
+    Nova.loadingDone();
+    if (res?.success) {
+      if (res.data?.portal_url && !res.data.portal_url.includes(':' + port)) location.href = res.data.portal_url;
+      else location.reload();
+    } else if (res?.totp_required) {
+      _login2fa = creds;
+      const passGroup = document.getElementById('li-pass')?.closest('.form-group');
+      document.getElementById('li-user')?.closest('.form-group')?.style.setProperty('display', 'none');
+      passGroup?.style.setProperty('display', 'none');
+      const g = document.createElement('div');
+      g.className = 'form-group';
+      g.innerHTML = '<label class="form-label">2FA code</label><input id="li-totp" type="text" class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="6-digit code or a backup code">';
+      passGroup?.after(g);
+      if (err) err.style.display = 'none';
+      document.getElementById('li-totp')?.focus();
+    } else if (err) {
+      err.textContent = res?.message || 'Login failed'; err.style.display = 'block';
+    }
   };
 })();

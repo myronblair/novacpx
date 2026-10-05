@@ -34,18 +34,7 @@ function renderLogin() {
   </div>`;
 }
 
-async function doLogin() {
-  Nova.loading('Signing in…');
-  const res = await Nova.api('auth', 'login', { method: 'POST', body: { username: document.getElementById('li-user')?.value, password: document.getElementById('li-pass')?.value }});
-  Nova.loadingDone();
-  if (res?.success) {
-    if (res.data?.portal_url && !res.data.portal_url.includes(':8881')) location.href = res.data.portal_url;
-    else location.reload();
-  } else {
-    const err = document.getElementById('li-err');
-    if (err) { err.textContent = res?.message || 'Login failed'; err.style.display = 'block'; }
-  }
-}
+async function doLogin() { return window.novaDoLogin(8881); }
 window.doLogin = doLogin;
 
 /* ── Pages ─────────────────────────────────────────────────────────────── */
@@ -342,11 +331,13 @@ const rNavGroups = [
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="4" height="4"/><rect x="7" y="9" width="4" height="4"/><rect x="12" y="9" width="4" height="4"/><rect x="7" y="4" width="4" height="4"/><path d="M22 11c0 5-3.9 9-10 9-8 0-10-7-10-7"/></svg>' },
     { id: 'sweep', label: 'Malware Sweep',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' },
+    { id: 'security', label: 'Two-Factor Auth',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
     { id: 'whitelabel', label: 'White Label',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>' },
   ]},
 ];
-const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker, whitelabel: rWhiteLabel, sweep: async (el) => { el.innerHTML = await window.sweepAdminPage('reseller'); } };
+const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker, whitelabel: rWhiteLabel, security: (el) => window.twofaSecurityPage(el), sweep: async (el) => { el.innerHTML = await window.sweepAdminPage('reseller'); } };
 
 let _rActivePage = 'dashboard';
 
