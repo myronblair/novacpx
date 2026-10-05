@@ -1441,7 +1441,7 @@ function cmd_transfer_export(array $p): int {
     }
     $meta['databases_files'] = [];
     foreach ($dbs as $i => $name) {
-        [$rc, $out] = ncr_run(['sh', '-c', 'set -o pipefail; mysqldump --single-transaction --routines --triggers --default-character-set=utf8mb4 '
+        [$rc, $out] = ncr_run(['bash', '-c', 'set -o pipefail; mysqldump --single-transaction --routines --triggers --default-character-set=utf8mb4 '
             . escapeshellarg($name) . ' | gzip > ' . escapeshellarg("{$stage}/db-{$i}.sql.gz")]);
         if ($rc !== 0) $fail("could not dump database {$name}: " . substr($out, -300));
         $meta['databases_files'][$name] = "db-{$i}.sql.gz";
@@ -1538,7 +1538,7 @@ function cmd_transfer_restore(array $p): int {
         $created[] = ['name' => $d['name'], 'user' => $d['user']];
         [$rc, $out] = ncr_run(['mysql'], $sql);
         if ($rc !== 0) $fail('could not create database ' . $d['name'] . ': ' . substr($out, -200));
-        [$rc, $out] = ncr_run(['sh', '-c', 'set -o pipefail; gunzip -c ' . escapeshellarg("{$stage}/{$d['file']}") . ' | mysql ' . escapeshellarg($d['name'])]);
+        [$rc, $out] = ncr_run(['bash', '-c', 'set -o pipefail; gunzip -c ' . escapeshellarg("{$stage}/{$d['file']}") . ' | mysql ' . escapeshellarg($d['name'])]);
         if ($rc !== 0) $fail('could not load database ' . $d['name'] . ': ' . substr($out, -200));
     }
     ncr_rmtree($stage);
