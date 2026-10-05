@@ -1,6 +1,7 @@
 <?php
 // Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 Auth::getInstance()->require('admin', 'reseller');
+require_once NOVACPX_LIB . '/PackageTools.php';
 $db   = DB::getInstance();
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
 $user = Auth::getInstance()->user();
