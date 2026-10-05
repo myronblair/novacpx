@@ -377,9 +377,11 @@ ${sites.length === 0 ? '<div class="empty">No checks yet - the first results app
   const sevBadge = (s) => Nova.badge(esc(s), s === 'high' ? 'red' : s === 'medium' ? 'yellow' : 'blue');
 
   async function sweepRender(el) {
-    const res = await Nova.api('sweep', 'status');
-    if (!res?.success) { el.innerHTML = '<div class="empty">Could not load Sweep.</div>'; return; }
-    const { run, findings, clamav } = res.data;
+    const acct = window._sweepAcct || null;
+    const res = await Nova.api('sweep', 'status', acct ? { params: { account_id: acct } } : {});
+    if (!res?.success) { el.innerHTML = `<div class="empty">${esc(res?.message || 'Could not load Sweep.')}</div>`; return; }
+    const { run, findings, clamav, enabled } = res.data;
+    if (enabled === false) { el.innerHTML = '<div class="page-header"><h2 class="page-title">Sweep</h2></div><div class="alert alert-warning">Malware scanning is switched off for this account. Ask your hosting provider to switch it on.</div>'; return; }
     const running = run && run.status === 'running';
     const open = findings.filter(f => f.status === 'open').length;
     el.innerHTML = `
@@ -404,43 +406,98 @@ ${run && run.status === 'failed' ? `<div class="alert alert-warning" style="marg
   </tbody></table></div>`}</div>`;
     if (running) setTimeout(() => { if (el.isConnected) sweepRender(el); }, 5000);
   }
-  window.sweepPage = async (el) => { el.innerHTML = '<div class="loading">Loading...</div>'; window._sweepEl = el; await sweepRender(el); };
+  window.sweepPage = async (el) => { el.innerHTML = '<div class="loading">Loading...</div>'; window._sweepAcct = null; window._sweepEl = el; await sweepRender(el); };
   window.sweepScan = async () => {
-    const res = await Nova.api('sweep', 'scan', { method: 'POST', body: {} });
+    const res = await Nova.api('sweep', 'scan', { method: 'POST', body: { account_id: window._sweepAcct || undefined } });
     Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
     if (res?.success) setTimeout(() => sweepRender(window._sweepEl), 1500);
   };
   window.sweepAct = (act, id) => {
     const go = async () => {
-      const res = await Nova.api('sweep', act, { method: 'POST', body: { finding_id: id } });
+      const res = await Nova.api('sweep', act, { method: 'POST', body: { finding_id: id, account_id: window._sweepAcct || undefined } });
       Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
       sweepRender(window._sweepEl);
     };
     if (act === 'quarantine') Nova.confirm('Move this file out of your website into quarantine? You can restore it later.', go, true); else go();
   };
 
-  window.sweepAdminPage = async () => {
-    const [ov, st] = await Promise.all([Nova.api('sweep', 'overview'), Nova.api('sweep', 'settings')]);
+  const sweepRefresh = () => { if (window.adminPage) adminPage('sweep-overview'); else if (window.resellerNav) resellerNav('sweep'); };
+  const sweepSwitch = (id, on) => `<label style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" ${on ? 'checked' : ''} onchange="sweepSetAccess(${id}, this.checked)"> <span class="text-muted">${on ? 'On' : 'Off'}</span></label>`;
+
+  function clamCard(c, cfg) {
+    if (!c) return '';
+    const running = c.state === 'running';
+    let body;
+    if (running) {
+      body = `<div class="alert alert-info">Working... this takes a few minutes. This page updates by itself.</div>
+        <pre style="background:var(--bg);padding:.75rem;font-size:.75rem;max-height:160px;overflow:auto;white-space:pre-wrap">${esc(c.log || '')}</pre>`;
+    } else if (!c.installed) {
+      body = `<p class="text-muted">ClamAV is not installed on this server. It adds a real antivirus engine on top of the built-in pattern scan.${c.ram_mb && c.ram_mb < 1800 ? ' This server has ' + c.ram_mb + ' MB of RAM, so the faster background daemon will be skipped.' : ''}</p>
+        ${c.state === 'failed' ? '<div class="alert alert-warning">The last install did not finish. Check the log below and try again.<pre style="font-size:.75rem;white-space:pre-wrap">' + esc(c.log || '') + '</pre></div>' : ''}
+        <button class="btn btn-primary" onclick="sweepClam('clamav-install')">Install ClamAV on this server</button>`;
+    } else {
+      body = `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+          <div><div class="text-muted text-sm">Version</div><strong>${esc(c.version || '-')}</strong></div>
+          <div><div class="text-muted text-sm">Scan mode</div><strong>${c.daemon ? 'Fast (daemon running)' : 'Standard (command line)'}</strong></div>
+          <div><div class="text-muted text-sm">Signatures updated</div><strong>${c.signatures_updated ? esc(new Date(c.signatures_updated * 1000).toLocaleString()) : 'not yet'}</strong></div>
+          <div><div class="text-muted text-sm">Auto-update</div><strong>${c.freshclam ? 'On' : 'Off'}</strong></div></div>
+        <label style="display:flex;gap:.4rem;align-items:center;margin-bottom:.75rem"><input type="checkbox" id="sw-clam" ${cfg.clamav ? 'checked' : ''} onchange="sweepSaveSettings()"> Use ClamAV in scans</label>
+        <button class="btn btn-sm" onclick="sweepClam('clamav-update')">Update signatures now</button>
+        <button class="btn btn-sm btn-danger" onclick="sweepClamRemove()">Remove ClamAV</button>`;
+    }
+    return `<div class="panel" style="margin-bottom:1rem"><div class="panel-header"><h3 class="panel-title">ClamAV antivirus</h3>
+      ${Nova.badge(running ? 'Working' : (c.installed ? 'Installed' : 'Not installed'), running ? 'yellow' : (c.installed ? 'green' : 'gray'))}</div>
+      <div style="padding:1rem 1.25rem">${body}</div></div>`;
+  }
+
+  window.sweepAdminPage = async (mode) => {
+    const isRes = mode === 'reseller';
+    const calls = [Nova.api('sweep', 'overview'), Nova.api('sweep', 'access')];
+    if (!isRes) calls.push(Nova.api('sweep', 'clamav-status'), Nova.api('sweep', 'settings'));
+    const [ov, ac, cs, st] = await Promise.all(calls);
     const rows = ov?.data || [];
-    const cfg = st?.data || {};
+    const access = ac?.data || { resellers: [], users: [] };
+    const clam = cs?.data || null, cfg = st?.data || {};
+    if (clam && clam.state === 'running') setTimeout(() => sweepRefresh(), 5000);
+    const resellers = access.resellers || [];
     return `
 <div class="page-header"><h1 class="page-title">Malware Sweep</h1></div>
-<div class="panel" style="margin-bottom:1rem"><div class="panel-header"><h3 class="panel-title">Engine</h3></div>
-  <div style="padding:1rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
-    <span>Built-in pattern scan: <strong>always on</strong> (nightly at 03:30)</span>
-    <label style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" id="sw-clam" ${cfg.clamav ? 'checked' : ''} ${cfg.clamav_installed ? '' : 'disabled'}> Also use ClamAV ${cfg.clamav_installed ? '' : '(not installed on this server)'}</label>
-    <button class="btn btn-primary btn-sm" onclick="sweepSaveSettings()" ${cfg.clamav_installed ? '' : 'disabled'}>Save</button>
-  </div></div>
+${isRes ? '' : `<div class="panel" style="margin-bottom:1rem"><div class="panel-header"><h3 class="panel-title">Built-in scan</h3></div>
+  <div style="padding:1rem 1.25rem">Pattern scan: <strong>always on</strong> for every account that has Sweep switched on, nightly at 03:30.</div></div>
+${clamCard(clam, cfg)}`}
+${resellers.length ? `<div class="panel" style="margin-bottom:1rem"><div class="panel-header"><h3 class="panel-title">Resellers</h3><span class="form-hint">Off = the reseller and all their customers lose Sweep</span></div>
+  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Reseller</th><th>Email</th><th>Sweep</th></tr></thead><tbody>
+  ${resellers.map(r => `<tr><td><strong>${esc(r.username)}</strong></td><td>${esc(r.email || '')}</td><td>${sweepSwitch(r.id, Number(r.enabled) === 1)}</td></tr>`).join('')}
+  </tbody></table></div></div>` : ''}
 <div class="panel"><div class="panel-header"><h3 class="panel-title">Accounts</h3></div>
   ${rows.length === 0 ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No accounts</div>' : `
-  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Account</th><th>Domain</th><th>Last scan</th><th>Open findings</th><th>High severity</th></tr></thead><tbody>
+  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Account</th><th>Domain</th><th>Last scan</th><th>Open findings</th><th>High severity</th><th>Sweep</th><th></th></tr></thead><tbody>
   ${rows.map(r => `<tr><td><strong>${esc(r.username)}</strong></td><td>${esc(r.domain)}</td><td>${esc(r.last_scan || 'never')}</td>
-    <td>${r.open_findings > 0 ? Nova.badge(String(r.open_findings), 'yellow') : '0'}</td><td>${r.high_findings > 0 ? Nova.badge(String(r.high_findings), 'red') : '0'}</td></tr>`).join('')}
+    <td>${r.open_findings > 0 ? Nova.badge(String(r.open_findings), 'yellow') : '0'}</td><td>${r.high_findings > 0 ? Nova.badge(String(r.high_findings), 'red') : '0'}</td>
+    <td>${sweepSwitch(r.user_id, Number(r.enabled) === 1)}</td>
+    <td><button class="btn btn-xs btn-primary" onclick="sweepManage(${r.id},'${esc(r.username)}')">Manage</button></td></tr>`).join('')}
   </tbody></table></div>`}</div>`;
   };
   window.sweepSaveSettings = async () => {
     const res = await Nova.api('sweep', 'settings', { method: 'POST', body: { clamav: document.getElementById('sw-clam').checked } });
     Nova.toast(res?.success ? 'Saved' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+  };
+  window.sweepSetAccess = async (userId, enabled) => {
+    const res = await Nova.api('sweep', 'set-access', { method: 'POST', body: { user_id: userId, enabled } });
+    Nova.toast(res?.message || (res?.success ? 'Saved' : 'Failed'), res?.success ? 'success' : 'error');
+    sweepRefresh();
+  };
+  window.sweepClam = async (act) => {
+    const res = await Nova.api('sweep', act, { method: 'POST', body: {} });
+    Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
+    setTimeout(sweepRefresh, 1500);
+  };
+  window.sweepClamRemove = () => Nova.confirm('Remove ClamAV from this server? Sweep keeps working with the built-in pattern scan only.', () => sweepClam('clamav-remove'), true);
+  window.sweepManage = async (accountId, name) => {
+    Nova.modal('Sweep - ' + name, '<div id="sweep-manage" style="min-width:min(900px,90vw)"><div class="loading">Loading...</div></div>');
+    window._sweepAcct = accountId;
+    window._sweepEl = document.getElementById('sweep-manage');
+    await sweepRender(window._sweepEl);
   };
 
   /* ══════════════════════════ Git Deploy ══════════════════════════ */

@@ -1954,6 +1954,74 @@ function cmd_https_enforce(array $p): int {
     return 0;
 }
 
+// ───────────────────────── ClamAV (server-wide, used by Sweep) ─────────────────────────
+
+const NCR_CLAM_STATE = '/var/lib/novacpx/clamav-install.state';
+const NCR_CLAM_LOG   = '/tmp/novacpx-clamav-install.log';
+
+function ncr_clam_mem_kb(): int {
+    return preg_match('/MemTotal:\s+(\d+)/', (string)@file_get_contents('/proc/meminfo'), $m) ? (int)$m[1] : 0;
+}
+
+function ncr_clam_state(string $s): void {
+    @mkdir('/var/lib/novacpx', 0755, true);
+    file_put_contents(NCR_CLAM_STATE, $s . "\n");
+}
+
+function cmd_clamav_status(array $p): int {
+    $bin = is_executable('/usr/bin/clamscan');
+    $ver = '';
+    if ($bin) { [, $v] = ncr_run(['/usr/bin/clamscan', '--version']); $ver = trim($v); }
+    $db = 0;
+    foreach (array_merge(glob('/var/lib/clamav/*.cvd') ?: [], glob('/var/lib/clamav/*.cld') ?: []) as $f) $db = max($db, (int)filemtime($f));
+    [, $d] = ncr_run(['systemctl', 'is-active', 'clamav-daemon']);
+    [, $f] = ncr_run(['systemctl', 'is-active', 'clamav-freshclam']);
+    $state = trim((string)@file_get_contents(NCR_CLAM_STATE));
+    $log = is_file(NCR_CLAM_LOG) ? implode('', array_slice(file(NCR_CLAM_LOG), -14)) : '';
+    return ncr_json([
+        'installed' => $bin, 'version' => $ver, 'daemon' => trim($d) === 'active', 'freshclam' => trim($f) === 'active',
+        'signatures_updated' => $db ?: null, 'ram_mb' => intdiv(ncr_clam_mem_kb(), 1024),
+        'state' => $state, 'log' => $log,
+    ]);
+}
+
+/** Install ClamAV and fetch the first signature set. The daemon (fast scans, about 1 GB of RAM) only goes in on servers with enough memory. */
+function cmd_clamav_install(array $p): int {
+    ncr_clam_state('running');
+    $daemon = ncr_clam_mem_kb() >= 1800000;
+    $pkgs = array_merge(['clamav', 'clamav-freshclam'], $daemon ? ['clamav-daemon'] : []);
+    echo "Installing " . implode(', ', $pkgs) . ($daemon ? '' : " (not enough RAM for the background daemon, using the command-line scanner)") . "\n";
+    $env = ['DEBIAN_FRONTEND' => 'noninteractive'];
+    [$rc] = ncr_run(array_merge(['apt-get', 'install', '-y', '-qq'], $pkgs), null, true, $env);
+    if ($rc !== 0 || !is_executable('/usr/bin/clamscan')) { ncr_clam_state('failed'); echo "apt install failed\n"; return 1; }
+    echo "Downloading the virus signatures (first run takes a few minutes)...\n";
+    ncr_run(['systemctl', 'stop', 'clamav-freshclam']);
+    ncr_run(['freshclam', '--quiet'], null, true);
+    ncr_run(['systemctl', 'enable', '--now', 'clamav-freshclam'], null, true);
+    if ($daemon) { ncr_run(['systemctl', 'enable', '--now', 'clamav-daemon'], null, true); }
+    ncr_clam_state('done');
+    echo "ClamAV is ready.\n";
+    return 0;
+}
+
+function cmd_clamav_update(array $p): int {
+    if (!is_executable('/usr/bin/freshclam')) refuse('ClamAV is not installed');
+    ncr_run(['systemctl', 'stop', 'clamav-freshclam']);
+    [$rc, $out] = ncr_run(['freshclam']);
+    ncr_run(['systemctl', 'start', 'clamav-freshclam']);
+    echo $out;
+    return $rc;
+}
+
+function cmd_clamav_remove(array $p): int {
+    ncr_clam_state('running');
+    foreach (['clamav-daemon', 'clamav-freshclam'] as $svc) ncr_run(['systemctl', 'disable', '--now', $svc]);
+    [$rc, $out] = ncr_run(['apt-get', 'purge', '-y', '-qq', 'clamav', 'clamav-daemon', 'clamav-freshclam', 'clamav-base'], null, true, ['DEBIAN_FRONTEND' => 'noninteractive']);
+    ncr_run(['apt-get', 'autoremove', '-y', '-qq'], null, true, ['DEBIAN_FRONTEND' => 'noninteractive']);
+    ncr_clam_state($rc === 0 ? 'removed' : 'failed');
+    return $rc;
+}
+
 // ───────────────────────── dispatch ─────────────────────────
 
 const NCR_COMMANDS = [
@@ -1974,7 +2042,7 @@ const NCR_COMMANDS = [
     'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
     'site.rules.write' => 'cmd_site_rules_write',
     'waf.write' => 'cmd_waf_write',
-    'ftp.sync' => 'cmd_ftp_sync', 'https.enforce' => 'cmd_https_enforce', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
+    'ftp.sync' => 'cmd_ftp_sync', 'clamav.status' => 'cmd_clamav_status', 'clamav.install' => 'cmd_clamav_install', 'clamav.update' => 'cmd_clamav_update', 'clamav.remove' => 'cmd_clamav_remove', 'https.enforce' => 'cmd_https_enforce', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
     'mail.queue.list' => 'cmd_mail_queue_list', 'mail.queue.action' => 'cmd_mail_queue_action',
     'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
 ];

@@ -54,24 +54,16 @@ function novacpx_branding_head(): void {
     // Sanitize custom CSS — strip </style> tags
     echo preg_replace('/<\s*\/\s*style/i', '', $css) . "\n";
     echo '</style>' . "\n";
-    if ($b['favicon_url'] ?? '') {
-        $fav = htmlspecialchars($b['favicon_url']);
-        echo "<link rel=\"icon\" href=\"$fav\">\n";
-    }
 }
 
-function novacpx_panel_name(string $default): string {
-    $b = novacpx_get_branding();
-    return htmlspecialchars($b['panel_name'] ?? $default);
+/** The panel name and logo are fixed in the code. Nothing in the database, settings or white-label page can change them. */
+const NOVACPX_PANEL_NAME = 'NovaCPX';
+
+function novacpx_panel_name(string $default = NOVACPX_PANEL_NAME): string {
+    return NOVACPX_PANEL_NAME;
 }
 
 function novacpx_logo_html(string $default_svg): string {
-    $b = novacpx_get_branding();
-    if (!empty($b['logo_url'])) {
-        $url  = htmlspecialchars($b['logo_url']);
-        $name = htmlspecialchars($b['panel_name'] ?? 'Panel');
-        return "<img src=\"$url\" alt=\"$name\" style=\"max-height:36px;max-width:160px;object-fit:contain\">";
-    }
     return $default_svg;
 }
 

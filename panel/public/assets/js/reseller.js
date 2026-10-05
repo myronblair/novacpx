@@ -340,11 +340,13 @@ const rNavGroups = [
   { label: 'Tools', items: [
     { id: 'docker', label: 'Docker',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="4" height="4"/><rect x="7" y="9" width="4" height="4"/><rect x="12" y="9" width="4" height="4"/><rect x="7" y="4" width="4" height="4"/><path d="M22 11c0 5-3.9 9-10 9-8 0-10-7-10-7"/></svg>' },
+    { id: 'sweep', label: 'Malware Sweep',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' },
     { id: 'whitelabel', label: 'White Label',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>' },
   ]},
 ];
-const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker, whitelabel: rWhiteLabel };
+const rPages = { dashboard: rDashboard, accounts: rAccounts, createAccount: rCreateAccount, packages: rPackages, dns: rDNS, docker: rDocker, whitelabel: rWhiteLabel, sweep: async (el) => { el.innerHTML = await window.sweepAdminPage('reseller'); } };
 
 let _rActivePage = 'dashboard';
 
@@ -570,23 +572,8 @@ async function rWhiteLabel(el) {
 <div class="grid-2" style="gap:1.5rem;align-items:start">
 
   <div class="card">
-    <div class="card-header"><span class="card-title">Panel Identity</span></div>
+    <div class="card-header"><span class="card-title">Custom Styling</span></div>
     <div class="card-body" style="display:flex;flex-direction:column;gap:1rem">
-      <div class="form-group">
-        <label>Panel Name</label>
-        <input id="wl-name" class="form-control" value="${Nova.escHtml(b.panel_name||'NovaCPX')}" placeholder="NovaCPX">
-      </div>
-      <div class="form-group">
-        <label>Logo</label>
-        ${b.logo_url ? `<div style="margin-bottom:.5rem"><img src="${Nova.escHtml(b.logo_url)}" style="max-height:50px;max-width:200px;border-radius:6px;background:var(--bg2);padding:.5rem"></div>` : ''}
-        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer">
-            Upload Logo <input type="file" id="wl-logo-file" accept="image/*" style="display:none" onchange="rWlUploadLogo()">
-          </label>
-          ${b.logo_url ? `<button class="btn btn-ghost btn-sm" onclick="rWlDeleteLogo()" style="color:var(--danger)">Remove</button>` : ''}
-          <span class="text-muted text-sm">PNG/SVG/JPG · max 512 KB</span>
-        </div>
-      </div>
       <div class="form-group">
         <label>Custom CSS <span class="text-muted text-sm">(advanced)</span></label>
         <textarea id="wl-css" class="form-control" rows="4" style="font-family:monospace;font-size:.8rem" placeholder="/* e.g. .sidebar { background: #1a1a2e; } */">${Nova.escHtml(b.custom_css||'')}</textarea>
@@ -669,33 +656,8 @@ function rWlUpdatePreview() {
   style.textContent = `:root { --primary: ${p}; --primary-dark: ${p}; --accent: ${a}; }`;
 }
 
-window.rWlUploadLogo = async () => {
-  const file = document.getElementById('wl-logo-file')?.files?.[0];
-  if (!file) return;
-  if (file.size > 512 * 1024) { Nova.toast('Logo must be under 512 KB', 'error'); return; }
-  const fd = new FormData();
-  fd.append('logo', file);
-  Nova.toast('Uploading…', 'info', 5000);
-  try {
-    const res = await fetch('/api/branding/upload-logo', {
-      method: 'POST', credentials: 'include', body: fd
-    });
-    const data = await res.json();
-    Nova.toast(data?.success ? 'Logo uploaded' : (data?.message || 'Upload failed'),
-               data?.success ? 'success' : 'error');
-    if (data?.success) rWhiteLabel(document.getElementById('page-content'));
-  } catch (e) { Nova.toast('Upload failed', 'error'); }
-};
-
-window.rWlDeleteLogo = async () => {
-  const r = await Nova.api('branding', 'delete-logo', { method: 'POST' });
-  Nova.toast(r?.success ? 'Logo removed' : (r?.message || 'Failed'), r?.success ? 'success' : 'error');
-  if (r?.success) rWhiteLabel(document.getElementById('page-content'));
-};
-
 window.rWlSave = async () => {
   const body = {
-    panel_name:      document.getElementById('wl-name')?.value?.trim()        || 'NovaCPX',
     primary_color:   document.getElementById('wl-primary-hex')?.value          || '#6366f1',
     accent_color:    document.getElementById('wl-accent-hex')?.value           || '#0ea5e9',
     support_email:   document.getElementById('wl-email')?.value?.trim()        || '',

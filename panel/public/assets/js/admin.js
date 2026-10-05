@@ -701,58 +701,110 @@
     return `
 <div class="page-header"><h2 class="page-title">Email Notifications</h2></div>
 
+<form id="notify-form">
 <div class="card mb-2">
-  <div class="card-header"><span class="card-title">Gmail Settings</span></div>
+  <div class="card-header"><span class="card-title">Delivery</span></div>
   <div class="card-body">
-    <form id="notify-form">
-      <div class="grid-2">
-        <div class="form-group">
-          <label>Gmail Sender Address</label>
-          <input type="email" name="gmail_sender" class="form-control" value="${s.gmail_sender || ''}" placeholder="account@gmail.com">
-          <span class="form-hint">Mail is sent through the Gmail API as this account</span>
-        </div>
-        <div class="form-group">
-          <label>OAuth Client ID</label>
-          <input type="text" name="gmail_client_id" class="form-control" value="${s.gmail_client_id || ''}">
-        </div>
-        <div class="form-group">
-          <label>OAuth Client Secret</label>
-          <input type="password" name="gmail_client_secret" class="form-control" placeholder="${s.gmail_client_secret_masked || ''}" value="">
-          <span class="form-hint">Leave blank to keep the stored value</span>
-        </div>
-        <div class="form-group">
-          <label>OAuth Refresh Token</label>
-          <input type="password" name="gmail_refresh_token" class="form-control" placeholder="${s.gmail_refresh_token_masked || ''}" value="">
-          <span class="form-hint">Leave blank to keep the stored value</span>
-        </div>
-        <div class="form-group">
-          <label>From Email</label>
-          <input type="email" name="notify_from_email" class="form-control" value="${s.notify_from_email || ''}">
-        </div>
-        <div class="form-group">
-          <label>From Name</label>
-          <input type="text" name="notify_from_name" class="form-control" value="${s.notify_from_name || 'NovaCPX Panel'}">
-        </div>
-        <div class="form-group">
-          <label>Admin Alert Email</label>
-          <input type="email" name="notify_admin_email" class="form-control" value="${s.notify_admin_email || ''}">
-          <span class="form-hint">Receives alerts for new accounts, suspensions, disk warnings</span>
-        </div>
-        <div class="form-group">
-          <label>Notifications</label>
-          <select name="notifications_enabled" class="form-control">
-            <option value="1" ${(s.notifications_enabled ?? '1') !== '0' ? 'selected' : ''}>Enabled</option>
-            <option value="0" ${s.notifications_enabled === '0' ? 'selected' : ''}>Disabled</option>
-          </select>
-        </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Send notifications with</label>
+        <select name="mail_transport" class="form-control" onchange="notifyTransportShow(this.value)">
+          <option value="gmail" ${(s.mail_transport || 'gmail') === 'gmail' ? 'selected' : ''}>Gmail API</option>
+          <option value="smtp" ${s.mail_transport === 'smtp' ? 'selected' : ''}>SMTP server</option>
+        </select>
+        <span class="form-hint">Fill in the matching section below. Only the chosen one is used.</span>
       </div>
-      <div style="display:flex;gap:.5rem;align-items:center">
-        <button type="submit" class="btn btn-primary">Save Settings</button>
-        <button type="button" class="btn btn-ghost" onclick="notifyTest()">Send Test Email</button>
+      <div class="form-group">
+        <label>Notifications</label>
+        <select name="notifications_enabled" class="form-control">
+          <option value="1" ${(s.notifications_enabled ?? '1') !== '0' ? 'selected' : ''}>Enabled</option>
+          <option value="0" ${s.notifications_enabled === '0' ? 'selected' : ''}>Disabled</option>
+        </select>
       </div>
-    </form>
+      <div class="form-group">
+        <label>From Email</label>
+        <input type="email" name="notify_from_email" class="form-control" value="${s.notify_from_email || ''}">
+      </div>
+      <div class="form-group">
+        <label>From Name</label>
+        <input type="text" name="notify_from_name" class="form-control" value="${s.notify_from_name || 'NovaCPX Panel'}">
+      </div>
+      <div class="form-group">
+        <label>Admin Alert Email</label>
+        <input type="email" name="notify_admin_email" class="form-control" value="${s.notify_admin_email || ''}">
+        <span class="form-hint">Receives alerts for new accounts, suspensions, disk warnings</span>
+      </div>
+    </div>
   </div>
 </div>
+
+<div class="card mb-2" id="notify-gmail" style="${s.mail_transport === 'smtp' ? 'display:none' : ''}">
+  <div class="card-header"><span class="card-title">Gmail Settings</span></div>
+  <div class="card-body">
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Gmail Sender Address</label>
+        <input type="email" name="gmail_sender" class="form-control" value="${s.gmail_sender || ''}" placeholder="account@gmail.com">
+        <span class="form-hint">Mail is sent through the Gmail API as this account</span>
+      </div>
+      <div class="form-group">
+        <label>OAuth Client ID</label>
+        <input type="text" name="gmail_client_id" class="form-control" value="${s.gmail_client_id || ''}">
+      </div>
+      <div class="form-group">
+        <label>OAuth Client Secret</label>
+        <input type="password" name="gmail_client_secret" class="form-control" placeholder="${s.gmail_client_secret_masked || ''}" value="">
+        <span class="form-hint">Leave blank to keep the stored value</span>
+      </div>
+      <div class="form-group">
+        <label>OAuth Refresh Token</label>
+        <input type="password" name="gmail_refresh_token" class="form-control" placeholder="${s.gmail_refresh_token_masked || ''}" value="">
+        <span class="form-hint">Leave blank to keep the stored value</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-2" id="notify-smtp" style="${s.mail_transport === 'smtp' ? '' : 'display:none'}">
+  <div class="card-header"><span class="card-title">SMTP Settings</span></div>
+  <div class="card-body">
+    <div class="grid-2">
+      <div class="form-group">
+        <label>SMTP Server</label>
+        <input type="text" name="smtp_host" class="form-control" value="${Nova.escHtml(s.smtp_host || '')}" placeholder="smtp.example.com">
+      </div>
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" name="smtp_port" class="form-control" min="1" max="65535" value="${Nova.escHtml(s.smtp_port || '587')}">
+        <span class="form-hint">587 (STARTTLS), 465 (SSL) or 25 (plain). Many hosting providers block outbound port 25.</span>
+      </div>
+      <div class="form-group">
+        <label>Connection security</label>
+        <select name="smtp_security" class="form-control">
+          <option value="starttls" ${(s.smtp_security || 'starttls') === 'starttls' ? 'selected' : ''}>STARTTLS (recommended)</option>
+          <option value="ssl" ${s.smtp_security === 'ssl' ? 'selected' : ''}>SSL / TLS</option>
+          <option value="none" ${s.smtp_security === 'none' ? 'selected' : ''}>None (not encrypted)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" name="smtp_user" class="form-control" value="${Nova.escHtml(s.smtp_user || '')}" autocomplete="off">
+        <span class="form-hint">Leave empty if the server needs no login</span>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" name="smtp_pass" class="form-control" placeholder="${s.smtp_pass_masked || ''}" value="" autocomplete="new-password">
+        <span class="form-hint">Leave blank to keep the stored value. The From Email above is used as the sender.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.25rem">
+  <button type="submit" class="btn btn-primary">Save Settings</button>
+  <button type="button" class="btn btn-ghost" onclick="notifyTest()">Send Test Email</button>
+</div>
+</form>
 
 <div class="card">
   <div class="card-header">
@@ -770,11 +822,17 @@
     e.preventDefault();
     const fd   = new FormData(e.target);
     const body = Object.fromEntries(fd.entries());
-    ['gmail_client_secret', 'gmail_refresh_token'].forEach(k => { if (!body[k]) delete body[k]; });
+    ['gmail_client_secret', 'gmail_refresh_token', 'smtp_pass'].forEach(k => { if (!body[k]) delete body[k]; });
     const res  = await Nova.api('system', 'save-notify-settings', { method: 'POST', body });
     if (res?.success) Nova.toast('Notification settings saved', 'success');
     else Nova.toast(res?.message || 'Save failed', 'error');
   });
+
+  window.notifyTransportShow = (v) => {
+    const g = document.getElementById('notify-gmail'), m = document.getElementById('notify-smtp');
+    if (g) g.style.display = v === 'smtp' ? 'none' : '';
+    if (m) m.style.display = v === 'smtp' ? '' : 'none';
+  };
 
   window.notifyTest = async () => {
     const email = prompt('Send test email to:');
@@ -897,7 +955,6 @@
     const r = await Nova.api('system', 'server-options');
     const o = r?.data || {};
     const cur = {
-      panel_name:   o.panel_name   || 'NovaCPX',
       default_php:  o.default_php  || '8.3',
       ns1:          o.default_nameserver1 || '',
       ns2:          o.default_nameserver2 || '',
@@ -915,7 +972,6 @@
   <div class="card-body">
     <form id="settings-form" onsubmit="event.preventDefault();adminSaveSettings()">
       <div class="grid-2">
-        <div class="form-group"><label>Panel Name</label><input type="text" id="sf-panel-name" value="${Nova.escHtml(cur.panel_name)}"></div>
         <div class="form-group"><label>Default PHP Version</label>
           <select id="sf-default-php">${phpOpts}</select>
         </div>
@@ -940,7 +996,6 @@
     const btn = document.querySelector('#settings-form button[type=submit]');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     const saves = [
-      ['panel_name',         document.getElementById('sf-panel-name')?.value?.trim()],
       ['default_php',        document.getElementById('sf-default-php')?.value],
       ['default_nameserver1',document.getElementById('sf-ns1')?.value?.trim()],
       ['default_nameserver2',document.getElementById('sf-ns2')?.value?.trim()],

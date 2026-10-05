@@ -28,7 +28,7 @@ match ($action) {
         if ($user['role'] !== 'admin' && $user['role'] !== 'reseller') Response::error('Forbidden', 403);
         if (!$resellerId) Response::error('reseller_id required');
 
-        $allowed = ['panel_name','logo_url','favicon_url','primary_color','accent_color',
+        $allowed = ['primary_color','accent_color',
                     'support_email','support_url','hide_powered_by','custom_css'];
         $fields  = [];
         $vals    = [];
@@ -59,46 +59,9 @@ match ($action) {
         Response::success(null, 'Branding saved');
     })(),
 
-    'upload-logo' => (function() use ($resellerId, $user) {
-        if ($user['role'] !== 'admin' && $user['role'] !== 'reseller') Response::error('Forbidden', 403);
-        if (!$resellerId) Response::error('reseller_id required');
-
-        $file = $_FILES['logo'] ?? null;
-        if (!$file || $file['error'] !== UPLOAD_ERR_OK) Response::error('File upload failed');
-
-        $allowed = ['image/png','image/jpeg','image/gif','image/svg+xml','image/webp'];
-        $finfo   = new finfo(FILEINFO_MIME_TYPE);
-        $mime    = $finfo->file($file['tmp_name']);
-        if (!in_array($mime, $allowed)) Response::error('Invalid file type. Allowed: PNG, JPG, GIF, SVG, WebP');
-        if ($file['size'] > 512 * 1024) Response::error('Logo must be under 512 KB');
-
-        $ext  = ['image/png'=>'png','image/jpeg'=>'jpg','image/gif'=>'gif',
-                 'image/svg+xml'=>'svg','image/webp'=>'webp'][$mime] ?? 'png';
-        $dir  = '/srv/novacpx/public/uploads/branding/' . $resellerId;
-        if (!is_dir($dir)) mkdir($dir, 0755, true);
-
-        $path = "$dir/logo.$ext";
-        // Remove old logo files
-        foreach (glob("$dir/logo.*") as $old) @unlink($old);
-        if (!move_uploaded_file($file['tmp_name'], $path)) Response::error('Failed to save logo');
-
-        $url = "/uploads/branding/{$resellerId}/logo.$ext";
-        DB::getInstance()->execute(
-            "INSERT INTO reseller_branding (user_id, logo_url) VALUES (?,?)
-             ON DUPLICATE KEY UPDATE logo_url = VALUES(logo_url)",
-            [$resellerId, $url]
-        );
-        audit('branding.upload-logo', "reseller:$resellerId");
-        Response::success(['url' => $url], 'Logo uploaded');
-    })(),
-
-    'delete-logo' => (function() use ($db, $resellerId, $user) {
-        if ($user['role'] !== 'admin' && $user['role'] !== 'reseller') Response::error('Forbidden', 403);
-        $dir = '/srv/novacpx/public/uploads/branding/' . $resellerId;
-        foreach (glob("$dir/logo.*") ?: [] as $f) @unlink($f);
-        $db->execute("UPDATE reseller_branding SET logo_url = NULL WHERE user_id = ?", [$resellerId]);
-        Response::success(null, 'Logo removed');
-    })(),
+    // The panel name and logo are fixed in the code and cannot be changed.
+    'upload-logo' => Response::error('The panel name and logo are fixed and cannot be changed', 403),
+    'delete-logo' => Response::error('The panel name and logo are fixed and cannot be changed', 403),
 
     'resellers' => (function() use ($db, $user) {
         Auth::getInstance()->require('admin');

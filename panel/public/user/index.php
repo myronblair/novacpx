@@ -140,6 +140,7 @@ svg.ring circle { transition: stroke-dashoffset .5s; }
       </div>
     </div>
   </div>
+  <?= novacpx_legal_footer(true) ?>
 </div>
 
 <script>
@@ -154,6 +155,5 @@ window.NOVACPX_BRANDING = <?= json_encode([
 <script src="/assets/js/site-tools.js<?= $_v('/assets/js/site-tools.js') ?>"></script>
 <script src="/assets/js/user.js<?= $_v('/assets/js/user.js') ?>"></script>
 <!-- user.js boots via DOMContentLoaded and handles all auth/init -->
-<?= novacpx_legal_footer(true) ?>
 </body>
 </html>

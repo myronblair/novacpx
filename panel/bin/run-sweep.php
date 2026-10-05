@@ -15,7 +15,8 @@ set_time_limit(0);
 $arg = $argv[1] ?? '';
 $db  = DB::getInstance();
 $ids = $arg === 'all'
-    ? array_column($db->fetchAll("SELECT id FROM accounts WHERE status = 'active' ORDER BY id"), 'id')
+    ? array_column($db->fetchAll("SELECT a.id FROM accounts a JOIN users u ON u.id = a.user_id LEFT JOIN users r ON r.id = u.reseller_id
+                                    WHERE a.status = 'active' AND u.sweep_enabled = 1 AND (r.id IS NULL OR r.sweep_enabled = 1) ORDER BY a.id"), 'id')
     : (ctype_digit($arg) ? [(int)$arg] : []);
 
 foreach ($ids as $id) {

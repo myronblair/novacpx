@@ -1,7 +1,7 @@
 <?php
 // Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 /**
- * Email notification dispatcher (Gmail API, see GmailMailer.php)
+ * Email notification dispatcher (Gmail API or plain SMTP, see Mailer.php)
  */
 class Notifier {
 
@@ -13,8 +13,8 @@ class Notifier {
 
     private static function send(string $to, string $subject, string $html): bool {
         if (!$to) return false;
-        require_once __DIR__ . '/GmailMailer.php';
-        $r = GmailMailer::send($to, $subject, $html);
+        require_once __DIR__ . '/Mailer.php';
+        $r = Mailer::send($to, $subject, $html);
         if (!$r['ok']) error_log('[NovaCPX Notifier] ' . $r['error']);
         return $r['ok'];
     }
