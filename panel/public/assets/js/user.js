@@ -118,6 +118,8 @@ const userPages = {
   shield:  (el) => window.shieldPage(el),
   traffic: (el) => window.trafficPage(el),
   pulse:   (el) => window.pulsePage(el),
+  sweep:   (el) => window.sweepPage(el),
+  gitdeploy: (el) => window.gitPage(el),
   'change-password': changePasswordPage,
 };
 
@@ -970,6 +972,10 @@ const navGroups = [
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg>' },
     { id: 'pulse', label: 'Uptime',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg>' },
+    { id: 'sweep', label: 'Sweep',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg>' },
+    { id: 'gitdeploy', label: 'Git Deploy',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.5 6h4a3 3 0 0 1 3 3v.5"/></svg>' },
     { id: 'stats', label: 'Statistics',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>' },
   ]},

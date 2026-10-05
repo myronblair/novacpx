@@ -219,6 +219,15 @@ Shows every account's month-to-date traffic against its package allowance. Choos
 ### Site Uptime
 Shows every monitored site with its state, last answer and 24-hour uptime. Settings: monitoring on/off and how many failed checks in a row count as down (default 2).
 
+### Malware Sweep
+Shows the last scan and the number of open findings per account. The built-in pattern scan is always on (nightly at 03:30); when ClamAV is installed you can switch it on as a second engine.
+
+### Mail Queue
+Lists the messages Postfix has not delivered yet with the reason for each. Retry or hold or delete one message, retry the whole queue, or empty it (asks for confirmation).
+
+### Package limits
+Packages carry two PHP limits: **PHP requests at once** (pool `pm.max_children`) and a **PHP memory ceiling** (an account's `memory_limit` is never set above it). Saving a package applies the limits to every account on it straight away.
+
 ### Background tasks
 `/etc/cron.d/novacpx-tasks` (installed on every deploy by `deploy/install-tasks.sh`) runs the stats collector, the traffic meter and uptime monitor (every 5 minutes), scheduled backups (every 15 minutes) and the nightly notification checks.
 

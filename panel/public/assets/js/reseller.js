@@ -245,17 +245,17 @@ function showPackageModal(pkg = null) {
       <div class="form-group" style="grid-column:1/-1"><label class="form-label">Package Name</label><input id="pk-name" class="form-control" value="${p.name||''}"></div>
       <div class="form-group"><label class="form-label">Disk (MB, 0=∞)</label><input id="pk-disk" type="number" class="form-control" value="${p.disk_mb||0}"></div>
       <div class="form-group"><label class="form-label">Bandwidth (MB)</label><input id="pk-bw" type="number" class="form-control" value="${p.bandwidth_mb||0}"></div>
-      <div class="form-group"><label class="form-label">Databases</label><input id="pk-db" type="number" class="form-control" value="${p.databases||0}"></div>
-      <div class="form-group"><label class="form-label">Email Accounts</label><input id="pk-email" type="number" class="form-control" value="${p.email_accounts||0}"></div>
-      <div class="form-group"><label class="form-label">Addon Domains</label><input id="pk-adom" type="number" class="form-control" value="${p.addon_domains||0}"></div>
-      <div class="form-group"><label class="form-label">Subdomains</label><input id="pk-sub" type="number" class="form-control" value="${p.subdomains||0}"></div>
-      <div class="form-group"><label class="form-label">FTP Accounts</label><input id="pk-ftp" type="number" class="form-control" value="${p.ftp_accounts||0}"></div>
+      <div class="form-group"><label class="form-label">Databases</label><input id="pk-db" type="number" class="form-control" value="${p.max_databases||0}"></div>
+      <div class="form-group"><label class="form-label">Email Accounts</label><input id="pk-email" type="number" class="form-control" value="${p.max_email||0}"></div>
+      <div class="form-group"><label class="form-label">Addon Domains</label><input id="pk-adom" type="number" class="form-control" value="${p.max_addon_domains||0}"></div>
+      <div class="form-group"><label class="form-label">Subdomains</label><input id="pk-sub" type="number" class="form-control" value="${p.max_subdomains||0}"></div>
+      <div class="form-group"><label class="form-label">FTP Accounts</label><input id="pk-ftp" type="number" class="form-control" value="${p.max_ftp||0}"></div>
       <div class="form-group"><label class="form-label">Price ($/mo)</label><input id="pk-price" type="number" step="0.01" class="form-control" value="${p.price||0}"></div>
     </div>`,
     `<button class="btn btn-primary" onclick="submitPackage(${p.id||'null'})">Save</button>`);
 }
 window.submitPackage = async (id) => {
-  const body = { name:document.getElementById('pk-name')?.value, disk_mb:parseInt(document.getElementById('pk-disk')?.value), bandwidth_mb:parseInt(document.getElementById('pk-bw')?.value), databases:parseInt(document.getElementById('pk-db')?.value), email_accounts:parseInt(document.getElementById('pk-email')?.value), addon_domains:parseInt(document.getElementById('pk-adom')?.value), subdomains:parseInt(document.getElementById('pk-sub')?.value), ftp_accounts:parseInt(document.getElementById('pk-ftp')?.value), price:parseFloat(document.getElementById('pk-price')?.value) };
+  const body = { name:document.getElementById('pk-name')?.value, disk_mb:parseInt(document.getElementById('pk-disk')?.value), bandwidth_mb:parseInt(document.getElementById('pk-bw')?.value), max_databases:parseInt(document.getElementById('pk-db')?.value), max_email:parseInt(document.getElementById('pk-email')?.value), max_addon_domains:parseInt(document.getElementById('pk-adom')?.value), max_subdomains:parseInt(document.getElementById('pk-sub')?.value), max_ftp:parseInt(document.getElementById('pk-ftp')?.value) };
   const res = id ? await Nova.api('packages','update',{method:'POST',body:{...body,id}}) : await Nova.api('packages','create',{method:'POST',body});
   if (res?.success) { Nova.toast(id ? 'Package updated' : 'Package created','success'); document.querySelector('.modal-overlay')?.remove(); rPackages(document.getElementById('page-content')); }
   else Nova.toast(res?.message,'error');

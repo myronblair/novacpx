@@ -15,6 +15,7 @@ cat > /etc/cron.d/novacpx-tasks <<CRON
 */5  * * * * www-data ${PHP_BIN} ${BIN}/run-tasks.php       >> /var/log/novacpx/cron.log 2>&1
 */15 * * * * www-data ${PHP_BIN} ${BIN}/run-schedules.php   >> /var/log/novacpx/cron.log 2>&1
 0    0 * * * www-data ${PHP_BIN} ${BIN}/notify-checks.php   >> /var/log/novacpx/cron.log 2>&1
+30   3 * * * www-data ${PHP_BIN} ${BIN}/run-sweep.php all  >> /var/log/novacpx/cron.log 2>&1
 CRON
 chmod 644 /etc/cron.d/novacpx-tasks
 if [ -f /etc/cron.d/novacpx ]; then

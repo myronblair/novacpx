@@ -755,3 +755,27 @@ Admin/reseller: every monitored site they may see.
 
 ### `GET|POST /api/pulse/settings`
 Admin: `{enabled, fail_count}`.
+
+## Sweep (malware scan)
+
+- `GET /api/sweep/status[?account_id=N]` last scan and open findings
+- `POST /api/sweep/scan {account_id?}` start a scan in the background
+- `POST /api/sweep/quarantine|restore|ignore {finding_id, account_id?}`
+- `GET /api/sweep/overview` admin/reseller: findings per account
+- `GET|POST /api/sweep/settings` admin: `{clamav}`
+
+## Git Deploy
+
+- `GET /api/gitdeploy/get[?account_id=N]` connection, last deploy, webhook URL and secret
+- `POST /api/gitdeploy/save {repo_url, branch?, subdir?, token?, clear_token?, overwrite?}` connect and deploy once
+- `POST /api/gitdeploy/deploy` pull the latest now; `POST /api/gitdeploy/secret` new webhook secret; `POST /api/gitdeploy/disconnect`
+- `POST /api/githook/run?account=ID` public webhook. Authenticate with an HMAC-SHA256 signature of the body in `X-Hub-Signature-256` (`sha256=<hex>`), `X-Gitea-Signature` or `X-Gogs-Signature`, or `?key=<secret>`. Pushes to other branches are ignored; at most one deploy per 10 seconds.
+
+## Mail queue (admin)
+
+- `GET /api/mailqueue/list`
+- `POST /api/mailqueue/action {action: flush|retry|delete|hold|release|purge, id?, confirm_all?}`
+
+## Packages
+
+`POST /api/packages/create|update` also accept `php_max_children` (1-100) and `php_memory_mb` (32-8192). `update` changes only the fields that are sent.

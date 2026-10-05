@@ -123,6 +123,14 @@ require_once dirname(__DIR__) . '/_branding.php';
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg>
           Site Uptime
         </a>
+        <a href="#" class="sidebar-link" data-page="sweep-overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          Malware Sweep
+        </a>
+        <a href="#" class="sidebar-link" data-page="mail-queue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          Mail Queue
+        </a>
       </div>
 
       <div class="sidebar-section">

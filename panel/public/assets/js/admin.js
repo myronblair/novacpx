@@ -95,6 +95,8 @@
     'ssl-manager': sslManager,
     'traffic-usage': () => window.trafficAdminPage(),
     'uptime': () => window.pulseAdminPage(),
+    'sweep-overview': () => window.sweepAdminPage(),
+    'mail-queue': () => window.mailQueueAdminPage(),
     firewall,
     fail2ban,
     'audit-log': auditLog,
@@ -1278,17 +1280,19 @@
         <div class="form-group" style="grid-column:1/-1"><label class="form-label">Name</label><input id="ap-name" class="form-control" value="${p.name||''}"></div>
         <div class="form-group"><label class="form-label">Disk (MB)</label><input id="ap-disk" type="number" class="form-control" value="${p.disk_mb||0}"></div>
         <div class="form-group"><label class="form-label">Bandwidth (MB)</label><input id="ap-bw" type="number" class="form-control" value="${p.bandwidth_mb||0}"></div>
-        <div class="form-group"><label class="form-label">Databases</label><input id="ap-db" type="number" class="form-control" value="${p.databases||0}"></div>
-        <div class="form-group"><label class="form-label">Email Accounts</label><input id="ap-email" type="number" class="form-control" value="${p.email_accounts||0}"></div>
-        <div class="form-group"><label class="form-label">Addon Domains</label><input id="ap-dom" type="number" class="form-control" value="${p.addon_domains||0}"></div>
-        <div class="form-group"><label class="form-label">Subdomains</label><input id="ap-sub" type="number" class="form-control" value="${p.subdomains||0}"></div>
-        <div class="form-group"><label class="form-label">FTP Accounts</label><input id="ap-ftp" type="number" class="form-control" value="${p.ftp_accounts||0}"></div>
-        <div class="form-group"><label class="form-label">Price ($/mo)</label><input id="ap-price" type="number" step="0.01" class="form-control" value="${p.price||0}"></div>
+        <div class="form-group"><label class="form-label">Databases</label><input id="ap-db" type="number" class="form-control" value="${p.max_databases||0}"></div>
+        <div class="form-group"><label class="form-label">Email Accounts</label><input id="ap-email" type="number" class="form-control" value="${p.max_email||0}"></div>
+        <div class="form-group"><label class="form-label">Addon Domains</label><input id="ap-dom" type="number" class="form-control" value="${p.max_addon_domains||0}"></div>
+        <div class="form-group"><label class="form-label">Subdomains</label><input id="ap-sub" type="number" class="form-control" value="${p.max_subdomains||0}"></div>
+        <div class="form-group"><label class="form-label">FTP Accounts</label><input id="ap-ftp" type="number" class="form-control" value="${p.max_ftp||0}"></div>
+        <div class="form-group"><label class="form-label">Max sites (domains)</label><input id="ap-maxdom" type="number" class="form-control" value="${p.max_domains||0}"></div>
+        <div class="form-group"><label class="form-label">PHP requests at once</label><input id="ap-kids" type="number" min="1" max="100" class="form-control" value="${p.php_max_children||5}"></div>
+        <div class="form-group"><label class="form-label">PHP memory ceiling (MB)</label><input id="ap-mem" type="number" min="32" max="8192" class="form-control" value="${p.php_memory_mb||256}"></div>
       </div>`,
       `<button class="btn btn-primary" onclick="adminSavePkg(${p.id||'null'})">Save</button>`);
   }
   window.adminSavePkg = async (id) => {
-    const body = {name:document.getElementById('ap-name')?.value,disk_mb:+document.getElementById('ap-disk')?.value,bandwidth_mb:+document.getElementById('ap-bw')?.value,databases:+document.getElementById('ap-db')?.value,email_accounts:+document.getElementById('ap-email')?.value,addon_domains:+document.getElementById('ap-dom')?.value,subdomains:+document.getElementById('ap-sub')?.value,ftp_accounts:+document.getElementById('ap-ftp')?.value,price:+document.getElementById('ap-price')?.value};
+    const body = {name:document.getElementById('ap-name')?.value,disk_mb:+document.getElementById('ap-disk')?.value,bandwidth_mb:+document.getElementById('ap-bw')?.value,max_databases:+document.getElementById('ap-db')?.value,max_email:+document.getElementById('ap-email')?.value,max_addon_domains:+document.getElementById('ap-dom')?.value,max_subdomains:+document.getElementById('ap-sub')?.value,max_ftp:+document.getElementById('ap-ftp')?.value,max_domains:+document.getElementById('ap-maxdom')?.value,php_max_children:+document.getElementById('ap-kids')?.value,php_memory_mb:+document.getElementById('ap-mem')?.value};
     const res = id ? await Nova.api('packages','update',{method:'POST',body:{...body,id}}) : await Nova.api('packages','create',{method:'POST',body});
     if (res?.success) { Nova.toast(id?'Updated':'Created','success'); document.querySelector('.modal-overlay')?.remove(); adminPage('packages'); }
     else Nova.toast(res?.message,'error');

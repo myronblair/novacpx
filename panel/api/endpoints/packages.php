@@ -41,23 +41,33 @@ match ($action) {
                 (int)($body['ssl_enabled'] ?? 1),
             ]
         );
+        $db->execute("UPDATE packages SET php_max_children = ?, php_memory_mb = ? WHERE id = ?",
+            [max(1, min(100, (int)($body['php_max_children'] ?? 5))), max(32, min(8192, (int)($body['php_memory_mb'] ?? 256))), $id]);
         audit('package.create', $name);
         Response::success(['id' => $id], 'Package created');
     })(),
 
     'update' => (function() use ($db, $body) {
         $id = (int)($body['id'] ?? 0);
-        $db->execute(
-            "UPDATE packages SET name=?, disk_mb=?, bandwidth_mb=?, max_domains=?, max_subdomains=?,
-             max_addon_domains=?, max_parked_domains=?, max_email=?, max_ftp=?, max_databases=?, php_version=?, ssl_enabled=? WHERE id=?",
-            [
-                $body['name'] ?? '', $body['disk_mb'] ?? 0, $body['bandwidth_mb'] ?? 0,
-                $body['max_domains'] ?? 0, $body['max_subdomains'] ?? 0,
-                $body['max_addon_domains'] ?? 0, $body['max_parked_domains'] ?? 0,
-                $body['max_email'] ?? 0, $body['max_ftp'] ?? 0, $body['max_databases'] ?? 0,
-                $body['php_version'] ?? '8.3', $body['ssl_enabled'] ?? 1, $id,
-            ]
-        );
+        $pkg = $db->fetchOne("SELECT id FROM packages WHERE id = ?", [$id]);
+        if (!$pkg) Response::error("Package not found", 404);
+        // only the fields that were sent are changed (a form that leaves one out must not reset it to 0)
+        $ints = ['disk_mb', 'bandwidth_mb', 'max_domains', 'max_subdomains', 'max_addon_domains', 'max_parked_domains', 'max_email', 'max_ftp', 'max_databases', 'ssl_enabled'];
+        $sets = []; $vals = [];
+        if (isset($body['name']) && trim((string)$body['name']) !== '') { $sets[] = 'name = ?'; $vals[] = trim((string)$body['name']); }
+        if (isset($body['php_version']) && preg_match('/^[0-9]\.[0-9]$/', (string)$body['php_version'])) { $sets[] = 'php_version = ?'; $vals[] = $body['php_version']; }
+        foreach ($ints as $k) { if (isset($body[$k])) { $sets[] = "$k = ?"; $vals[] = max(0, (int)$body[$k]); } }
+        if ($sets) { $vals[] = $id; $db->execute("UPDATE packages SET " . implode(', ', $sets) . " WHERE id = ?", $vals); }
+        if (isset($body['php_max_children']) || isset($body['php_memory_mb'])) {
+            $db->execute("UPDATE packages SET php_max_children = COALESCE(?, php_max_children), php_memory_mb = COALESCE(?, php_memory_mb) WHERE id = ?",
+                [isset($body['php_max_children']) ? max(1, min(100, (int)$body['php_max_children'])) : null,
+                 isset($body['php_memory_mb']) ? max(32, min(8192, (int)$body['php_memory_mb'])) : null, $id]);
+            // apply to every account on the package right away
+            require_once NOVACPX_LIB . '/PHPManager.php';
+            foreach ($db->fetchAll("SELECT id, username, php_version FROM accounts WHERE package_id = ? AND status = 'active'", [$id]) as $a) {
+                try { PHPManager::createPool($a['username'], $a['php_version'], PHPManager::currentSettings((int)$a['id'])); } catch (Throwable $e) { error_log('[packages] pool ' . $a['username'] . ': ' . $e->getMessage()); }
+            }
+        }
         audit('package.update', "package:$id");
         Response::success(null, 'Package updated');
     })(),

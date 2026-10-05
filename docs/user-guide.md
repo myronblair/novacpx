@@ -218,3 +218,14 @@ Press **Save & apply**. If the web server rejects a change, nothing is changed a
 
 Under **Backups** you can set how often a backup runs (hourly, daily, weekly, monthly), what it contains (full, files, database) and how many copies to keep.
 
+## Sweep
+
+**Sweep** checks your site's PHP files for the usual signs of web shells and backdoors. It runs every night and when you press **Scan now**. Each finding shows the file, what was found and a severity. Choose **Quarantine** to move the file out of your website (you can **Restore** it later) or **Harmless** if you know the file is fine; harmless findings stay quiet in later scans.
+
+## Git Deploy
+
+**Git Deploy** keeps your site in step with a Git repository.
+
+1. Enter the repository address (https), the branch, and optionally a folder inside `public_html`. For a private repository add an access token (it is stored where only the server can read it).
+2. If the folder already has files, tick **Replace existing files** to connect anyway (files tracked by the repository are overwritten, other files stay).
+3. Press **Connect & deploy**. Later, press **Deploy now**, or add the shown webhook (JSON, push events) to your repository so every push deploys automatically.

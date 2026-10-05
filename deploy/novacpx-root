@@ -386,6 +386,14 @@ function ncr_pool_text(string $user, string $ver, array $s): string {
     $up   = $size($s['upload_max_filesize'] ?? '64M', '64M');
     $post = $size($s['post_max_size'] ?? '64M', '64M');
     $exe  = v_int($s['max_execution_time'] ?? 30, 1, 3600, 'max_execution_time');
+    $kids = v_int($s['max_children'] ?? 5, 1, 100, 'max_children');
+    if (isset($s['memory_cap_mb'])) {                       // the package's ceiling for memory_limit
+        $cap = v_int($s['memory_cap_mb'], 32, 8192, 'memory_cap_mb');
+        if (preg_match('/^([0-9]{1,5})([KMG]?)$/', $mem, $mm)) {
+            $mb = (int)$mm[1] * ['' => 1 / 1048576, 'K' => 1 / 1024, 'M' => 1, 'G' => 1024][$mm[2]];
+            if ($mb > $cap) $mem = $cap . 'M';
+        }
+    }
     return "[{$user}]
 user  = {$user}
 group = www-data
@@ -395,7 +403,7 @@ listen.group = www-data
 listen.mode  = 0660
 
 pm = ondemand
-pm.max_children     = 5
+pm.max_children     = {$kids}
 pm.process_idle_timeout = 10s
 pm.max_requests     = 500
 
@@ -1325,6 +1333,192 @@ function cmd_site_rules_write(array $p): int {
     return $rc;
 }
 
+// ───────────────────────── Mail queue ─────────────────────────
+
+function v_queue_id(mixed $v): string {
+    if (!is_string($v) || !preg_match('/^[0-9A-Za-z]{6,25}$/', $v)) refuse('invalid queue id');
+    return $v;
+}
+
+/** The Postfix queue as JSON (at most 500 messages). */
+function cmd_mail_queue_list(array $p): int {
+    [$rc, $out] = ncr_run(['postqueue', '-j']);
+    if ($rc !== 0) { echo $out; return $rc; }
+    $items = [];
+    foreach (explode("\n", trim($out)) as $line) {
+        if ($line === '') continue;
+        $j = json_decode($line, true);
+        if (!is_array($j)) continue;
+        $items[] = [
+            'id' => (string)($j['queue_id'] ?? ''), 'queue' => (string)($j['queue_name'] ?? ''), 'time' => (int)($j['arrival_time'] ?? 0),
+            'size' => (int)($j['message_size'] ?? 0), 'sender' => (string)($j['sender'] ?? ''),
+            'recipients' => array_map(fn($r) => ['address' => (string)($r['address'] ?? ''), 'reason' => (string)($r['delay_reason'] ?? '')], (array)($j['recipients'] ?? [])),
+        ];
+        if (count($items) >= 500) break;
+    }
+    return ncr_json($items);
+}
+
+/** flush (retry everything) | retry | delete | hold | release one message, or purge the whole queue (needs confirm_all). */
+function cmd_mail_queue_action(array $p): int {
+    $act = $p['action'] ?? '';
+    switch ($act) {
+        case 'flush':   return ncr_out(ncr_run(['postqueue', '-f']), false);
+        case 'retry':   return ncr_out(ncr_run(['postqueue', '-i', v_queue_id($p['id'] ?? null)]), false);
+        case 'delete':  return ncr_out(ncr_run(['postsuper', '-d', v_queue_id($p['id'] ?? null)]), false);
+        case 'hold':    return ncr_out(ncr_run(['postsuper', '-h', v_queue_id($p['id'] ?? null)]), false);
+        case 'release': return ncr_out(ncr_run(['postsuper', '-H', v_queue_id($p['id'] ?? null)]), false);
+        case 'purge':
+            if (empty($p['confirm_all'])) refuse('purge needs confirm_all');
+            return ncr_out(ncr_run(['postsuper', '-d', 'ALL']), false);
+    }
+    refuse('unknown queue action');
+}
+
+// ───────────────────────── Sweep: quarantine ─────────────────────────
+
+/** An existing regular file below the account's home (never a symlink, never inside the quarantine). Returns [absolute path, relative path]. */
+function v_account_file(string $user, mixed $rel): array {
+    if (!is_string($rel) || $rel === '' || strlen($rel) > 400 || str_contains($rel, "\0") || str_contains($rel, '..')) refuse('invalid path');
+    $rel = ltrim($rel, '/');
+    if ($rel === '' || str_starts_with($rel, '.quarantine/')) refuse('invalid path');
+    $abs = "/home/{$user}/{$rel}";
+    if (is_link($abs) || !is_file($abs)) refuse('not a regular file');
+    $real = realpath($abs);
+    if ($real === false || !str_starts_with($real, "/home/{$user}/") || str_starts_with($real, "/home/{$user}/.quarantine/")) refuse('outside the account');
+    return [$real, substr($real, strlen("/home/{$user}/"))];
+}
+
+function ncr_quarantine_name(int $id, string $rel): string {
+    return "f{$id}__" . substr(preg_replace('/[^A-Za-z0-9._-]/', '_', basename($rel)), 0, 80);
+}
+
+function cmd_sweep_quarantine(array $p): int {
+    $user = v_managed_user($p['username'] ?? null)['name'];
+    $id   = v_int($p['id'] ?? null, 1, PHP_INT_MAX, 'finding id');
+    [$abs, $rel] = v_account_file($user, $p['path'] ?? null);
+    $dir = "/home/{$user}/.quarantine";
+    if (is_link($dir)) refuse('quarantine is a symlink');
+    if (!is_dir($dir) && !mkdir($dir, 0700)) refuse('cannot create the quarantine folder');
+    chown($dir, 'root'); chgrp($dir, 'root'); chmod($dir, 0700);
+    $dest = "{$dir}/" . ncr_quarantine_name($id, $rel);
+    if (file_exists($dest)) refuse('already quarantined');
+    if (!rename($abs, $dest)) refuse('move failed');
+    chown($dest, 'root'); chgrp($dest, 'root'); chmod($dest, 0000);
+    return ncr_json(['quarantined' => $rel]);
+}
+
+function cmd_sweep_restore(array $p): int {
+    $user = v_managed_user($p['username'] ?? null)['name'];
+    $id   = v_int($p['id'] ?? null, 1, PHP_INT_MAX, 'finding id');
+    $rel  = $p['path'] ?? null;
+    if (!is_string($rel) || $rel === '' || strlen($rel) > 400 || str_contains($rel, '..') || str_contains($rel, "\0")) refuse('invalid path');
+    $rel  = ltrim($rel, '/');
+    $src  = "/home/{$user}/.quarantine/" . ncr_quarantine_name($id, $rel);
+    $dest = "/home/{$user}/{$rel}";
+    if (!is_file($src)) refuse('nothing in quarantine for this finding');
+    if (file_exists($dest) || is_link($dest)) refuse('a file already exists at the original location');
+    $parent = dirname($dest);
+    if (!is_dir($parent) || is_link($parent) || !str_starts_with((string)realpath($parent), "/home/{$user}")) refuse('the original folder no longer exists');
+    $pw = posix_getpwnam($user);
+    if (!rename($src, $dest)) refuse('move failed');
+    chown($dest, $user); chgrp($dest, 'www-data'); chmod($dest, 0640);
+    return ncr_json(['restored' => $rel]);
+}
+
+// ───────────────────────── Git Deploy ─────────────────────────
+
+const NCR_GIT_TOKEN_DIR = '/etc/novacpx/git-tokens';
+
+function v_git_url(mixed $v): string {
+    if (!is_string($v) || strlen($v) > 300 || !preg_match('#^https://([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}(:[0-9]{2,5})?/[A-Za-z0-9._~/-]+$#', $v)) refuse('repository address must be an https:// URL');
+    $host = parse_url($v, PHP_URL_HOST);
+    $ip = gethostbyname((string)$host);
+    // never let a customer point the server at its own network
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) refuse('repository host is not publicly reachable');
+    return $v;
+}
+
+function v_git_branch(mixed $v): string {
+    if (!is_string($v) || !preg_match('#^[A-Za-z0-9._/-]{1,100}$#', $v) || str_contains($v, '..') || str_starts_with($v, '-') || str_starts_with($v, '/')) refuse('invalid branch name');
+    return $v;
+}
+
+function v_git_subdir(mixed $v): string {
+    $v = trim((string)($v ?? ''), '/');
+    if ($v === '') return '';
+    if (strlen($v) > 120 || !preg_match('#^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$#', $v) || str_contains($v, '..')) refuse('invalid folder');
+    return $v;
+}
+
+function cmd_git_deploy(array $p): int {
+    $pw     = v_managed_user($p['username'] ?? null);
+    $user   = $pw['name'];
+    $url    = v_git_url($p['repo_url'] ?? null);
+    $branch = v_git_branch($p['branch'] ?? 'main');
+    $sub    = v_git_subdir($p['subdir'] ?? '');
+    $over   = !empty($p['overwrite']);
+
+    // access token: kept root-only, never in the panel database or in any output
+    if (!is_dir(NCR_GIT_TOKEN_DIR)) mkdir(NCR_GIT_TOKEN_DIR, 0700, true);
+    $tokFile = NCR_GIT_TOKEN_DIR . "/{$user}";
+    if (!empty($p['clear_token'])) @unlink($tokFile);
+    if (isset($p['token']) && is_string($p['token']) && $p['token'] !== '') {
+        if (!preg_match('/^[A-Za-z0-9._~+=\/-]{8,200}$/', $p['token'])) refuse('invalid access token');
+        ncr_write_file($tokFile, $p['token'], 0600);
+    }
+    $token = is_file($tokFile) ? trim((string)file_get_contents($tokFile)) : '';
+
+    $root = "/home/{$user}/public_html";
+    $dir  = $sub === '' ? $root : "{$root}/{$sub}";
+    if (is_link($root) || !is_dir($root)) refuse('the account has no public_html folder');
+    if (!is_dir($dir)) {
+        [$rc, $o] = ncr_run(['runuser', '-u', $user, '--', 'mkdir', '-p', $dir]);
+        if ($rc !== 0) refuse('cannot create the folder');
+    }
+    $real = realpath($dir);
+    if ($real === false || ($real !== $root && !str_starts_with($real, $root . '/'))) refuse('folder is outside public_html');
+
+    $git = ['runuser', '-u', $user, '--', 'timeout', '180', 'git',
+            '-c', 'core.hooksPath=/dev/null', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', '-c', 'safe.directory=' . $real];
+    if ($token !== '') $git = array_merge($git, ['-c', 'http.extraHeader=Authorization: Basic ' . base64_encode('git:' . $token)]);
+    $env = ['HOME' => "/home/{$user}", 'GIT_TERMINAL_PROMPT' => '0', 'GIT_CONFIG_NOSYSTEM' => '1'];
+    $log = '';
+    $run = function (array $args) use ($git, $env, $real, &$log, $token) {
+        [$rc, $out] = ncr_run(array_merge($git, ['-C', $real], $args), null, false, $env);
+        if ($token !== '') $out = str_replace([$token, base64_encode('git:' . $token)], '***', $out);
+        $log .= $out;
+        return $rc;
+    };
+
+    $isRepo = is_dir("{$real}/.git");
+    if (!$isRepo) {
+        $entries = array_diff(scandir($real) ?: [], ['.', '..']);
+        if ($entries && !$over) refuse('The folder already has files. Tick "replace existing files" to connect the repository anyway (tracked files are overwritten, other files stay).');
+        if ($run(['init', '-q']) !== 0) { echo $log; return 1; }
+        $run(['remote', 'add', 'origin', $url]);
+    } else {
+        $run(['remote', 'set-url', 'origin', $url]);
+    }
+    if ($run(['fetch', '--prune', '--depth', '50', 'origin', $branch]) !== 0) {
+        echo json_encode(['ok' => false, 'output' => substr($log, -3000)]) . "\n"; return 1;
+    }
+    if ($run(['checkout', '-q', '-f', '-B', $branch, 'FETCH_HEAD']) !== 0) {
+        echo json_encode(['ok' => false, 'output' => substr($log, -3000)]) . "\n"; return 1;
+    }
+    $run(['reset', '-q', '--hard', 'FETCH_HEAD']);
+    [, $commit] = ncr_run(array_merge($git, ['-C', $real, 'log', '-1', '--pretty=%h %s']), null, false, $env);
+    ncr_run(['chown', '-R', "{$user}:www-data", $real]);
+    return ncr_json(['ok' => true, 'commit' => trim($commit), 'output' => substr($log, -3000), 'has_token' => $token !== '']);
+}
+
+/** Remove the stored access token of an account (when the repository is disconnected). */
+function cmd_git_forget(array $p): int {
+    $user = v_username($p['username'] ?? null);
+    @unlink(NCR_GIT_TOKEN_DIR . "/{$user}");
+    return 0;
+}
+
 // ───────────────────────── dispatch ─────────────────────────
 
 const NCR_COMMANDS = [
@@ -1344,6 +1538,8 @@ const NCR_COMMANDS = [
     'docker.install' => 'cmd_docker_install', 'docker.stack.prepare' => 'cmd_docker_stack_prepare', 'docker.stack.check' => 'cmd_docker_stack_check',
     'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
     'site.rules.write' => 'cmd_site_rules_write',
+    'mail.queue.list' => 'cmd_mail_queue_list', 'mail.queue.action' => 'cmd_mail_queue_action',
+    'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
 ];
 
 function ncr_main(array $argv): int {

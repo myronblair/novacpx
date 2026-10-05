@@ -253,4 +253,151 @@ ${sites.length === 0 ? '<div class="empty">No checks yet - the first results app
     const res = await Nova.api('pulse', 'settings', { method: 'POST', body: { enabled: document.getElementById('pu-on').checked, fail_count: parseInt(document.getElementById('pu-fails').value, 10) || 2 } });
     Nova.toast(res?.success ? 'Saved' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
   };
+  /* ══════════════════════════ Sweep (malware scan) ══════════════════════════ */
+  const sevBadge = (s) => Nova.badge(esc(s), s === 'high' ? 'red' : s === 'medium' ? 'yellow' : 'blue');
+
+  async function sweepRender(el) {
+    const res = await Nova.api('sweep', 'status');
+    if (!res?.success) { el.innerHTML = '<div class="empty">Could not load Sweep.</div>'; return; }
+    const { run, findings, clamav } = res.data;
+    const running = run && run.status === 'running';
+    const open = findings.filter(f => f.status === 'open').length;
+    el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Sweep</h2>
+  <button class="btn btn-primary btn-sm" onclick="sweepScan()" ${running ? 'disabled' : ''}>${running ? 'Scanning...' : 'Scan now'}</button></div>
+<p class="text-muted" style="margin-bottom:1rem">Sweep looks through your site's PHP files for the usual signs of web shells and backdoors${clamav ? ' and runs the antivirus engine on top' : ''}. It runs every night and whenever you press Scan now. Nothing is changed unless you quarantine a file.</p>
+<div class="stats-grid" style="margin-bottom:1rem">
+  <div class="stat-card"><div class="stat-label">Last scan</div><div class="stat-value" style="font-size:1rem">${run ? esc(run.finished_at || run.started_at) : 'never'}</div></div>
+  <div class="stat-card"><div class="stat-label">Files checked</div><div class="stat-value">${run ? run.files : '-'}</div></div>
+  <div class="stat-card"><div class="stat-label">Open findings</div><div class="stat-value" style="color:${open ? 'var(--red)' : 'var(--green)'}">${open}</div></div>
+</div>
+${run && run.status === 'failed' ? `<div class="alert alert-warning" style="margin-bottom:1rem">The last scan did not finish: ${esc(run.note || '')}</div>` : ''}
+<div class="card">${findings.length === 0 ? '<div class="empty" style="padding:2rem">Nothing suspicious found.</div>' : `
+  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Severity</th><th>File</th><th>What was found</th><th>State</th><th>Actions</th></tr></thead><tbody>
+  ${findings.map(f => `<tr>
+    <td>${sevBadge(f.severity)}</td><td><code>${esc(f.path)}</code></td>
+    <td><strong>${esc(f.rule)}</strong><br><small class="text-muted">${esc(f.snippet || '')}</small></td>
+    <td>${f.status === 'quarantined' ? Nova.badge('Quarantined', 'green') : 'Open'}</td>
+    <td style="white-space:nowrap">${f.status === 'open'
+      ? `<button class="btn btn-xs btn-danger" onclick="sweepAct('quarantine',${f.id})">Quarantine</button> <button class="btn btn-xs" onclick="sweepAct('ignore',${f.id})">Harmless</button>`
+      : `<button class="btn btn-xs" onclick="sweepAct('restore',${f.id})">Restore</button>`}</td></tr>`).join('')}
+  </tbody></table></div>`}</div>`;
+    if (running) setTimeout(() => { if (el.isConnected) sweepRender(el); }, 5000);
+  }
+  window.sweepPage = async (el) => { el.innerHTML = '<div class="loading">Loading...</div>'; window._sweepEl = el; await sweepRender(el); };
+  window.sweepScan = async () => {
+    const res = await Nova.api('sweep', 'scan', { method: 'POST', body: {} });
+    Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
+    if (res?.success) setTimeout(() => sweepRender(window._sweepEl), 1500);
+  };
+  window.sweepAct = (act, id) => {
+    const go = async () => {
+      const res = await Nova.api('sweep', act, { method: 'POST', body: { finding_id: id } });
+      Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
+      sweepRender(window._sweepEl);
+    };
+    if (act === 'quarantine') Nova.confirm('Move this file out of your website into quarantine? You can restore it later.', go, true); else go();
+  };
+
+  window.sweepAdminPage = async () => {
+    const [ov, st] = await Promise.all([Nova.api('sweep', 'overview'), Nova.api('sweep', 'settings')]);
+    const rows = ov?.data || [];
+    const cfg = st?.data || {};
+    return `
+<div class="page-header"><h1 class="page-title">Malware Sweep</h1></div>
+<div class="panel" style="margin-bottom:1rem"><div class="panel-header"><h3 class="panel-title">Engine</h3></div>
+  <div style="padding:1rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+    <span>Built-in pattern scan: <strong>always on</strong> (nightly at 03:30)</span>
+    <label style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" id="sw-clam" ${cfg.clamav ? 'checked' : ''} ${cfg.clamav_installed ? '' : 'disabled'}> Also use ClamAV ${cfg.clamav_installed ? '' : '(not installed on this server)'}</label>
+    <button class="btn btn-primary btn-sm" onclick="sweepSaveSettings()" ${cfg.clamav_installed ? '' : 'disabled'}>Save</button>
+  </div></div>
+<div class="panel"><div class="panel-header"><h3 class="panel-title">Accounts</h3></div>
+  ${rows.length === 0 ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No accounts</div>' : `
+  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Account</th><th>Domain</th><th>Last scan</th><th>Open findings</th><th>High severity</th></tr></thead><tbody>
+  ${rows.map(r => `<tr><td><strong>${esc(r.username)}</strong></td><td>${esc(r.domain)}</td><td>${esc(r.last_scan || 'never')}</td>
+    <td>${r.open_findings > 0 ? Nova.badge(String(r.open_findings), 'yellow') : '0'}</td><td>${r.high_findings > 0 ? Nova.badge(String(r.high_findings), 'red') : '0'}</td></tr>`).join('')}
+  </tbody></table></div>`}</div>`;
+  };
+  window.sweepSaveSettings = async () => {
+    const res = await Nova.api('sweep', 'settings', { method: 'POST', body: { clamav: document.getElementById('sw-clam').checked } });
+    Nova.toast(res?.success ? 'Saved' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+  };
+
+  /* ══════════════════════════ Git Deploy ══════════════════════════ */
+  async function gitRender(el) {
+    const res = await Nova.api('gitdeploy', 'get');
+    const g = res?.data || null;
+    el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Git Deploy</h2>
+  ${g ? '<button class="btn btn-primary btn-sm" onclick="gitDeployNow()">Deploy now</button>' : ''}</div>
+<p class="text-muted" style="margin-bottom:1rem">Keep your site in step with a Git repository. Connect an https repository and a branch; the latest code is pulled into your site when you press Deploy now, and automatically on every push once you add the webhook.</p>
+<div class="card" style="margin-bottom:1rem"><div class="card-header"><span class="card-title">${g ? 'Connected repository' : 'Connect a repository'}</span></div>
+  <div style="padding:1rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.8rem">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Repository address (https)</label><input id="gd-url" class="form-control" placeholder="https://github.com/you/site.git" value="${esc(g?.repo_url || '')}"></div>
+    <div class="form-group"><label class="form-label">Branch</label><input id="gd-branch" class="form-control" value="${esc(g?.branch || 'main')}"></div>
+    <div class="form-group"><label class="form-label">Folder inside public_html (optional)</label><input id="gd-sub" class="form-control" placeholder="leave empty for the whole site" value="${esc(g?.subdir || '')}"></div>
+    <div class="form-group"><label class="form-label">Access token (private repositories)</label><input id="gd-token" type="password" class="form-control" placeholder="${g?.has_token ? 'stored - type to replace' : 'not needed for public repositories'}"></div>
+    <div class="form-group" style="align-self:end"><label style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" id="gd-over"> Replace existing files in the folder</label></div>
+  </div>
+  <div style="padding:0 1rem 1rem;display:flex;gap:.5rem">
+    <button class="btn btn-primary btn-sm" onclick="gitSave()">${g ? 'Save & deploy' : 'Connect & deploy'}</button>
+    ${g ? '<button class="btn btn-sm btn-danger" onclick="gitDisconnect()">Disconnect</button>' : ''}
+  </div></div>
+${g ? `
+<div class="card" style="margin-bottom:1rem"><div class="card-header"><span class="card-title">Last deploy</span>${g.last_status ? Nova.badge(g.last_status === 'ok' ? 'OK' : 'Failed', g.last_status === 'ok' ? 'green' : 'red') : ''}</div>
+  <div style="padding:1rem"><div style="font-size:.85rem;margin-bottom:.5rem">${esc(g.last_deploy || 'never')} ${g.last_commit ? ' - <code>' + esc(g.last_commit) + '</code>' : ''}</div>
+  ${g.last_output ? `<pre style="max-height:200px;overflow:auto;font-size:.75rem;background:var(--bg3);padding:.7rem;border-radius:6px">${esc(g.last_output)}</pre>` : ''}</div></div>
+<div class="card"><div class="card-header"><span class="card-title">Deploy on every push (webhook)</span></div>
+  <div style="padding:1rem;font-size:.85rem">
+    <p>In your repository settings add a webhook (JSON, push events only) with:</p>
+    <div class="form-group"><label class="form-label">Payload URL</label><input class="form-control" readonly value="${esc(g.webhook_url)}" onclick="this.select()"></div>
+    <div class="form-group"><label class="form-label">Secret</label><input class="form-control" readonly value="${esc(g.secret)}" onclick="this.select()"></div>
+    <button class="btn btn-xs" onclick="gitNewSecret()">Create a new secret</button>
+  </div></div>` : ''}`;
+  }
+  window.gitPage = async (el) => { el.innerHTML = '<div class="loading">Loading...</div>'; window._gitEl = el; await gitRender(el); };
+  const gitDone = (res, okMsg) => {
+    Nova.loadingDone?.();
+    Nova.toast(res?.success ? (res.message || okMsg) : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+    gitRender(window._gitEl);
+  };
+  window.gitSave = async () => {
+    const v = (id) => document.getElementById(id)?.value ?? '';
+    Nova.loading?.('Connecting and deploying...');
+    gitDone(await Nova.api('gitdeploy', 'save', { method: 'POST', body: { repo_url: v('gd-url').trim(), branch: v('gd-branch').trim(), subdir: v('gd-sub').trim(), token: v('gd-token'), overwrite: document.getElementById('gd-over').checked } }), 'Deployed');
+  };
+  window.gitDeployNow = async () => { Nova.loading?.('Deploying...'); gitDone(await Nova.api('gitdeploy', 'deploy', { method: 'POST', body: {} }), 'Deployed'); };
+  window.gitNewSecret = async () => gitDone(await Nova.api('gitdeploy', 'secret', { method: 'POST', body: {} }), 'New secret created');
+  window.gitDisconnect = () => Nova.confirm('Disconnect the repository? Your site files stay as they are.', async () => gitDone(await Nova.api('gitdeploy', 'disconnect', { method: 'POST', body: {} }), 'Disconnected'), true);
+
+  /* ══════════════════════════ Mail queue (admin) ══════════════════════════ */
+  window.mailQueueAdminPage = async () => {
+    const res = await Nova.api('mailqueue', 'list');
+    if (!res?.success) return `<div class="page-header"><h1 class="page-title">Mail Queue</h1></div><div class="empty">${esc(res?.message || 'Could not read the mail queue')}</div>`;
+    const msgs = res.data.messages;
+    return `
+<div class="page-header"><h1 class="page-title">Mail Queue</h1>
+  <div class="page-actions"><button class="btn btn-sm" onclick="mqAct('flush')">Retry all now</button>
+  <button class="btn btn-sm btn-danger" onclick="mqPurge()">Delete everything</button></div></div>
+<div class="panel"><div class="panel-header"><h3 class="panel-title">Waiting to be delivered</h3><span class="badge badge-${msgs.length ? 'yellow' : 'green'}">${msgs.length} message${msgs.length === 1 ? '' : 's'}</span></div>
+  ${msgs.length === 0 ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">The queue is empty - everything has been delivered.</div>' : `
+  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Queued</th><th>From</th><th>To</th><th>Why it is waiting</th><th>Size</th><th>Actions</th></tr></thead><tbody>
+  ${msgs.map(m => `<tr><td>${esc(new Date(m.time * 1000).toLocaleString())}${m.queue === 'hold' ? '<br>' + Nova.badge('On hold', 'blue') : ''}</td>
+    <td>${esc(m.sender || '(none)')}</td><td>${m.recipients.map(r => esc(r.address)).join('<br>')}</td>
+    <td><small>${m.recipients.map(r => esc(r.reason || '-')).join('<br>')}</small></td><td>${Nova.bytes(m.size)}</td>
+    <td style="white-space:nowrap"><button class="btn btn-xs" onclick="mqAct('retry','${esc(m.id)}')">Retry</button>
+      <button class="btn btn-xs" onclick="mqAct('${m.queue === 'hold' ? 'release' : 'hold'}','${esc(m.id)}')">${m.queue === 'hold' ? 'Release' : 'Hold'}</button>
+      <button class="btn btn-xs btn-danger" onclick="mqAct('delete','${esc(m.id)}')">Delete</button></td></tr>`).join('')}
+  </tbody></table></div>`}</div>`;
+  };
+  window.mqAct = async (action, id) => {
+    const res = await Nova.api('mailqueue', 'action', { method: 'POST', body: { action, id } });
+    Nova.toast(res?.success ? 'Done' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+    if (window.adminPage) adminPage('mail-queue');
+  };
+  window.mqPurge = () => Nova.confirm('Delete EVERY message in the mail queue? This cannot be undone.', async () => {
+    const res = await Nova.api('mailqueue', 'action', { method: 'POST', body: { action: 'purge', confirm_all: true } });
+    Nova.toast(res?.success ? 'Queue emptied' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+    if (window.adminPage) adminPage('mail-queue');
+  }, true);
 })();

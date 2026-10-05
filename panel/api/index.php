@@ -66,7 +66,7 @@ if (!$endpoint) {
 }
 
 // Public endpoints (no auth required)
-$public = ['auth', 'whmcs'];   // whmcs authenticates with its own X-WHMCS-Key (see whmcs.php)
+$public = ['auth', 'whmcs', 'githook'];   // whmcs authenticates with its own X-WHMCS-Key (see whmcs.php)
 if (!in_array($endpoint, $public)) {
     $auth = Auth::getInstance();
     if (!$auth->check()) {
