@@ -13,7 +13,7 @@ if crontab -l >/dev/null 2>&1; then
 fi
 cat > /etc/cron.d/novacpx-autodeploy <<'CRON'
 # NovaCPX auto-deploy (managed by deploy/install-autodeploy.sh)
-* * * * * root /usr/local/bin/novacpx-poll-deploy >> /var/log/novacpx/autodeploy.log 2>&1
+*/10 * * * * root /usr/local/bin/novacpx-poll-deploy >> /var/log/novacpx/autodeploy.log 2>&1
 CRON
 chmod 644 /etc/cron.d/novacpx-autodeploy
-echo "auto-deploy installed (polls origin/main of /opt/novacpx-src every minute)"
+echo "auto-deploy installed (polls origin/main of /opt/novacpx-src every 10 minutes)"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# NovaCPX auto-deploy: every minute (cron.d/novacpx-autodeploy) look at origin/main of the source checkout and, when it has
+# NovaCPX auto-deploy: every 10 minutes (cron.d/novacpx-autodeploy) look at origin/main of the source checkout and, when it has
 # commits this server has not deployed, hand them to deploy-runner.sh (pull, syntax check, rsync to the web root, migrations,
 # version record, rollback on a PHP syntax error). No inbound webhook needed, so it works the same on the DO server and on a
 # LAN-only dev VM. Installed to /usr/local/bin/novacpx-poll-deploy by deploy/install-autodeploy.sh.
