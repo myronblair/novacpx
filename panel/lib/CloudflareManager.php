@@ -2,16 +2,16 @@
 // Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
 class CloudflareManager {
     private const API = 'https://api.cloudflare.com/client/v4/';
-    private PDO $db;
+    private DB $db;
 
     public function __construct() {
-        $this->db = Database::getInstance()->getPDO();
+        $this->db = DB::getInstance();
     }
 
     // ── Credential management ─────────────────────────────────────────────────
     public function saveCredentials(int $accountId, string $apiKey, string $email): bool {
-        $stmt = $this->db->prepare("UPDATE accounts SET cf_api_key=?, cf_api_email=? WHERE id=?");
-        return $stmt->execute([$apiKey, $email, $accountId]);
+        $this->db->execute("UPDATE accounts SET cf_api_key=?, cf_api_email=? WHERE id=?", [$apiKey, $email, $accountId]);
+        return true;
     }
 
     public function testCredentials(string $apiKey, string $email): bool {
@@ -20,9 +20,7 @@ class CloudflareManager {
     }
 
     public function getCredentials(int $accountId): ?array {
-        $stmt = $this->db->prepare("SELECT cf_api_key, cf_api_email, cf_zone_id FROM accounts WHERE id=?");
-        $stmt->execute([$accountId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = $this->db->fetchOne("SELECT cf_api_key, cf_api_email, cf_zone_id FROM accounts WHERE id=?", [$accountId]);
         return ($row && $row['cf_api_key']) ? $row : null;
     }
 
@@ -101,16 +99,26 @@ class CloudflareManager {
     // ── Sync: pull Cloudflare records into local DB ───────────────────────────
     public function syncFromCloudflare(string $domain, string $zoneId, string $apiKey, string $email): int {
         $cfRecords = $this->listRecords($zoneId, $apiKey, $email);
-        $count     = 0;
+        $zone = $this->db->fetchOne("SELECT id FROM dns_zones WHERE domain = ?", [$domain]);
+        if (!$zone) throw new RuntimeException("{$domain} has no DNS zone in this panel");
+        $count = 0;
         foreach ($cfRecords as $rec) {
+            if (!in_array($rec['type'], ['A','AAAA','CNAME','MX','TXT','SRV','NS','PTR','CAA'], true)) continue;
             $name = rtrim(str_replace('.' . $domain, '', $rec['name']), '.');
-            $this->db->prepare("INSERT INTO dns_records (domain, name, type, content, ttl, priority)
-                VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE content=VALUES(content), ttl=VALUES(ttl)")
-                ->execute([$domain, $name ?: '@', $rec['type'], $rec['content'], $rec['ttl'] ?? 300, $rec['priority'] ?? 0]);
+            if ($name === $domain) $name = '@';
+            $name = $name ?: '@';
+            $ttl  = (int)($rec['ttl'] ?? 300); if ($ttl < 1) $ttl = 300;
+            $have = $this->db->fetchOne("SELECT id FROM dns_records WHERE zone_id = ? AND name = ? AND type = ? AND content = ?", [$zone['id'], $name, $rec['type'], $rec['content']]);
+            if ($have) {
+                $this->db->execute("UPDATE dns_records SET ttl = ?, proxied = ? WHERE id = ?", [$ttl, !empty($rec['proxied']) ? 1 : 0, $have['id']]);
+            } else {
+                $this->db->execute("INSERT INTO dns_records (zone_id, name, type, content, ttl, priority, proxied) VALUES (?,?,?,?,?,?,?)",
+                    [$zone['id'], $name, $rec['type'], $rec['content'], $ttl, $rec['priority'] ?? null, !empty($rec['proxied']) ? 1 : 0]);
+            }
             $count++;
         }
-        // Store zone ID on domain
-        $this->db->prepare("UPDATE dns_zones SET cf_zone_id=? WHERE domain=?")->execute([$zoneId, $domain]);
+        // Remember the Cloudflare zone for this domain
+        $this->db->execute("UPDATE dns_zones SET cf_zone_id = ? WHERE domain = ?", [$zoneId, $domain]);
         return $count;
     }
 
@@ -144,8 +152,6 @@ class CloudflareManager {
     }
 
     private function getLocalRecords(string $domain): array {
-        $stmt = $this->db->prepare("SELECT * FROM dns_records WHERE domain=?");
-        $stmt->execute([$domain]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $this->db->fetchAll("SELECT r.* FROM dns_records r JOIN dns_zones z ON z.id = r.zone_id WHERE z.domain = ?", [$domain]);
     }
 }

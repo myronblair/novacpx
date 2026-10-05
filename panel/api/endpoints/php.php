@@ -25,6 +25,24 @@ match ($action) {
         ]);
     })(),
 
+    // Server-wide defaults (the Web Server page): the default PHP version and its php.ini limits
+    'global-config' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        $ver = $db->fetchOne("SELECT value FROM settings WHERE `key`='default_php'")['value'] ?? '';
+        if (!preg_match('/^[0-9]\.[0-9]$/', $ver)) $ver = (string)(defined('PHP_DEFAULT') ? PHP_DEFAULT : '8.3');
+        $ini = @file_get_contents("/etc/php/{$ver}/fpm/php.ini") ?: '';
+        $get = function (string $k, string $def) use ($ini): string {
+            return preg_match('/^\s*' . preg_quote($k, '/') . '\s*=\s*([^\s;]+)/m', $ini, $m) ? $m[1] : $def;
+        };
+        Response::success([
+            'version'             => $ver,
+            'memory_limit'        => $get('memory_limit', '128M'),
+            'max_execution_time'  => (int)$get('max_execution_time', '30'),
+            'upload_max_filesize' => $get('upload_max_filesize', '2M'),
+            'post_max_size'       => $get('post_max_size', '8M'),
+        ]);
+    })(),
+
     'versions' => (function() {
         $versions = [];
         foreach (['7.4','8.1','8.2','8.3'] as $v) {

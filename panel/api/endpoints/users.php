@@ -90,7 +90,6 @@ match ($action) {
         if ($user['role'] === 'admin') Response::error('Cannot delete admin users');
         // Disown accounts under this reseller rather than deleting them
         $db->execute("UPDATE users SET reseller_id=NULL WHERE reseller_id=?", [$id]);
-        $db->execute("UPDATE accounts SET reseller_id=NULL WHERE reseller_id=?", [$id]);
         $db->execute("DELETE FROM users WHERE id=?", [$id]);
         audit('user.delete', "user:{$user['username']}");
         Response::success(null, 'User deleted');
