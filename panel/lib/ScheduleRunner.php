@@ -25,6 +25,8 @@ class ScheduleRunner {
     public static function runDue(): array {
         require_once __DIR__ . '/BackupManager.php';
         $db = DB::getInstance();
+        // a backup whose process died (reboot, killed) would stay "running" forever: mark anything older than 12 hours as failed
+        $db->execute("UPDATE backups SET status = 'failed' WHERE status = 'running' AND created_at < datetime('now','-12 hours')");
         $ran = 0; $failed = 0;
         foreach (self::due() as $s) {
             $db->execute("UPDATE backup_schedules SET last_run = datetime('now') WHERE id = ?", [$s['id']]);
