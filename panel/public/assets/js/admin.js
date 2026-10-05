@@ -3250,7 +3250,7 @@ async function backupsFull() {
         ${backupList.map(b => `<tr>
           <td>${Nova.escHtml(b.username||b.account_id||'—')}</td>
           <td>${Nova.badge(b.type,'default')}</td>
-          <td>${Nova.bytes(b.size||0)}</td>
+          <td>${Nova.bytes(Math.round((parseFloat(b.size_mb)||0) * 1048576))}</td>
           <td>${Nova.badge(b.status, b.status==='complete'?'green':b.status==='failed'?'red':'yellow')}</td>
           <td>${b.remote_path ? Nova.badge('remote','blue') : Nova.badge('local','muted')}</td>
           <td class="text-muted text-sm">${Nova.relTime(b.created_at)}</td>
