@@ -43,7 +43,7 @@ class Sweep {
 
     /** True when the ClamAV background daemon is up (much faster than starting clamscan for every scan). */
     public static function clamdActive(): bool {
-        return is_executable('/usr/bin/clamdscan') && (is_socket('/run/clamav/clamd.ctl') || is_socket('/var/run/clamav/clamd.ctl'));
+        return is_executable('/usr/bin/clamdscan') && (@filetype('/run/clamav/clamd.ctl') === 'socket' || @filetype('/var/run/clamav/clamd.ctl') === 'socket');
     }
 
     /** May this panel user use Sweep? Their own switch, and their reseller's switch when they have one. */
