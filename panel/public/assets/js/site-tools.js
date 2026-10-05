@@ -216,22 +216,35 @@ ${warn}
   ${rows.map(r => `<tr><td>${esc(r.created_at)}</td><td>${esc(r.direction)}</td><td>${esc(r.username)}</td><td>${Nova.badge(r.status, r.status === 'failed' ? 'red' : 'green')}</td><td><small>${esc(r.detail || '')}</small></td></tr>`).join('')}
   </tbody></table></div>` : '<div style="padding:1.5rem;color:var(--text-muted)">No transfers yet.</div>'}</div>`;
   };
-  window.trExport = async () => {
+  /** Start a background job and poll until it finishes; onDone(job) gets the finished job. */
+  async function trRun(kind, body, out, working, onDone) {
+    out.innerHTML = `<div class="loading">${working}</div>`;
+    const res = await Nova.api('transfer', kind, { method: 'POST', body });
+    if (!res?.success) { out.innerHTML = `<div class="alert alert-danger">${esc(res?.message || 'Failed')}</div>`; return; }
+    const id = res.data.job;
+    for (let i = 0; i < 2400; i++) {            // up to ~2 hours at 3 s
+      await new Promise(r => setTimeout(r, 3000));
+      if (!document.body.contains(out)) return;   // the admin left the page; the job carries on
+      const j = await Nova.api('transfer', 'job', { params: { id } });
+      if (j?.success && j.data.status === 'done') { onDone(j.data); return; }
+      if (j?.success && j.data.status === 'failed') { out.innerHTML = `<div class="alert alert-danger">${esc(j.data.error || 'Failed')}</div>`; return; }
+    }
+    out.innerHTML = '<div class="alert alert-warning">Still running - check Recent transfers later.</div>';
+  }
+  window.trExport = () => {
     const out = document.getElementById('tr-out');
-    out.innerHTML = '<div class="loading">Packing the account - this can take a few minutes...</div>';
-    const res = await Nova.api('transfer', 'export', { method: 'POST', body: { account_id: +document.getElementById('tr-acct').value } });
-    if (!res?.success) { out.innerHTML = `<div class="alert alert-danger">${esc(res?.message || 'Failed')}</div>`; return; }
-    out.innerHTML = `<div class="alert alert-success">Ready (${fmtMb(res.data.size / 1048576)}), valid until ${esc(res.data.expires)}.</div>
-      <input class="form-control" readonly onclick="this.select()" value="${esc(res.data.url)}">`;
+    trRun('export', { account_id: +document.getElementById('tr-acct').value }, out, 'Packing the account - this can take a few minutes...', (j) => {
+      out.innerHTML = `<div class="alert alert-success">Ready (${fmtMb(j.result.size / 1048576)}), valid until ${esc(j.result.expires)}.</div>
+        <input class="form-control" readonly onclick="this.select()" value="${esc(j.result.url)}">`;
+    });
   };
-  window.trImport = async () => {
+  window.trImport = () => {
     const out = document.getElementById('tr-in');
-    out.innerHTML = '<div class="loading">Downloading and building the account - this can take a few minutes...</div>';
-    const res = await Nova.api('transfer', 'import', { method: 'POST', body: { link: document.getElementById('tr-link').value.trim() } });
-    if (!res?.success) { out.innerHTML = `<div class="alert alert-danger">${esc(res?.message || 'Failed')}</div>`; return; }
-    const d = res.data;
-    out.innerHTML = `<div class="alert alert-success">Imported ${esc(d.username)} (${esc(d.domain)}) with ${d.databases.length} database(s).</div>
-      <ul>${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
+    trRun('import', { link: document.getElementById('tr-link').value.trim() }, out, 'Downloading and building the account - this can take a few minutes...', (j) => {
+      const d = j.result;
+      out.innerHTML = `<div class="alert alert-success">Imported ${esc(d.username)} (${esc(d.domain)}) with ${d.databases.length} database(s).</div>
+        <ul>${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
+    });
   };
 
   /* ══════════════════════════ Traffic Meter ══════════════════════════ */

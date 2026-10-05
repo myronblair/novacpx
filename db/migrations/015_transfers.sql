@@ -20,3 +20,14 @@ CREATE TABLE IF NOT EXISTS transfer_log (
   detail     TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Exports and imports run in the background (building an account restarts PHP, which must not happen inside a web request).
+CREATE TABLE IF NOT EXISTS transfer_jobs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL,                 -- export | import
+  args       TEXT NOT NULL DEFAULT '{}',    -- cleared when the job ends (an import link is a credential)
+  status     TEXT NOT NULL DEFAULT 'running', -- running | done | failed
+  result     TEXT,
+  error      TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);

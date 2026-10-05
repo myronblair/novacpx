@@ -29,6 +29,34 @@ class Transfer {
         }
     }
 
+    /** Queue a job and start it in the background. @return int job id */
+    public static function startJob(string $kind, array $args): int {
+        $id = (int)DB::getInstance()->insert("INSERT INTO transfer_jobs (kind, args) VALUES (?,?)", [$kind, json_encode($args)]);
+        exec('nohup /usr/bin/php ' . escapeshellarg('/opt/novacpx/bin/run-transfer.php') . ' ' . $id . ' >/dev/null 2>&1 &');
+        return $id;
+    }
+
+    public static function runJob(int $id): void {
+        $db = DB::getInstance();
+        $job = $db->fetchOne("SELECT * FROM transfer_jobs WHERE id = ? AND status = 'running'", [$id]);
+        if (!$job) return;
+        $a = json_decode($job['args'], true) ?: [];
+        try {
+            if ($job['kind'] === 'export') {
+                $acct = $db->fetchOne("SELECT * FROM accounts WHERE id = ?", [(int)($a['account_id'] ?? 0)]);
+                if (!$acct) throw new RuntimeException('Account not found');
+                $res = self::export($acct, (string)$a['host']);
+            } else {
+                $res = self::import((string)($a['link'] ?? ''));
+            }
+            $db->execute("UPDATE transfer_jobs SET status = 'done', result = ?, args = '{}' WHERE id = ?", [json_encode($res), $id]);
+        } catch (Throwable $e) {
+            $msg = $e instanceof RuntimeException ? $e->getMessage() : 'Unexpected error - see the panel log';
+            if (!($e instanceof RuntimeException)) error_log('[transfer] ' . $e->getMessage());
+            $db->execute("UPDATE transfer_jobs SET status = 'failed', error = ?, args = '{}' WHERE id = ?", [$msg, $id]);
+        }
+    }
+
     /** @return array{url:string,expires:string,size:int} */
     public static function export(array $acct, string $host): array {
         $db = DB::getInstance();
