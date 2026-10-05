@@ -75,6 +75,7 @@ NovaCPX is a Linux web hosting control panel with a three-tier architecture (Adm
 - **Firewall** — per-site request filter (SQL and script injection, path traversal, code inclusion, attack scanners, sensitive files, odd methods, XML-RPC) with exempt paths
 - **Package tool lists** — each hosting package chooses which optional tools its customers see
 - **Account Transfer** — move a customer to another NovaCPX server: website files, MySQL databases (with passwords), login, PHP version and package travel in one single-use, checksummed link
+- **Web Terminal** — a root shell in the admin panel's browser tab. Off until you enable it, 2FA required, a fresh authenticator code every time, every session recorded.
 - **Git Deploy** — connect a site to an https Git repository and branch; deploy on demand or on every push through a signed webhook
 - **Mail Queue** — admin view of the Postfix queue: retry, hold, release, delete, flush
 - **Pool limits** — per-package PHP limits (requests at once, memory ceiling) written into each account's PHP-FPM pool

@@ -98,6 +98,7 @@
     'sweep-overview': () => window.sweepAdminPage(),
     'mail-queue': () => window.mailQueueAdminPage(),
     'transfer': () => window.transferAdminPage(),
+    'terminal': () => window.terminalAdminPage(),
     firewall,
     fail2ban,
     'audit-log': auditLog,

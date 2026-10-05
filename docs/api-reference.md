@@ -796,3 +796,14 @@ Admin: `{enabled, fail_count}`.
 - `GET /api/transfer/job?id=N` `{status: running|done|failed, result, error}`; an export's result holds `url`, `expires`, `size`; an import's holds `username`, `domain`, `databases`, `notes`
 - `GET /api/transfer/log` recent exports and imports
 - `GET /api/transferdl/get?token=...` public, single-use download of a bundle (the token is the credential)
+
+## Web terminal (admin)
+
+Only a real admin session works (no API tokens, no impersonation).
+
+- `GET /api/terminal/status` `{enabled, twofa, service, unlocked_for, unlock_seconds, recordings}`
+- `POST /api/terminal/enable` installs and starts the terminal; refused until the admin has 2FA on
+- `POST /api/terminal/disable`
+- `POST /api/terminal/unlock {code}` a fresh authenticator code opens `/terminal/` for 5 minutes; 5 wrong codes lock for 10 minutes
+- `GET /api/terminal/log?name=...` one recorded session (text, the last 200 KB)
+- `GET /api/terminal/authcheck` 204/403, called by nginx for every `/terminal/` request

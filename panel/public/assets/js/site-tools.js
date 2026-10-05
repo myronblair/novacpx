@@ -520,4 +520,62 @@ ${g ? `
     Nova.toast(res?.success ? 'Queue emptied' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
     if (window.adminPage) adminPage('mail-queue');
   }, true);
+  /* ══════════════════════════ Web Terminal (admin) ══════════════════════════ */
+  window.terminalAdminPage = async () => {
+    const res = await Nova.api('terminal', 'status');
+    if (!res?.success) return `<div class="page-header"><h1 class="page-title">Web Terminal</h1></div><div class="empty">${esc(res?.message || 'Could not load')}</div>`;
+    const d = res.data, sv = d.service || {};
+    const nginxOk = sv.webserver === 'nginx';
+    let action = '';
+    if (!d.enabled) {
+      action = !nginxOk ? `<div class="alert alert-warning">The web terminal needs the nginx web server. This server uses <strong>${esc(sv.webserver)}</strong>.</div>`
+        : !d.twofa ? `<div class="alert alert-warning">Turn on two-factor authentication for your admin login first (Security &gt; 2FA). The terminal will not run without it.</div>`
+        : `<button class="btn btn-primary" onclick="termEnable()">Enable web terminal</button>
+           <div class="form-hint" style="margin-top:.6rem">Installs the ttyd program, starts it, and adds it to the admin panel at <code>/terminal/</code>. Nothing is reachable until you enter an authenticator code.</div>`;
+    } else {
+      action = `<div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+          <input id="term-code" class="form-control" style="max-width:11rem" inputmode="numeric" maxlength="6" placeholder="6-digit code" onkeydown="if(event.key==='Enter')termUnlock()">
+          <button class="btn btn-primary" onclick="termUnlock()">Unlock &amp; open terminal</button>
+          <button class="btn" onclick="termOpen()" ${d.unlocked_for ? '' : 'disabled'}>Open (unlocked ${d.unlocked_for ? Math.ceil(d.unlocked_for / 60) + ' min left' : 'no'})</button>
+          <button class="btn btn-danger" style="margin-left:auto" onclick="termDisable()">Disable</button></div>
+        <div class="form-hint" style="margin-top:.6rem">Root shell in your browser. A fresh code opens it for ${Math.round(d.unlock_seconds / 60)} minutes; one session at a time; idle for 15 minutes or 4 hours total ends it. Everything typed and shown is recorded below.</div>`;
+    }
+    const rec = d.recordings || [];
+    return `
+<div class="page-header"><h1 class="page-title">Web Terminal</h1></div>
+<div class="panel" style="margin-bottom:1.25rem"><div class="panel-header"><h3 class="panel-title">Status</h3>
+  ${Nova.badge(d.enabled ? (sv.active ? 'Running' : 'Enabled, not running') : 'Off', d.enabled && sv.active ? 'green' : (d.enabled ? 'yellow' : 'gray'))}</div>
+  <div style="padding:1rem 1.25rem">${action}</div></div>
+<div class="panel"><div class="panel-header"><h3 class="panel-title">Recorded sessions</h3><span class="form-hint">Kept 90 days</span></div>
+  ${rec.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th>Started</th><th>Size</th><th></th></tr></thead><tbody>
+  ${rec.map(r => `<tr><td>${esc(new Date(r.time * 1000).toLocaleString())}</td><td>${Nova.bytes(r.size)}</td>
+    <td><button class="btn btn-xs" onclick="termView('${esc(r.name)}')">View</button></td></tr>`).join('')}</tbody></table></div>`
+  : '<div style="padding:1.5rem;color:var(--text-muted)">No sessions recorded yet.</div>'}</div>`;
+  };
+  window.termOpen = () => { window.open('/terminal/', '_blank', 'noopener'); };
+  window.termUnlock = async () => {
+    const code = (document.getElementById('term-code')?.value || '').trim();
+    const res = await Nova.api('terminal', 'unlock', { method: 'POST', body: { code } });
+    if (!res?.success) return Nova.toast(res?.message || 'Could not unlock', 'error');
+    Nova.toast('Unlocked', 'success');
+    termOpen();
+    if (window.adminPage) adminPage('terminal');
+  };
+  window.termEnable = async () => {
+    Nova.loading('Installing and starting the terminal...');
+    const res = await Nova.api('terminal', 'enable', { method: 'POST', body: {} });
+    Nova.loadingDone();
+    Nova.toast(res?.success ? 'Web terminal enabled' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+    if (window.adminPage) adminPage('terminal');
+  };
+  window.termDisable = () => Nova.confirm('Switch the web terminal off? Open sessions end.', async () => {
+    const res = await Nova.api('terminal', 'disable', { method: 'POST', body: {} });
+    Nova.toast(res?.success ? 'Web terminal disabled' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+    if (window.adminPage) adminPage('terminal');
+  });
+  window.termView = async (name) => {
+    const res = await Nova.api('terminal', 'log', { params: { name } });
+    if (!res?.success) return Nova.toast(res?.message || 'Could not read the recording', 'error');
+    Nova.modal('Session ' + name, `${res.data.truncated ? '<div class="form-hint">Showing the last 200 KB.</div>' : ''}<pre style="background:var(--bg);padding:1rem;font-size:.78rem;overflow:auto;max-height:420px;white-space:pre-wrap">${esc(res.data.text)}</pre>`);
+  };
 })();

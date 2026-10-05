@@ -1769,6 +1769,147 @@ function cmd_ftp_sync(array $p): int {
     return 0;
 }
 
+// ───────────────────────── Web terminal (ttyd behind the admin panel's nginx) ─────────────────────────
+
+const NCR_TERM_SOCK   = '/run/novacpx-terminal/t.sock';
+const NCR_TERM_CONF   = '/etc/nginx/novacpx-terminal.conf';
+const NCR_TERM_LOGDIR = '/var/log/novacpx/terminal';
+
+/** The nginx file that holds the admin panel's server block (the one listening on 8882): the system site or the standalone panel server's own config. */
+function ncr_term_site(): string {
+    $cands = array_merge(glob('/etc/nginx/sites-available/*') ?: [], glob('/etc/nginx/conf.d/*.conf') ?: [], ['/etc/novacpx/nginx-panel.conf']);
+    foreach ($cands as $f) {
+        $t = is_file($f) ? @file_get_contents($f) : false;
+        if ($t !== false && preg_match('/listen\s+8882\b/', $t)) return $f;
+    }
+    refuse('cannot find the admin panel nginx site');
+}
+
+/** [test command, reload command] for whichever nginx owns that site file. */
+function ncr_term_nginx_cmds(string $site): array {
+    return $site === '/etc/novacpx/nginx-panel.conf'
+        ? [['nginx', '-t', '-c', $site], ['systemctl', 'reload', 'novacpx-web']]
+        : [['nginx', '-t'], ['systemctl', 'reload', 'nginx']];
+}
+
+function ncr_term_session_script(): string {
+    return <<<'SH'
+#!/bin/bash
+# NovaCPX web terminal session: records everything, idles out after 15 minutes, ends after 4 hours.
+umask 077
+LOGDIR=/var/log/novacpx/terminal
+mkdir -p "$LOGDIR"; chmod 700 "$LOGDIR"
+find "$LOGDIR" -type f -name '*.log' -mtime +90 -delete 2>/dev/null
+LOG="$LOGDIR/$(date +%Y%m%d-%H%M%S)-$$.log"
+cd /root 2>/dev/null
+export TERM=xterm-256color
+exec timeout --foreground 4h script -q -f -c 'bash --rcfile /etc/novacpx/terminal.bashrc -i' "$LOG"
+SH;
+}
+
+function ncr_term_bashrc(): string {
+    return "# Managed by NovaCPX\n[ -f /root/.bashrc ] && . /root/.bashrc\nreadonly TMOUT=900\nexport TMOUT\n"
+         . "echo 'NovaCPX web terminal - this session is recorded. Idle for 15 minutes ends it.'\n";
+}
+
+function ncr_term_unit(): string {
+    return "[Unit]\nDescription=NovaCPX web terminal (ttyd)\nAfter=network.target\n\n[Service]\nType=simple\n"
+         . "RuntimeDirectory=novacpx-terminal\nRuntimeDirectoryMode=0755\nUMask=0007\n"
+         . "ExecStart=/usr/bin/ttyd -i " . NCR_TERM_SOCK . " -b /terminal -W -m 1 -O -t titleFixed=NovaCPX -t fontSize=14 /usr/local/sbin/novacpx-terminal-session\n"
+         . "ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -S " . NCR_TERM_SOCK . " ] && break; sleep 0.25; done; chgrp www-data " . NCR_TERM_SOCK . "; chmod 660 " . NCR_TERM_SOCK . "'\n"
+         . "Restart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=multi-user.target\n";
+}
+
+function ncr_term_nginx(string $fpmSock): string {
+    return "# Managed by NovaCPX - web terminal (admin panel only)\n"
+         . "location = /terminal-auth {\n    internal;\n    fastcgi_pass unix:{$fpmSock};\n    include /etc/nginx/fastcgi_params;\n"
+         . "    fastcgi_param SCRIPT_FILENAME /srv/novacpx/public/api/index.php;\n"
+         . "    fastcgi_param REQUEST_URI /api/terminal/authcheck;\n"
+         . "    fastcgi_param HTTP_X_ORIGINAL_URI \$request_uri;\n"
+         . "    fastcgi_pass_request_body off;\n    fastcgi_param CONTENT_LENGTH \"\";\n}\n"
+         . "location ^~ /terminal/ {\n    auth_request /terminal-auth;\n    proxy_pass http://unix:" . NCR_TERM_SOCK . ";\n"
+         . "    proxy_http_version 1.1;\n    proxy_set_header Upgrade \$http_upgrade;\n    proxy_set_header Connection \"upgrade\";\n"
+         . "    proxy_set_header Host \$http_host;\n    proxy_read_timeout 4h;\n    proxy_send_timeout 4h;\n    proxy_buffering off;\n}\n";
+}
+
+/** Install ttyd, the session wrapper, the service and the nginx hook, then start it. Idempotent. */
+function cmd_terminal_enable(array $p): int {
+    if (ncr_webserver() !== 'nginx') refuse('the web terminal needs the nginx web server');
+    $site = ncr_term_site();
+    [$testCmd, $reloadCmd] = ncr_term_nginx_cmds($site);
+    $t = file_get_contents($site);
+    preg_match('#fastcgi_pass\s+unix:(/run/php/php[0-9.]+-fpm\.sock)#', $t, $m);
+    $fpm = $m[1] ?? '';
+    if ($fpm === '') refuse('cannot find the php-fpm socket in the panel site');
+
+    if (!is_file('/usr/bin/ttyd')) {
+        [$rc, $out] = ncr_run(['apt-get', 'install', '-y', '-qq', 'ttyd'], null, false, ['DEBIAN_FRONTEND' => 'noninteractive']);
+        if ($rc !== 0 || !is_file('/usr/bin/ttyd')) { echo "ttyd install failed\n" . $out; return 1; }
+    }
+    ncr_write_file('/usr/local/sbin/novacpx-terminal-session', ncr_term_session_script() . "\n", 0755);
+    ncr_write_file('/etc/novacpx/terminal.bashrc', ncr_term_bashrc(), 0644);
+    ncr_write_file('/etc/systemd/system/novacpx-terminal.service', ncr_term_unit(), 0644);
+    ncr_write_file(NCR_TERM_CONF, ncr_term_nginx($fpm), 0644);
+
+    // Hook the include into the 8882 server block (once).
+    if (!str_contains($t, NCR_TERM_CONF)) {
+        $new = preg_replace('/(listen\s+8882\b[^\n]*\n)/', "$1    include " . NCR_TERM_CONF . ";\n", $t, 1, $n);
+        if (!$n) refuse('could not hook the panel site');
+        ncr_write_file($site, $new, 0644);
+        [$rc, $out] = ncr_run($testCmd);
+        if ($rc !== 0) { ncr_write_file($site, $t, 0644); echo "nginx -t failed, change reverted\n" . $out; return 1; }
+    }
+    ncr_run(['systemctl', 'daemon-reload']);
+    [$rc, $out] = ncr_run(['systemctl', 'enable', '--now', 'novacpx-terminal']);
+    if ($rc !== 0) { echo $out; return $rc; }
+    ncr_run(['systemctl', 'restart', 'novacpx-terminal']);
+    [$rc, $out] = ncr_run($reloadCmd);
+    if ($rc !== 0) { echo $out; return $rc; }
+    return 0;
+}
+
+function cmd_terminal_disable(array $p): int {
+    ncr_run(['systemctl', 'disable', '--now', 'novacpx-terminal']);
+    return 0;
+}
+
+function cmd_terminal_status(array $p): int {
+    [, $active] = ncr_run(['systemctl', 'is-active', 'novacpx-terminal']);
+    return ncr_json([
+        'installed' => is_file('/usr/bin/ttyd'),
+        'hooked'    => is_file(NCR_TERM_CONF),
+        'active'    => trim($active) === 'active',
+        'webserver' => ncr_webserver(),
+    ]);
+}
+
+function cmd_terminal_log_list(array $p): int {
+    $out = [];
+    foreach (glob(NCR_TERM_LOGDIR . '/*.log') ?: [] as $f) {
+        $out[] = ['name' => basename($f), 'size' => filesize($f), 'time' => filemtime($f)];
+    }
+    usort($out, fn($a, $b) => $b['time'] <=> $a['time']);
+    return ncr_json(array_slice($out, 0, 100));
+}
+
+/** The tail of one recording (control sequences stripped so it reads as plain text). */
+function cmd_terminal_log_read(array $p): int {
+    $name = $p['name'] ?? null;
+    if (!is_string($name) || !preg_match('/^[0-9]{8}-[0-9]{6}-[0-9]+\.log$/', $name)) refuse('invalid recording name');
+    $f = NCR_TERM_LOGDIR . '/' . $name;
+    if (!is_file($f) || is_link($f)) refuse('no such recording');
+    $size = filesize($f);
+    $max  = 200000;
+    $fh   = fopen($f, 'rb');
+    if ($size > $max) fseek($fh, $size - $max);
+    $raw  = stream_get_contents($fh);
+    fclose($fh);
+    $raw  = preg_replace('/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Za-z0-9]|\x1b[=>]/', '', $raw);
+    $raw  = preg_replace('/[^\x09\x0a\x0d\x20-\x7e\x80-\xff]/', '', $raw);
+    $raw  = mb_convert_encoding($raw, 'UTF-8', 'UTF-8');
+    return ncr_json(['name' => $name, 'size' => $size, 'truncated' => $size > $max, 'text' => $raw]);
+}
+
 // ───────────────────────── dispatch ─────────────────────────
 
 const NCR_COMMANDS = [
@@ -1789,7 +1930,7 @@ const NCR_COMMANDS = [
     'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
     'site.rules.write' => 'cmd_site_rules_write',
     'waf.write' => 'cmd_waf_write',
-    'ftp.sync' => 'cmd_ftp_sync', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
+    'ftp.sync' => 'cmd_ftp_sync', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
     'mail.queue.list' => 'cmd_mail_queue_list', 'mail.queue.action' => 'cmd_mail_queue_action',
     'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
 ];
