@@ -78,7 +78,17 @@ match ($action) {
         $accountId = $isAdmin ? (isset($_GET['account_id']) ? (int)$_GET['account_id'] : null)
                               : ($_userAccountId ?? null);
         $list = $dm->listContainers($accountId);
-        Response::success(['containers' => $list]);
+        $names = [];
+        foreach (DB::getInstance()->fetchAll("SELECT id, username FROM accounts") as $a) $names[(int)$a['id']] = $a['username'];
+        foreach ($list as &$row) $row['account_name'] = $row['account_id'] ? ($names[(int)$row['account_id']] ?? ('#' . $row['account_id'])) : 'Panel admin';
+        unset($row);
+        $out = ['containers' => $list];
+        if ($isAdmin && $accountId === null) {
+            // containers on this host that the panel did not create (Portainer agent, other tools)
+            $own = $dm->ownership();
+            $out['other'] = array_values(array_filter($own['containers'], fn($c) => $c['owner'] === 'System'));
+        }
+        Response::success($out);
     })(),
 
     'container-action' => (function() use ($dm, $body, $currentUser, $isAdmin, $role, $_userAccountId) {
@@ -150,7 +160,11 @@ match ($action) {
     // ── Images ──────────────────────────────────────────────────────────────
     'images' => (function() use ($dm, $isAdmin) {
         if (!$isAdmin) Response::error('Admin only', 403);
-        Response::success(['images' => $dm->listImages()]);
+        $own = $dm->ownership()['images'];
+        $imgs = $dm->listImages();
+        foreach ($imgs as &$i) $i += ($own[(string)($i['ID'] ?? '')] ?? ['owner' => 'Unused', 'kind' => 'unused', 'used_by' => '']);
+        unset($i);
+        Response::success(['images' => $imgs]);
     })(),
 
     'image-pull' => (function() use ($dm, $body, $isAdmin) {
@@ -174,19 +188,32 @@ match ($action) {
     // ── Volumes & Networks ───────────────────────────────────────────────────
     'volumes' => (function() use ($dm, $isAdmin) {
         if (!$isAdmin) Response::error('Admin only', 403);
-        Response::success(['volumes' => $dm->listVolumes()]);
+        $own = $dm->ownership()['volumes'];
+        $vols = $dm->listVolumes();
+        foreach ($vols as &$v) $v += ($own[(string)($v['Name'] ?? '')] ?? ['owner' => 'Unused', 'kind' => 'unused', 'used_by' => '']);
+        unset($v);
+        Response::success(['volumes' => $vols]);
     })(),
 
     'networks' => (function() use ($dm, $isAdmin) {
         if (!$isAdmin) Response::error('Admin only', 403);
-        Response::success(['networks' => $dm->listNetworks()]);
+        $own = $dm->ownership()['networks'];
+        $nets = $dm->listNetworks();
+        foreach ($nets as &$n) $n += ($own[(string)($n['Name'] ?? '')] ?? ['owner' => 'Unused', 'kind' => 'unused', 'used_by' => '']);
+        unset($n);
+        Response::success(['networks' => $nets]);
     })(),
 
     // ── Compose Stacks ───────────────────────────────────────────────────────
     'stacks' => (function() use ($dm, $currentUser, $isAdmin, $_userAccountId) {
         $accountId = $isAdmin ? (isset($_GET['account_id']) ? (int)$_GET['account_id'] : null)
                               : ($_userAccountId ?? null);
-        Response::success(['stacks' => $dm->listStacks($accountId)]);
+        $stacks = $dm->listStacks($accountId);
+        $names = [];
+        foreach (DB::getInstance()->fetchAll("SELECT id, username FROM accounts") as $a) $names[(int)$a['id']] = $a['username'];
+        foreach ($stacks as &$st) $st['account_name'] = $st['account_id'] ? ($names[(int)$st['account_id']] ?? ('#' . $st['account_id'])) : 'Panel admin';
+        unset($st);
+        Response::success(['stacks' => $stacks]);
     })(),
 
     'stack-create' => (function() use ($dm, $body, $currentUser, $isAdmin, $_userAccountId) {

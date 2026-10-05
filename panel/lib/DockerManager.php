@@ -156,6 +156,92 @@ class DockerManager {
         return $rows;
     }
 
+    /**
+     * Who owns what on this Docker host. Containers the panel made belong to a hosting account (or the admin); everything else
+     * (Portainer agents, other tools) is "System". Images, volumes and networks inherit the owner of the containers that use them;
+     * nothing using them = Unused.
+     * @return array{containers:array,images:array,volumes:array,networks:array}
+     */
+    public function ownership(): array {
+        $live = $this->jsonLines(Root::run('docker.inventory')['out']);
+        $tracked = [];                              // container id (12) => account username|null
+        foreach ($this->db->fetchAll("SELECT dc.container_id, a.username FROM docker_containers dc LEFT JOIN accounts a ON a.id = dc.account_id") as $r) {
+            $tracked[substr((string)$r['container_id'], 0, 12)] = $r['username'] ?: null;
+        }
+        $stackOwner = [];                           // stack dir => username|null
+        foreach ($this->db->fetchAll("SELECT s.stack_dir, a.username FROM docker_compose_stacks s LEFT JOIN accounts a ON a.id = s.account_id") as $r) {
+            $stackOwner[rtrim((string)$r['stack_dir'], '/')] = $r['username'] ?: null;
+        }
+        $labelOf = function (string $labels, string $key): string {
+            return preg_match('/(?:^|,)' . preg_quote($key, '/') . '=([^,]*)/', $labels, $m) ? $m[1] : '';
+        };
+        $projectOwner = [];                         // compose project => owner label
+        $containers = [];
+        foreach ($live as $c) {
+            $id   = substr((string)($c['ID'] ?? ''), 0, 12);
+            $labs = (string)($c['Labels'] ?? '');
+            $dir  = rtrim($labelOf($labs, 'com.docker.compose.project.working_dir'), '/');
+            $proj = $labelOf($labs, 'com.docker.compose.project');
+            if (array_key_exists($id, $tracked))           $owner = $tracked[$id] ?? 'Panel admin';
+            elseif ($dir !== '' && array_key_exists($dir, $stackOwner)) $owner = $stackOwner[$dir] ?? 'Panel admin';
+            else                                           $owner = 'System';
+            if ($proj !== '' && $owner !== 'System') $projectOwner[$proj] = $owner;
+            $name = ltrim((string)($c['Names'] ?? ''), '/');
+            $containers[] = ['id' => $id, 'name' => $name, 'image' => (string)($c['Image'] ?? ''), 'owner' => $owner,
+                             'state' => (string)($c['State'] ?? ''), 'project' => $proj,
+                             'mounts' => array_filter(explode(',', (string)($c['Mounts'] ?? ''))),
+                             'networks' => array_filter(explode(',', (string)($c['Networks'] ?? '')))];
+        }
+        $add = function (array &$map, string $key, string $owner, string $by) {
+            if ($key === '') return;
+            $map[$key]['owners'][$owner] = true;
+            $map[$key]['by'][$by] = true;
+        };
+        $img = $vol = $net = [];
+        foreach ($containers as $c) {
+            $add($img, $c['image'], $c['owner'], $c['name']);
+            foreach ($c['mounts'] as $m)   $add($vol, $m, $c['owner'], $c['name']);
+            foreach ($c['networks'] as $n) $add($net, $n, $c['owner'], $c['name']);
+        }
+        $verdict = function (?array $e, string $fallback = 'Unused') {
+            if (!$e) return ['owner' => $fallback, 'kind' => $fallback === 'Unused' ? 'unused' : 'system', 'used_by' => ''];
+            $owners = array_keys($e['owners']);
+            $by = implode(', ', array_slice(array_keys($e['by']), 0, 4)) . (count($e['by']) > 4 ? ' ...' : '');
+            $real = array_values(array_filter($owners, fn($o) => $o !== 'System'));
+            if (!$real) return ['owner' => 'System', 'kind' => 'system', 'used_by' => $by];
+            return ['owner' => implode(', ', $real) . (count($real) < count($owners) ? ' + System' : ''), 'kind' => 'account', 'used_by' => $by];
+        };
+        $imgOut = []; $volOut = []; $netOut = [];
+        $images = $this->listImages();
+        $byId = [];                                  // several tags can point at one image: if any tag is in use, the image is
+        foreach ($images as $i) {
+            $repo = (string)($i['Repository'] ?? ''); $tag = (string)($i['Tag'] ?? ''); $id = (string)($i['ID'] ?? '');
+            $e = $img[$repo . ':' . $tag] ?? ($tag === 'latest' ? ($img[$repo] ?? null) : null);
+            if ($e) {
+                foreach ($e['owners'] as $o => $_) $byId[$id]['owners'][$o] = true;
+                foreach ($e['by'] as $b => $_) $byId[$id]['by'][$b] = true;
+            }
+        }
+        foreach ($images as $i) {
+            $id = (string)($i['ID'] ?? '');
+            $imgOut[$id] = $verdict($byId[$id] ?? null);
+        }
+        foreach ($this->listVolumes() as $v) {
+            $name = (string)($v['Name'] ?? ''); $proj = $labelOf((string)($v['Labels'] ?? ''), 'com.docker.compose.project');
+            $r = $verdict($vol[$name] ?? null);
+            if ($r['kind'] === 'unused' && $proj !== '' && isset($projectOwner[$proj])) $r = ['owner' => $projectOwner[$proj], 'kind' => 'account', 'used_by' => 'stack ' . $proj . ' (stopped)'];
+            $volOut[$name] = $r;
+        }
+        foreach ($this->listNetworks() as $n) {
+            $name = (string)($n['Name'] ?? ''); $proj = $labelOf((string)($n['Labels'] ?? ''), 'com.docker.compose.project');
+            if (in_array($name, ['bridge', 'host', 'none'], true)) { $netOut[$name] = ['owner' => 'System (built in)', 'kind' => 'system', 'used_by' => '']; continue; }
+            $r = $verdict($net[$name] ?? null);
+            if ($r['kind'] === 'unused' && $proj !== '' && isset($projectOwner[$proj])) $r = ['owner' => $projectOwner[$proj], 'kind' => 'account', 'used_by' => 'stack ' . $proj . ' (stopped)'];
+            $netOut[$name] = $r;
+        }
+        return ['containers' => $containers, 'images' => $imgOut, 'volumes' => $volOut, 'networks' => $netOut];
+    }
+
     public function listImages(): array {
         return $this->jsonLines(Root::run('docker.list', ['what' => 'images'])['out']);
     }

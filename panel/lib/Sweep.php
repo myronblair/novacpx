@@ -157,7 +157,7 @@ class Sweep {
             $run['status'] = 'failed';
         }
         $findings = $db->fetchAll("SELECT id, path, rule, severity, snippet, status, created_at FROM sweep_findings
-                                   WHERE account_id = ? AND status IN ('open','quarantined')
+                                   WHERE account_id = ? AND status IN ('open','quarantined','blocked')
                                    ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id LIMIT 300", [$accountId]);
         return ['run' => $run ?: null, 'findings' => $findings, 'clamav' => self::clamAvailable(), 'enabled' => self::accountAllowed($accountId)];
     }

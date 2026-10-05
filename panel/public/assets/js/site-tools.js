@@ -298,12 +298,39 @@ ${warn}
 <div class="panel">
   <div class="panel-header"><h3 class="panel-title">This month</h3><span class="badge badge-blue">${rows.length} accounts</span></div>
   ${rows.length === 0 ? '<div style="padding:2rem;text-align:center;color:var(--text-muted)">No accounts</div>' : `
-  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Account</th><th>Domain</th><th>Package</th><th>Served</th><th>Allowance</th><th style="min-width:160px">Used</th></tr></thead><tbody>
+  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Account</th><th>Domain</th><th>Package</th><th>Served</th><th>Allowance</th><th style="min-width:160px">Used</th><th></th></tr></thead><tbody>
   ${rows.map(r => `<tr><td><strong>${esc(r.username)}</strong>${r.status !== 'active' ? ' ' + Nova.badge(esc(r.status), 'red') : ''}</td><td>${esc(r.domain)}</td><td>${esc(r.package || '-')}</td>
     <td>${fmtMb(r.used_mb)}</td><td>${r.allowance_mb > 0 ? fmtMb(r.allowance_mb) : 'Unlimited'}</td>
-    <td>${r.percent === null ? '-' : r.percent + '%' + Nova.progressBar(Math.min(100, r.percent))}</td></tr>`).join('')}
+    <td>${r.percent === null ? '-' : r.percent + '%' + Nova.progressBar(Math.min(100, r.percent))}</td>
+    <td><button class="btn btn-xs btn-primary" onclick="trafficDetail(${r.account_id})">Details</button></td></tr>`).join('')}
   </tbody></table></div>`}
 </div>`;
+  };
+  window.trafficDetail = async (accountId) => {
+    Nova.loading('Loading usage...');
+    const res = await Nova.api('traffic', 'account', { params: { account_id: accountId } });
+    Nova.loadingDone();
+    if (!res?.success) return Nova.toast(res?.message || 'Could not load usage', 'error');
+    const d = res.data, a = d.account, bw = d.bandwidth;
+    const days = bw.daily || [];
+    const max = Math.max(1, ...days.map(x => x.mb));
+    const bar = (used, limit, unit) => {
+      if (!limit) return `${used}${unit ? ' ' + unit : ''} <span class="text-muted">(no limit)</span>`;
+      const pct = Math.round(used / limit * 100);
+      return `${used} / ${limit}${unit ? ' ' + unit : ''} &nbsp;${pct}%${Nova.progressBar(Math.min(100, pct))}`;
+    };
+    Nova.modal('Usage - ' + a.username,
+      `<div style="min-width:min(760px,90vw)">
+        <p class="text-muted" style="margin-bottom:1rem">${esc(a.domain)} &middot; package <strong>${esc(a.package || '-')}</strong>${a.status !== 'active' ? ' ' + Nova.badge(esc(a.status), 'red') : ''}</p>
+        <h4 style="margin:0 0 .5rem">Bandwidth this month</h4>
+        <p style="margin-bottom:.5rem">${bar(bw.used_mb, bw.allowance_mb, 'MB')}</p>
+        <div style="display:flex;gap:2px;align-items:flex-end;height:70px;margin-bottom:.25rem">${days.length ? days.map(x => `<span title="${esc(x.day)}: ${fmtMb(x.mb)}, ${x.requests} requests" style="flex:1;min-width:3px;border-radius:2px 2px 0 0;background:var(--primary);height:${Math.max(2, Math.round(x.mb / max * 70))}px"></span>`).join('') : '<span class="text-muted">No traffic recorded yet</span>'}</div>
+        <div class="text-muted" style="font-size:.75rem;margin-bottom:1rem">Last 30 days (hover a bar for the day)</div>
+        <h4 style="margin:1rem 0 .5rem">Previous months</h4>
+        ${d.months.length ? `<table class="table"><thead><tr><th>Month</th><th>Served</th><th>Requests</th></tr></thead><tbody>${d.months.map(m => `<tr><td>${esc(m.month)}</td><td>${fmtMb(m.mb)}</td><td>${m.requests}</td></tr>`).join('')}</tbody></table>` : '<div class="text-muted">No history yet</div>'}
+        <h4 style="margin:1rem 0 .5rem">What this account uses</h4>
+        <table class="table"><tbody>${d.resources.map(r => `<tr><td>${esc(r.label)}</td><td>${bar(r.used, r.limit, r.unit)}</td></tr>`).join('')}</tbody></table>
+      </div>`);
   };
   window.trafficSaveAction = async () => {
     const res = await Nova.api('traffic', 'settings', { method: 'POST', body: { bandwidth_action: document.getElementById('tr-action').value } });
@@ -386,7 +413,8 @@ ${sites.length === 0 ? '<div class="empty">No checks yet - the first results app
     const open = findings.filter(f => f.status === 'open').length;
     el.innerHTML = `
 <div class="page-header"><h2 class="page-title">Sweep</h2>
-  <button class="btn btn-primary btn-sm" onclick="sweepScan()" ${running ? 'disabled' : ''}>${running ? 'Scanning...' : 'Scan now'}</button></div>
+  <div style="display:flex;gap:.5rem">${findings.some(f => f.status === 'open' && f.severity === 'high') ? '<button class="btn btn-danger btn-sm" onclick="sweepQuarantineAll()">Quarantine all high-severity</button>' : ''}
+  <button class="btn btn-primary btn-sm" onclick="sweepScan()" ${running ? 'disabled' : ''}>${running ? 'Scanning...' : 'Scan now'}</button></div></div>
 <p class="text-muted" style="margin-bottom:1rem">Sweep looks through your site's PHP files for the usual signs of web shells and backdoors${clamav ? ' and runs the antivirus engine on top' : ''}. It runs every night and whenever you press Scan now. Nothing is changed unless you quarantine a file.</p>
 <div class="stats-grid" style="margin-bottom:1rem">
   <div class="stat-card"><div class="stat-label">Last scan</div><div class="stat-value" style="font-size:1rem">${run ? esc(run.finished_at || run.started_at) : 'never'}</div></div>
@@ -399,9 +427,10 @@ ${run && run.status === 'failed' ? `<div class="alert alert-warning" style="marg
   ${findings.map(f => `<tr>
     <td>${sevBadge(f.severity)}</td><td><code>${esc(f.path)}</code></td>
     <td><strong>${esc(f.rule)}</strong><br><small class="text-muted">${esc(f.snippet || '')}</small></td>
-    <td>${f.status === 'quarantined' ? Nova.badge('Quarantined', 'green') : 'Open'}</td>
+    <td>${f.status === 'quarantined' ? Nova.badge('Quarantined', 'green') : f.status === 'blocked' ? Nova.badge('Blocked', 'yellow') : 'Open'}</td>
     <td style="white-space:nowrap">${f.status === 'open'
-      ? `<button class="btn btn-xs btn-danger" onclick="sweepAct('quarantine',${f.id})">Quarantine</button> <button class="btn btn-xs" onclick="sweepAct('ignore',${f.id})">Harmless</button>`
+      ? `<button class="btn btn-xs btn-danger" onclick="sweepAct('quarantine',${f.id})">Quarantine</button> <button class="btn btn-xs btn-warning" onclick="sweepAct('block',${f.id})">Block</button> <button class="btn btn-xs" onclick="sweepAct('ignore',${f.id})">Harmless</button>`
+      : f.status === 'blocked' ? `<button class="btn btn-xs" onclick="sweepAct('unblock',${f.id})">Unblock</button>`
       : `<button class="btn btn-xs" onclick="sweepAct('restore',${f.id})">Restore</button>`}</td></tr>`).join('')}
   </tbody></table></div>`}</div>`;
     if (running) setTimeout(() => { if (el.isConnected) sweepRender(el); }, 5000);
@@ -412,13 +441,20 @@ ${run && run.status === 'failed' ? `<div class="alert alert-warning" style="marg
     Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
     if (res?.success) setTimeout(() => sweepRender(window._sweepEl), 1500);
   };
+  window.sweepQuarantineAll = () => Nova.confirm('Move every open high-severity file into quarantine? You can restore each one later.', async () => {
+    const res = await Nova.api('sweep', 'quarantine-all', { method: 'POST', body: { account_id: window._sweepAcct || undefined } });
+    Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
+    sweepRender(window._sweepEl);
+  }, true);
   window.sweepAct = (act, id) => {
     const go = async () => {
       const res = await Nova.api('sweep', act, { method: 'POST', body: { finding_id: id, account_id: window._sweepAcct || undefined } });
       Nova.toast(res?.message || 'Failed', res?.success ? 'success' : 'error');
       sweepRender(window._sweepEl);
     };
-    if (act === 'quarantine') Nova.confirm('Move this file out of your website into quarantine? You can restore it later.', go, true); else go();
+    if (act === 'quarantine') Nova.confirm('Move this file out of the website into quarantine? You can restore it later.', go, true);
+    else if (act === 'block') Nova.confirm('Block this file? It stays where it is but can no longer be read or run. You can unblock it later.', go, true);
+    else go();
   };
 
   const sweepRefresh = () => { if (window.adminPage) adminPage('sweep-overview'); else if (window.resellerNav) resellerNav('sweep'); };

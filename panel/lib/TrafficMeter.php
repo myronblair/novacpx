@@ -112,6 +112,38 @@ class TrafficMeter {
         ];
     }
 
+    /** Everything one account uses: bandwidth (this month, 30 days, month history) and what it holds against its package limits. */
+    public static function accountDetail(int $accountId): array {
+        $db  = DB::getInstance();
+        $a   = $db->fetchOne("SELECT a.id, a.username, a.domain, a.status, a.home_dir, a.disk_used_mb, p.name AS package, p.disk_mb, p.max_domains, p.max_email, p.max_ftp, p.max_databases
+                              FROM accounts a LEFT JOIN packages p ON p.id = a.package_id WHERE a.id = ?", [$accountId]);
+        if (!$a) throw new RuntimeException('Account not found');
+        $months = $db->fetchAll("SELECT substr(day,1,7) AS month, SUM(bytes_out) AS b, SUM(requests) AS r FROM usage_daily WHERE account_id = ? GROUP BY 1 ORDER BY 1 DESC LIMIT 6", [$accountId]);
+        // live disk use of the home folder (cheap enough for a one-account view); the stored figure is the fallback
+        $diskMb = (int)$a['disk_used_mb'];
+        $home = '/home/' . $a['username'];
+        if (preg_match('/^[a-z][a-z0-9_]{1,31}$/', $a['username']) && is_dir($home)) {
+            $out = trim((string)@shell_exec('timeout 20 du -sm ' . escapeshellarg($home) . ' 2>/dev/null | cut -f1'));
+            if ($out !== '' && ctype_digit($out)) $diskMb = (int)$out;
+        }
+        $count = fn(string $sql) => (int)($db->fetchOne($sql, [$accountId])['c'] ?? 0);
+        $resources = [
+            ['key' => 'disk',      'label' => 'Disk space',     'used' => $diskMb, 'unit' => 'MB', 'limit' => (int)$a['disk_mb']],
+            ['key' => 'domains',   'label' => 'Domains',        'used' => $count("SELECT COUNT(*) AS c FROM domains WHERE account_id = ?"), 'unit' => '', 'limit' => (int)$a['max_domains']],
+            ['key' => 'email',     'label' => 'Email accounts', 'used' => $count("SELECT COUNT(*) AS c FROM email_accounts WHERE account_id = ?"), 'unit' => '', 'limit' => (int)$a['max_email']],
+            ['key' => 'ftp',       'label' => 'FTP accounts',   'used' => $count("SELECT COUNT(*) AS c FROM ftp_accounts WHERE account_id = ?"), 'unit' => '', 'limit' => (int)$a['max_ftp']],
+            ['key' => 'databases', 'label' => 'Databases',      'used' => $count("SELECT COUNT(*) AS c FROM `databases` WHERE account_id = ?"), 'unit' => '', 'limit' => (int)$a['max_databases']],
+            ['key' => 'backups',   'label' => 'Backups stored', 'used' => (int)round((float)($db->fetchOne("SELECT COALESCE(SUM(size_mb),0) AS c FROM backups WHERE account_id = ? AND status = 'complete'", [$accountId])['c'] ?? 0)), 'unit' => 'MB', 'limit' => 0],
+            ['key' => 'docker',    'label' => 'Docker containers', 'used' => $count("SELECT COUNT(*) AS c FROM docker_containers WHERE account_id = ?"), 'unit' => '', 'limit' => 0],
+        ];
+        return [
+            'account'   => ['id' => (int)$a['id'], 'username' => $a['username'], 'domain' => $a['domain'], 'status' => $a['status'], 'package' => $a['package']],
+            'bandwidth' => self::summary($accountId),
+            'months'    => array_map(fn($m) => ['month' => $m['month'], 'mb' => round($m['b'] / 1048576, 1), 'requests' => (int)$m['r']], $months),
+            'resources' => $resources,
+        ];
+    }
+
     /** Month usage for every account the caller may see (admin: all, reseller: own customers). */
     public static function overview(?int $resellerId = null): array {
         $db = DB::getInstance();
