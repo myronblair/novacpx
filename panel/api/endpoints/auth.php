@@ -57,6 +57,10 @@ match ($action) {
             'role'     => $u['role'],
             'theme'    => $u['theme'],
         ];
+        if ($u['role'] === 'user') {
+            require_once NOVACPX_LIB . '/PackageTools.php';
+            $data['tools'] = PackageTools::forUser((int)($u['uid'] ?? $u['id']));   // null = everything
+        }
         // Expose impersonation context so the UI can show a "return" banner
         if (!empty($u['impersonator_id'])) {
             $imp = DB::getInstance()->fetchOne(

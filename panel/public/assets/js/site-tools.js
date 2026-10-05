@@ -127,6 +127,66 @@ ${warn}
     el.innerHTML = shieldHtml();
   };
 
+  /* ══════════════════════════ Firewall (WAF) ══════════════════════════ */
+  let _waf = null;
+  window.wafPage = async (el) => {
+    el.innerHTML = '<div class="loading">Loading...</div>';
+    const res = await Nova.api('waf', 'get');
+    if (!res?.success) { el.innerHTML = '<div class="empty">Could not load the firewall.</div>'; return; }
+    _waf = res.data;
+    const warn = _waf.web_server !== 'nginx'
+      ? `<div class="alert alert-warning" style="margin-bottom:1rem">The firewall needs the nginx web server. This server uses <strong>${esc(_waf.web_server)}</strong>, so saving will be refused.</div>` : '';
+    el.innerHTML = `
+<div class="page-header"><h2 class="page-title">Firewall</h2>
+  <button class="btn btn-primary btn-sm" onclick="wafSave()">Save &amp; apply</button></div>
+${warn}
+<div class="card" style="margin-bottom:1rem"><div style="padding:1rem">
+  <label style="display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="waf-on" ${_waf.mode === 'block' ? 'checked' : ''}>
+    <strong>Block suspicious requests</strong></label>
+  <div class="form-hint" style="margin-top:.4rem">Requests that match a rule below are refused with a 403 error before they reach your site. This is a first line of defence; it does not replace keeping your site's software up to date.</div>
+</div></div>
+<div class="card" style="margin-bottom:1rem">
+  <div class="card-header"><span class="card-title">Rules</span></div>
+  <div style="padding:1rem">${_waf.catalog.map(r => `
+    <label style="display:flex;gap:.6rem;align-items:flex-start;margin-bottom:.7rem">
+      <input type="checkbox" class="waf-rule" value="${esc(r.slug)}" ${_waf.rules.includes(r.slug) ? 'checked' : ''} style="margin-top:.2rem">
+      <span><strong>${esc(r.name)}</strong><br><small style="color:var(--text-muted)">${esc(r.description)}</small></span></label>`).join('')}
+  </div>
+</div>
+<div class="card">
+  <div class="card-header"><span class="card-title">Pages the rules skip</span></div>
+  <div style="padding:1rem">
+    <textarea id="waf-exempt" class="form-control" rows="3" placeholder="/wp-admin&#10;/api/search">${esc((_waf.exempt || []).join('\n'))}</textarea>
+    <div class="form-hint" style="margin-top:.4rem">One path per line. Everything under that path is left alone - use this if a rule blocks something legitimate, such as an editor that posts code.</div>
+  </div>
+</div>`;
+  };
+  window.wafSave = async () => {
+    const body = {
+      mode: document.getElementById('waf-on')?.checked ? 'block' : 'off',
+      rules: [...document.querySelectorAll('.waf-rule:checked')].map(c => c.value),
+      exempt: (document.getElementById('waf-exempt')?.value || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean),
+    };
+    Nova.loading?.('Applying firewall...');
+    const res = await Nova.api('waf', 'save', { method: 'POST', body });
+    Nova.loadingDone?.();
+    Nova.toast(res?.success ? res.message : (res?.message || 'Could not apply the firewall'), res?.success ? 'success' : 'error');
+  };
+
+  /* ══════════════════════════ Package tool lists ══════════════════════════ */
+  const PKG_TOOLS = [['shield', 'Site Shield and firewall'], ['traffic', 'Traffic meter'], ['pulse', 'Uptime monitor'], ['sweep', 'Malware sweep'],
+                     ['gitdeploy', 'Git Deploy'], ['docker', 'Docker apps'], ['wordpress', 'WordPress manager'], ['cron', 'Cron jobs'], ['backups', 'Backups']];
+  /** Checkbox block for a package form; tools = JSON text from the package row (null/empty = everything). */
+  window.pkgToolsHtml = (tools) => {
+    let sel = null;
+    try { sel = tools ? JSON.parse(tools) : null; } catch (e) { sel = null; }
+    return `<div class="form-group" style="grid-column:1/-1"><label class="form-label">Tools included</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.3rem">${PKG_TOOLS.map(([k, n]) =>
+        `<label style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" class="pkg-tool" value="${k}" ${(!sel || sel.includes(k)) ? 'checked' : ''}> ${esc(n)}</label>`).join('')}</div>
+      <div class="form-hint">Customers on this package only see the ticked tools.</div></div>`;
+  };
+  window.pkgToolsCollect = () => [...document.querySelectorAll('.pkg-tool:checked')].map(c => c.value);
+
   /* ══════════════════════════ Traffic Meter ══════════════════════════ */
   function dailyBars(daily) {
     if (!daily.length) return '<div class="empty">No traffic recorded yet. The meter reads your access log every 5 minutes.</div>';

@@ -116,6 +116,7 @@ const userPages = {
   backups,
   docker: dockerPage,
   shield:  (el) => window.shieldPage(el),
+  waf:     (el) => window.wafPage(el),
   traffic: (el) => window.trafficPage(el),
   pulse:   (el) => window.pulsePage(el),
   sweep:   (el) => window.sweepPage(el),
@@ -968,6 +969,8 @@ const navGroups = [
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>' },
     { id: 'shield', label: 'Site Shield',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
+    { id: 'waf', label: 'Firewall',
+      svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V6z"/><path d="M9 9l6 6M15 9l-6 6"/></svg>' },
     { id: 'traffic', label: 'Traffic',
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg>' },
     { id: 'pulse', label: 'Uptime',
@@ -998,7 +1001,11 @@ let _activePage = 'dashboard';
 function renderNav() {
   const nav = document.getElementById('sidebar-nav');
   if (!nav) return;
-  nav.innerHTML = navGroups.map(g => `
+  // pages that belong to optional tools are hidden when the customer's package leaves them out
+  const toolOf = { shield: 'shield', waf: 'shield', traffic: 'traffic', pulse: 'pulse', sweep: 'sweep', gitdeploy: 'gitdeploy', docker: 'docker', cron: 'cron', backups: 'backups' };
+  const allowed = _user && Array.isArray(_user.tools) ? _user.tools : null;
+  const visible = (n) => !allowed || !toolOf[n.id] || allowed.includes(toolOf[n.id]);
+  nav.innerHTML = navGroups.map(g => ({ ...g, items: g.items.filter(visible) })).filter(g => g.items.length).map(g => `
     <div class="sidebar-section">
       <div class="sidebar-section-label">${g.label}</div>
       ${g.items.map(n => `

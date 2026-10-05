@@ -89,6 +89,7 @@ window.NOVACPX_BRANDING = <?= json_encode([
 ]) ?>;
 </script>
 <script src="/assets/js/nova.js<?= $_v('/assets/js/nova.js') ?>"></script>
+<script src="/assets/js/site-tools.js<?= $_v('/assets/js/site-tools.js') ?>"></script>
 <script src="/assets/js/reseller.js<?= $_v('/assets/js/reseller.js') ?>"></script>
 
 <?= novacpx_legal_footer(true) ?>

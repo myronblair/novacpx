@@ -1288,11 +1288,12 @@
         <div class="form-group"><label class="form-label">Max sites (domains)</label><input id="ap-maxdom" type="number" class="form-control" value="${p.max_domains||0}"></div>
         <div class="form-group"><label class="form-label">PHP requests at once</label><input id="ap-kids" type="number" min="1" max="100" class="form-control" value="${p.php_max_children||5}"></div>
         <div class="form-group"><label class="form-label">PHP memory ceiling (MB)</label><input id="ap-mem" type="number" min="32" max="8192" class="form-control" value="${p.php_memory_mb||256}"></div>
+        ${window.pkgToolsHtml(p.tools)}
       </div>`,
       `<button class="btn btn-primary" onclick="adminSavePkg(${p.id||'null'})">Save</button>`);
   }
   window.adminSavePkg = async (id) => {
-    const body = {name:document.getElementById('ap-name')?.value,disk_mb:+document.getElementById('ap-disk')?.value,bandwidth_mb:+document.getElementById('ap-bw')?.value,max_databases:+document.getElementById('ap-db')?.value,max_email:+document.getElementById('ap-email')?.value,max_addon_domains:+document.getElementById('ap-dom')?.value,max_subdomains:+document.getElementById('ap-sub')?.value,max_ftp:+document.getElementById('ap-ftp')?.value,max_domains:+document.getElementById('ap-maxdom')?.value,php_max_children:+document.getElementById('ap-kids')?.value,php_memory_mb:+document.getElementById('ap-mem')?.value};
+    const body = {name:document.getElementById('ap-name')?.value,disk_mb:+document.getElementById('ap-disk')?.value,bandwidth_mb:+document.getElementById('ap-bw')?.value,max_databases:+document.getElementById('ap-db')?.value,max_email:+document.getElementById('ap-email')?.value,max_addon_domains:+document.getElementById('ap-dom')?.value,max_subdomains:+document.getElementById('ap-sub')?.value,max_ftp:+document.getElementById('ap-ftp')?.value,max_domains:+document.getElementById('ap-maxdom')?.value,php_max_children:+document.getElementById('ap-kids')?.value,php_memory_mb:+document.getElementById('ap-mem')?.value,tools:window.pkgToolsCollect()};
     const res = id ? await Nova.api('packages','update',{method:'POST',body:{...body,id}}) : await Nova.api('packages','create',{method:'POST',body});
     if (res?.success) { Nova.toast(id?'Updated':'Created','success'); document.querySelector('.modal-overlay')?.remove(); adminPage('packages'); }
     else Nova.toast(res?.message,'error');

@@ -12,9 +12,10 @@ match ($action) {
         Response::success($rows);
     })(),
 
-    'get' => (function() use ($db) {
+    'get' => (function() use ($db, $user) {
         $id  = (int)($_GET['id'] ?? 0);
         $row = $db->fetchOne("SELECT * FROM packages WHERE id = ?", [$id]);
+        if ($row && $user['role'] === 'reseller' && $row['owner_id'] !== null && (int)$row['owner_id'] !== (int)$user['uid']) $row = null;
         if (!$row) Response::error("Package not found", 404);
         Response::success($row);
     })(),
@@ -43,14 +44,17 @@ match ($action) {
         );
         $db->execute("UPDATE packages SET php_max_children = ?, php_memory_mb = ? WHERE id = ?",
             [max(1, min(100, (int)($body['php_max_children'] ?? 5))), max(32, min(8192, (int)($body['php_memory_mb'] ?? 256))), $id]);
+        if (array_key_exists('tools', $body)) $db->execute("UPDATE packages SET tools = ? WHERE id = ?", [PackageTools::normalise($body['tools']), $id]);
         audit('package.create', $name);
         Response::success(['id' => $id], 'Package created');
     })(),
 
-    'update' => (function() use ($db, $body) {
+    'update' => (function() use ($db, $body, $user) {
         $id = (int)($body['id'] ?? 0);
-        $pkg = $db->fetchOne("SELECT id FROM packages WHERE id = ?", [$id]);
+        $pkg = $db->fetchOne("SELECT id, owner_id FROM packages WHERE id = ?", [$id]);
         if (!$pkg) Response::error("Package not found", 404);
+        // a reseller changes only their own packages (the shared ones, with no owner, are the admin's)
+        if ($user['role'] === 'reseller' && (int)$pkg['owner_id'] !== (int)$user['uid']) Response::error("Package not found", 404);
         // only the fields that were sent are changed (a form that leaves one out must not reset it to 0)
         $ints = ['disk_mb', 'bandwidth_mb', 'max_domains', 'max_subdomains', 'max_addon_domains', 'max_parked_domains', 'max_email', 'max_ftp', 'max_databases', 'ssl_enabled'];
         $sets = []; $vals = [];
@@ -58,6 +62,7 @@ match ($action) {
         if (isset($body['php_version']) && preg_match('/^[0-9]\.[0-9]$/', (string)$body['php_version'])) { $sets[] = 'php_version = ?'; $vals[] = $body['php_version']; }
         foreach ($ints as $k) { if (isset($body[$k])) { $sets[] = "$k = ?"; $vals[] = max(0, (int)$body[$k]); } }
         if ($sets) { $vals[] = $id; $db->execute("UPDATE packages SET " . implode(', ', $sets) . " WHERE id = ?", $vals); }
+        if (array_key_exists('tools', $body)) $db->execute("UPDATE packages SET tools = ? WHERE id = ?", [PackageTools::normalise($body['tools']), $id]);
         if (isset($body['php_max_children']) || isset($body['php_memory_mb'])) {
             $db->execute("UPDATE packages SET php_max_children = COALESCE(?, php_max_children), php_memory_mb = COALESCE(?, php_memory_mb) WHERE id = ?",
                 [isset($body['php_max_children']) ? max(1, min(100, (int)$body['php_max_children'])) : null,
