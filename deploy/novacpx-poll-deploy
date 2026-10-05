@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 TomTom Enterprises. Licensed under the MIT License (see LICENSE).
-# NovaCPX auto-deploy: every 10 minutes (cron.d/novacpx-autodeploy) look at origin/main of the source checkout and, when it has
+# NovaCPX auto-deploy: every 10 minutes (cron.d/novacpx-autodeploy) look at the update channel's branch (stable = origin/main, beta = origin/beta) of the source checkout and, when it has
 # commits this server has not deployed, hand them to deploy-runner.sh (pull, syntax check, rsync to the web root, migrations,
 # version record, rollback on a PHP syntax error). No inbound webhook needed, so it works the same on the DO server and on a
 # LAN-only dev VM. Installed to /usr/local/bin/novacpx-poll-deploy by deploy/install-autodeploy.sh.
@@ -13,13 +13,33 @@ cd "$REPO" 2>/dev/null || exit 0
 WEB_ROOT=$(awk -F= '/^[[:space:]]*webroot[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' /etc/novacpx/config.ini 2>/dev/null)
 WEB_ROOT=${WEB_ROOT:-/srv/novacpx/public}
 
-timeout 40 git fetch -q origin main 2>/dev/null || exit 0
-LOCAL=$(git rev-parse HEAD) || exit 0
-REMOTE=$(git rev-parse origin/main) || exit 0
-[ "$LOCAL" = "$REMOTE" ] && exit 0
-# never act when this checkout has commits origin lacks (someone is working here)
-git merge-base --is-ancestor "$LOCAL" "$REMOTE" || { echo "$(date '+%F %T') local checkout has diverged from origin/main; not deploying"; exit 0; }
+# The update channel (Settings > Updates) picks the branch: stable follows main, beta follows the pre-release branch.
+DB_PATH=$(awk -F= '/^[[:space:]]*path[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' /etc/novacpx/config.ini 2>/dev/null)
+DB_PATH=${DB_PATH:-/var/lib/novacpx/panel.db}
+CHANNEL=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='update_channel'" 2>/dev/null)
+BRANCH=main; [ "$CHANNEL" = "beta" ] && BRANCH=beta
 
-echo "$(date '+%F %T') new commits on origin/main (${LOCAL:0:7} -> ${REMOTE:0:7}); deploying"
-echo "$REPO|$WEB_ROOT|${REMOTE:0:7}|main" >> "$QUEUE"
+timeout 40 git fetch -q origin "$BRANCH" 2>/dev/null || exit 0
+REMOTE=$(git rev-parse "origin/$BRANCH") || exit 0
+CUR=$(git rev-parse --abbrev-ref HEAD)
+FORCE=""
+if [ "$CUR" != "$BRANCH" ]; then
+  # channel changed: move the checkout to the other branch (only when nothing is being worked on here)
+  git diff --quiet && git diff --cached --quiet || { echo "$(date '+%F %T') channel is $CHANNEL but the checkout has local changes; not switching"; exit 0; }
+  OLD=$(git rev-parse HEAD)
+  if git merge-base --is-ancestor "$OLD" "origin/$BRANCH"; then
+    git checkout -q -B "$BRANCH" "$OLD" 2>/dev/null || exit 0      # what is deployed is inside the new branch: the normal fast-forward deploy follows
+  else
+    git checkout -q -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || exit 0   # sideways or backwards: redeploy everything from the new branch
+    FORCE=force
+  fi
+  echo "$(date '+%F %T') switched the checkout to $BRANCH (channel ${CHANNEL:-stable})"
+fi
+LOCAL=$(git rev-parse HEAD) || exit 0
+[ "$LOCAL" = "$REMOTE" ] && [ -z "$FORCE" ] && exit 0
+# never act when this checkout has commits origin lacks (someone is working here)
+[ -n "$FORCE" ] || git merge-base --is-ancestor "$LOCAL" "$REMOTE" || { echo "$(date '+%F %T') local checkout has diverged from origin/$BRANCH; not deploying"; exit 0; }
+
+echo "$(date '+%F %T') new commits on origin/$BRANCH (${LOCAL:0:7} -> ${REMOTE:0:7}); deploying"
+echo "$REPO|$WEB_ROOT|${REMOTE:0:7}|$BRANCH|$FORCE" >> "$QUEUE"
 bash "$REPO/deploy/deploy-runner.sh"

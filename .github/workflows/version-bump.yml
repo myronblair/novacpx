@@ -30,7 +30,12 @@ jobs:
           PATCH=${PATCH:-0}
 
           if [ "$BRANCH" = "main" ]; then
-            NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            if [[ "$CURRENT" == *-beta* ]]; then
+              # promoted from beta: release exactly the version the beta was heading for
+              NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            else
+              NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
           else
             # beta branch: append -beta.N
             BETA_NUM=$(echo "$CURRENT" | grep -oP '(?<=beta\.)\d+' || echo "0")

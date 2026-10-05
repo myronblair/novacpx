@@ -21,7 +21,7 @@ DB_PATH=$(python3 -c "import configparser; c=configparser.ConfigParser(); c.read
 CHANNEL=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='update_channel'" 2>/dev/null || echo "stable")
 [[ "$CHANNEL" != "beta" ]] && CHANNEL="stable"
 
-while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT QUEUED_BRANCH; do
+while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT QUEUED_BRANCH FORCE; do
   [[ -z "$REPO_PATH" ]] && continue
 
   # Use branch recorded in queue entry (from webhook); fall back to DB channel
@@ -58,7 +58,7 @@ while IFS='|' read -r REPO_PATH WEB_ROOT COMMIT QUEUED_BRANCH; do
   git pull origin "${TARGET_BRANCH}" >> "$LOG" 2>&1
   AFTER=$(git rev-parse HEAD | tr -cd 'a-f0-9A-F')
 
-  if [[ "$BEFORE" == "$AFTER" ]]; then
+  if [[ "$BEFORE" == "$AFTER" && "$FORCE" != "force" ]]; then
     log "Nothing new to deploy (already at $AFTER)"
     continue
   fi
