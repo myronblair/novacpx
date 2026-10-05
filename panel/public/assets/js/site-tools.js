@@ -635,4 +635,77 @@ ${g ? `
     if (!res?.success) return Nova.toast(res?.message || 'Could not read the recording', 'error');
     Nova.modal('Session ' + name, `${res.data.truncated ? '<div class="form-hint">Showing the last 200 KB.</div>' : ''}<pre style="background:var(--bg);padding:1rem;font-size:.78rem;overflow:auto;max-height:420px;white-space:pre-wrap">${esc(res.data.text)}</pre>`);
   };
+  /* ══════════════════════════ Two-factor authentication (own login) ══════════════════════════ */
+  function twofaLoadQr() {
+    if (window.qrcode) return Promise.resolve();
+    return new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+      s.onload = ok; s.onerror = fail; document.head.appendChild(s);
+    });
+  }
+
+  window.twofaSelfCard = async () => {
+    const st = await Nova.api('totp', 'status');
+    const on = !!st?.data?.enabled;
+    return `<div class="panel" style="margin-bottom:1.25rem"><div class="panel-header"><h3 class="panel-title">Your two-factor authentication</h3>
+      ${Nova.badge(on ? 'On' : 'Off', on ? 'green' : 'gray')}</div>
+      <div style="padding:1rem 1.25rem" id="twofa-self">
+      ${on ? `<p class="text-muted">Signing in asks for a code from your authenticator app. Keep your backup codes somewhere safe.</p>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="twofaRegen()">New backup codes</button>
+          <button class="btn btn-sm btn-danger" onclick="twofaDisable()">Turn off 2FA</button></div>`
+      : `<p class="text-muted">Add a second step to your login with an authenticator app (Google Authenticator, Authy, 1Password, Microsoft Authenticator...). Some features, like the Web Terminal, need it.</p>
+        <button class="btn btn-primary" onclick="twofaSetup()">Set up 2FA</button>`}
+      </div></div>`;
+  };
+
+  window.twofaSetup = async () => {
+    const res = await Nova.api('totp', 'setup', { method: 'POST', body: {} });
+    if (!res?.success) return Nova.toast(res?.message || 'Could not start setup', 'error');
+    const { secret, otpauth } = res.data;
+    const box = document.getElementById('twofa-self');
+    box.innerHTML = `<p>1. Scan this with your authenticator app (or type the key in by hand).</p>
+      <div id="twofa-qr" style="background:#fff;display:inline-block;padding:10px;border-radius:8px;min-width:120px;min-height:120px"></div>
+      <p style="margin-top:.5rem">Key: <code style="user-select:all">${esc(secret)}</code></p>
+      <p>2. Enter the 6-digit code it shows.</p>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap"><input id="twofa-code" class="form-control" style="max-width:11rem" inputmode="numeric" maxlength="6" placeholder="123456" onkeydown="if(event.key==='Enter')twofaEnable()">
+      <button class="btn btn-primary" onclick="twofaEnable()">Turn on 2FA</button>
+      <button class="btn" onclick="adminPage('twofa')">Cancel</button></div>`;
+    try {
+      await twofaLoadQr();
+      const qr = window.qrcode(0, 'M'); qr.addData(otpauth); qr.make();
+      document.getElementById('twofa-qr').innerHTML = qr.createSvgTag(5, 0);
+    } catch (e) {
+      document.getElementById('twofa-qr').innerHTML = '<small style="color:#333">QR code could not load - type the key in by hand.</small>';
+    }
+  };
+
+  const twofaShowCodes = (codes, title) => Nova.modal(title,
+    `<p>Save these backup codes now - each works once if you lose your phone, and they will not be shown again.</p>
+     <pre style="background:var(--bg);padding:1rem;font-size:1rem;user-select:all">${codes.map(esc).join('\n')}</pre>`,
+    `<button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove();adminPage('twofa')">I saved them</button>`);
+
+  window.twofaEnable = async () => {
+    const code = (document.getElementById('twofa-code')?.value || '').trim();
+    const res = await Nova.api('totp', 'enable', { method: 'POST', body: { code } });
+    if (!res?.success) return Nova.toast(res?.message || 'Code incorrect', 'error');
+    twofaShowCodes(res.data.backup_codes || [], '2FA is on');
+  };
+  window.twofaRegen = () => {
+    const code = prompt('Enter a current code from your authenticator app:');
+    if (!code) return;
+    Nova.api('totp', 'regen-backup-codes', { method: 'POST', body: { code: code.trim() } }).then(res => {
+      if (!res?.success) return Nova.toast(res?.message || 'Code incorrect', 'error');
+      twofaShowCodes(res.data.backup_codes || [], 'New backup codes');
+    });
+  };
+  window.twofaDisable = () => {
+    const password = prompt('Enter your password to turn off 2FA:');
+    if (!password) return;
+    Nova.api('totp', 'disable', { method: 'POST', body: { password } }).then(res => {
+      Nova.toast(res?.success ? '2FA turned off' : (res?.message || 'Failed'), res?.success ? 'success' : 'error');
+      if (res?.success && window.adminPage) adminPage('twofa');
+    });
+  };
 })();

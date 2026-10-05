@@ -14,7 +14,7 @@ match ($action) {
         $db->prepare("UPDATE users SET totp_secret=? WHERE id=?")->execute([$secret, $uid]);
         Response::success([
             'secret'  => $secret,
-            'qr_url'  => TOTP::qrUrl($secret, $currentUser['username']),
+            'otpauth' => TOTP::otpauthUri($secret, $currentUser['username']),
         ], 'Scan QR code in your authenticator app, then confirm with a code');
     })(),
 

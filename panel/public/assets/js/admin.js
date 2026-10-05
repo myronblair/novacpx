@@ -3521,11 +3521,14 @@ window.cfPurge = async (zoneId, acctId) => {
 async function twofaPage() {
   const res = await Nova.api('accounts','list',{params:{limit:500}});
   const users = res?.data || [];
+  const selfCard = window.twofaSelfCard ? await window.twofaSelfCard() : '';
   return `
 <div class="page-header mb-3">
   <h2 class="page-title">Two-Factor Authentication</h2>
   <p class="text-muted text-sm">View 2FA status for all users. Force-disable for account recovery.</p>
 </div>
+
+${selfCard}
 
 <div class="card">
   <div class="card-header">
