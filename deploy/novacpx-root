@@ -2063,6 +2063,45 @@ function cmd_clamav_remove(array $p): int {
     return $rc;
 }
 
+// ───────────────────────── Intrusion protection: firewall (ufw) and/or fail2ban ─────────────────────────
+
+function ncr_ssh_port(): int {
+    [, $out] = ncr_run(['sshd', '-T']);
+    return preg_match('/^port\s+(\d+)/mi', $out, $m) ? (int)$m[1] : 22;
+}
+
+function cmd_security_status(array $p): int {
+    [, $ufw] = ncr_run(['ufw', 'status']);
+    [, $f2b] = ncr_run(['systemctl', 'is-active', 'fail2ban']);
+    return ncr_json(['firewall' => str_contains($ufw, 'Status: active'), 'fail2ban' => trim($f2b) === 'active', 'ufw_installed' => is_executable('/usr/sbin/ufw'),
+                     'fail2ban_installed' => is_file('/usr/bin/fail2ban-client'), 'ssh_port' => ncr_ssh_port()]);
+}
+
+/** Switch the firewall and fail2ban on or off independently. Turning the firewall on always allows SSH, web and the panel ports first so it cannot lock the admin out. */
+function cmd_security_apply(array $p): int {
+    $fw  = !empty($p['firewall']);
+    $f2b = !empty($p['fail2ban']);
+    if ($fw) {
+        if (!is_executable('/usr/sbin/ufw')) refuse('ufw is not installed');
+        $ssh = ncr_ssh_port();
+        foreach ([$ssh . '/tcp', '22/tcp', '80/tcp', '443/tcp', '8880:8883/tcp', '21/tcp', '25/tcp', '465/tcp', '587/tcp', '110/tcp', '143/tcp', '993/tcp', '995/tcp', '53'] as $rule) {
+            ncr_run(['ufw', 'allow', $rule]);
+        }
+        [$rc, $out] = ncr_run(['ufw', '--force', 'enable']);
+        if ($rc !== 0) { echo $out; return $rc; }
+    } else {
+        ncr_run(['ufw', '--force', 'disable']);
+    }
+    if ($f2b) {
+        if (!is_file('/usr/bin/fail2ban-client')) refuse('fail2ban is not installed');
+        [$rc, $out] = ncr_run(['systemctl', 'enable', '--now', 'fail2ban']);
+        if ($rc !== 0) { echo $out; return $rc; }
+    } else {
+        ncr_run(['systemctl', 'disable', '--now', 'fail2ban']);
+    }
+    return 0;
+}
+
 // ───────────────────────── dispatch ─────────────────────────
 
 const NCR_COMMANDS = [
@@ -2083,7 +2122,7 @@ const NCR_COMMANDS = [
     'docker.inventory' => 'cmd_docker_inventory', 'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
     'site.rules.write' => 'cmd_site_rules_write',
     'waf.write' => 'cmd_waf_write',
-    'ftp.sync' => 'cmd_ftp_sync', 'clamav.status' => 'cmd_clamav_status', 'clamav.install' => 'cmd_clamav_install', 'clamav.update' => 'cmd_clamav_update', 'clamav.remove' => 'cmd_clamav_remove', 'https.enforce' => 'cmd_https_enforce', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
+    'ftp.sync' => 'cmd_ftp_sync', 'security.status' => 'cmd_security_status', 'security.apply' => 'cmd_security_apply', 'clamav.status' => 'cmd_clamav_status', 'clamav.install' => 'cmd_clamav_install', 'clamav.update' => 'cmd_clamav_update', 'clamav.remove' => 'cmd_clamav_remove', 'https.enforce' => 'cmd_https_enforce', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
     'mail.queue.list' => 'cmd_mail_queue_list', 'mail.queue.action' => 'cmd_mail_queue_action',
     'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'sweep.block' => 'cmd_sweep_block', 'sweep.unblock' => 'cmd_sweep_unblock', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
 ];

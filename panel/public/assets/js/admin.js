@@ -65,6 +65,7 @@
   document.getElementById('app').style.display = '';
   document.getElementById('user-name').textContent = me.data.username;
   document.getElementById('user-avatar').textContent = me.data.username[0].toUpperCase();
+  setTimeout(() => window.applySecurityNav && window.applySecurityNav(), 0);
 
   // ── Logout ─────────────────────────────────────────────────────────────────
   document.getElementById('logout-btn').addEventListener('click', async e => {
@@ -991,6 +992,26 @@
   </div>
 </div>`;
   }
+
+  window.soSaveSecurity = async () => {
+    const mode = document.getElementById('so-security').value;
+    const go = async () => {
+      Nova.loading('Applying...');
+      const res = await Nova.api('system', 'save-security', { method: 'POST', body: { mode } });
+      Nova.loadingDone();
+      Nova.toast(res?.message || (res?.success ? 'Saved' : 'Failed'), res?.success ? 'success' : 'error');
+      if (window.applySecurityNav) await window.applySecurityNav();
+      adminPage('server-options');
+    };
+    if (mode === 'none') Nova.confirm('Turn off BOTH the firewall and fail2ban? This server will have no intrusion protection.', go, true); else go();
+  };
+  window.applySecurityNav = async () => {
+    const r = await Nova.api('system', 'security-state');
+    const m = r?.data?.mode || 'both';
+    const show = (page, on) => { const a = document.querySelector(`.sidebar-link[data-page="${page}"]`); if (a) a.style.display = on ? '' : 'none'; };
+    show('firewall', m === 'both' || m === 'firewall');
+    show('fail2ban', m === 'both' || m === 'fail2ban');
+  };
 
   window.adminSaveSettings = async () => {
     const btn = document.querySelector('#settings-form button[type=submit]');
@@ -4597,6 +4618,23 @@ async function serverOptions() {
         </select>
       </div>
       <button class="btn btn-primary btn-sm" onclick="soSave('web_server','so-web','Web server')">Save & Switch</button>
+    </div>
+  </div>
+
+  <!-- Intrusion protection: firewall and fail2ban overlap, so pick what you want -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">Intrusion Protection</span>${Nova.badge((opts.security_mode||'both') === 'none' ? 'off' : (opts.security_mode||'both'), (opts.security_mode||'both') === 'none' ? 'red' : 'green')}</div>
+    <div class="card-body">
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:.5rem">The firewall (UFW) opens and closes ports. Fail2ban watches the logs and bans addresses that keep failing to log in. They overlap, so you can run both, either one, or neither.</p>
+      <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">Running now &mdash; Firewall: ${opts.ufw_installed === false ? Nova.badge('not installed','gray') : (opts.firewall_active ? Nova.badge('active','green') : Nova.badge('inactive','red'))} &nbsp; Fail2ban: ${opts.fail2ban_installed === false ? Nova.badge('not installed','gray') : (opts.fail2ban_active ? Nova.badge('active','green') : Nova.badge('inactive','red'))}</p>
+      <div class="form-group">
+        <label>Protection</label>
+        <select id="so-security" class="form-control">
+          ${[['both','Firewall + Fail2ban (recommended)'],['firewall','Firewall only'],['fail2ban','Fail2ban only'],['none','Neither (not recommended)']].map(([v,l])=>`<option value="${v}" ${v===(opts.security_mode||'both')?'selected':''}>${l}</option>`).join('')}
+        </select>
+        <span class="form-hint">Turning the firewall on always keeps SSH, web, mail, FTP and the panel ports open. The unused tool's page disappears from the Security menu.</span>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="soSaveSecurity()">Save & Apply</button>
     </div>
   </div>
 

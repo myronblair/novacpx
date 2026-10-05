@@ -444,12 +444,16 @@ BASH;
     'server-options' => (function() use ($db) {
         Auth::getInstance()->require('admin');
         $keys = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname',
-                 'default_php','default_nameserver1','default_nameserver2','update_channel'];
+                 'default_php','default_nameserver1','default_nameserver2','update_channel','security_mode'];
         $opts = [];
         foreach ($db->fetchAll("SELECT `key`,`value` FROM settings WHERE `key` IN ('" . implode("','", $keys) . "')") as $r) {
             $opts[$r['key']] = $r['value'];
         }
         // Detect actually-running services
+        try { $sec = Root::json('security.status'); $opts['firewall_active'] = !empty($sec['firewall']); $opts['fail2ban_active'] = !empty($sec['fail2ban']);
+              $opts['ufw_installed'] = !empty($sec['ufw_installed']); $opts['fail2ban_installed'] = !empty($sec['fail2ban_installed']);
+              if (empty($opts['security_mode'])) $opts['security_mode'] = $opts['firewall_active'] ? ($opts['fail2ban_active'] ? 'both' : 'firewall') : ($opts['fail2ban_active'] ? 'fail2ban' : 'none'); }
+        catch (RuntimeException $e) {}
         $opts['apache_active']   = !empty(trim(shell_exec('systemctl is-active apache2 2>/dev/null') ?: '')) && trim(shell_exec('systemctl is-active apache2 2>/dev/null')) === 'active';
         $opts['nginx_active']    = trim(shell_exec('systemctl is-active nginx 2>/dev/null') ?: '') === 'active';
         $opts['proftpd_active']  = trim(shell_exec('systemctl is-active proftpd 2>/dev/null') ?: '') === 'active';
@@ -458,6 +462,24 @@ BASH;
         $opts['bind9_active']    = trim(shell_exec('systemctl is-active named 2>/dev/null || systemctl is-active bind9 2>/dev/null') ?: '') === 'active';
         $opts['powerdns_active'] = trim(shell_exec('systemctl is-active pdns 2>/dev/null') ?: '') === 'active';
         Response::success($opts);
+    })(),
+
+    // Which intrusion protection runs on this server: the firewall, fail2ban, both, or neither
+    'save-security' => (function() use ($db, $body) {
+        Auth::getInstance()->require('admin');
+        $mode = (string)($body['mode'] ?? '');
+        if (!in_array($mode, ['both', 'firewall', 'fail2ban', 'none'], true)) Response::error('Choose both, firewall, fail2ban or none');
+        try { Root::ok('security.apply', ['firewall' => in_array($mode, ['both', 'firewall'], true), 'fail2ban' => in_array($mode, ['both', 'fail2ban'], true)]); }
+        catch (RuntimeException $e) { Response::error($e->getMessage()); }
+        $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES ('security_mode',?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [$mode]);
+        audit('settings.security_mode', $mode);
+        Response::success(['mode' => $mode], 'Intrusion protection set to: ' . $mode);
+    })(),
+
+    // Light read for the menu: which of the two pages to show
+    'security-state' => (function() use ($db) {
+        Auth::getInstance()->require('admin');
+        Response::success(['mode' => $db->fetchOne("SELECT value FROM settings WHERE `key`='security_mode'")['value'] ?? 'both']);
     })(),
 
     'save-option' => (function() use ($db, $body) {
