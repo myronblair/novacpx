@@ -2782,8 +2782,8 @@ ${dbs.map(d=>`<tr>
 
   window.applyNovaCPXUpdate = async () => {
     Nova.confirm('Apply NovaCPX update? PHP syntax is checked first, and a backup is taken automatically. The panel will self-restore if anything breaks.', async () => {
-      Nova.loading('Pulling NovaCPX update from GitHub…');
-      const res = await Nova.api('system', 'apply-update', { method: 'POST' });
+      Nova.loading('Updating NovaCPX…');
+      const res = await Nova.api('system', 'apply-novacpx-update', { method: 'POST' });
       Nova.loadingDone();
       const d = res?.data;
       if (!res?.success) {
