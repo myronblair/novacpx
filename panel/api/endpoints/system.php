@@ -113,7 +113,7 @@ match ($action) {
         $cached = $db->fetchOne("SELECT value, updated_at FROM settings WHERE `key`='update_cache_os'");
         $age    = $cached ? (time() - strtotime($cached['updated_at'])) : PHP_INT_MAX;
 
-        if (!$force && $cached && $age < 43200) {
+        if (!$force && $cached && $age < 600) {
             $data = json_decode($cached['value'], true) ?: [];
             $data['cached'] = true;
             $data['cached_at'] = $cached['updated_at'];
@@ -247,6 +247,7 @@ BASH;
         $r = Root::run('panel.update.apply', ['channel' => $channel]);
         if ($r['rc'] !== 0) Response::error('Update failed: ' . trim($r['out']));
         $res = json_decode($r['out'], true) ?: [];
+        $db->execute("DELETE FROM settings WHERE `key`='update_cache_novacpx'");
         if (!empty($res['updated'])) {
             audit('system.novacpx-update', "novacpx:{$res['before']}→{$res['after']} (channel:{$channel})");
             novacpx_log('info', "NovaCPX updated {$res['before']} → {$res['after']} via $channel channel");
@@ -467,6 +468,7 @@ BASH;
                     'panel_name','default_php','default_nameserver1','default_nameserver2','update_channel'];
         if (!in_array($key, $allowed)) Response::error("Invalid setting key: $key");
         $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES (?,?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [$key, $value]);
+        if ($key === 'update_channel') $db->execute("DELETE FROM settings WHERE `key`='update_cache_novacpx'");   // the cached check was for the old channel
         audit("settings.{$key}", $value);
         Response::success(null, "Setting saved: {$key} = {$value}");
     })(),
