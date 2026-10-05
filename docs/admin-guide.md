@@ -247,3 +247,7 @@ Authenticate with the `X-WHMCS-Key: <api_key>` header.
 | `/var/log/novacpx/stats-collector.log` | Server stats cron output |
 | `/var/log/novacpx/notify-checks.log` | Disk/SSL notification cron output |
 | `/var/log/novacpx/switch-*.log` | Service switch script output |
+
+### Package tools
+
+In **Packages**, the *Tools included* tick-boxes choose which optional tools (Site Shield and firewall, Traffic, Uptime, Sweep, Git Deploy, Docker, WordPress, Cron, Backups) customers on that package can use. A package with every box ticked has no restriction, and existing packages keep everything until you change them. Customers cannot reach a tool that is not included, even through the API. Admins and resellers are never restricted. Resellers can change only their own packages.

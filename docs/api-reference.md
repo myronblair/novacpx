@@ -779,3 +779,12 @@ Admin: `{enabled, fail_count}`.
 ## Packages
 
 `POST /api/packages/create|update` also accept `php_max_children` (1-100) and `php_memory_mb` (32-8192). `update` changes only the fields that are sent.
+
+## Firewall (WAF)
+
+- `GET /api/waf/get[?account_id=N]` current mode, enabled rules, exempt paths and the rule catalogue
+- `POST /api/waf/save {account_id?, mode: "off"|"block", rules:[slug], exempt:[path]}` rules: `sqli`, `xss`, `traversal`, `inclusion`, `scanners`, `sensitive`, `methods`, `xmlrpc`
+
+## Package tools
+
+`POST /api/packages/create|update` accept `tools: [slug]` (`shield`, `traffic`, `pulse`, `sweep`, `gitdeploy`, `docker`, `wordpress`, `cron`, `backups`); omitting the field leaves it unchanged and sending all slugs means no restriction. `GET /api/auth/me` returns `tools` for customers (`null` = everything). Endpoints of an excluded tool answer 403 to that customer.

@@ -229,3 +229,9 @@ Under **Backups** you can set how often a backup runs (hourly, daily, weekly, mo
 1. Enter the repository address (https), the branch, and optionally a folder inside `public_html`. For a private repository add an access token (it is stored where only the server can read it).
 2. If the folder already has files, tick **Replace existing files** to connect anyway (files tracked by the repository are overwritten, other files stay).
 3. Press **Connect & deploy**. Later, press **Deploy now**, or add the shown webhook (JSON, push events) to your repository so every push deploys automatically.
+
+## Firewall
+
+**Firewall** refuses requests that look like attacks before they reach your site: database commands hidden in a web address, script tags, attempts to read system files, well-known attack scanners, requests for files such as `.env` or `.git`, and the WordPress XML-RPC door. Tick **Block suspicious requests**, choose the rules you want and press **Save & apply**. If a rule blocks something legitimate (for example an editor that posts code), list that page under **Pages the rules skip**. The firewall is a first line of defence; keep your site's software up to date as well.
+
+Tools that your hosting package does not include are hidden from the menu.

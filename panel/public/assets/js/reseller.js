@@ -251,11 +251,12 @@ function showPackageModal(pkg = null) {
       <div class="form-group"><label class="form-label">Subdomains</label><input id="pk-sub" type="number" class="form-control" value="${p.max_subdomains||0}"></div>
       <div class="form-group"><label class="form-label">FTP Accounts</label><input id="pk-ftp" type="number" class="form-control" value="${p.max_ftp||0}"></div>
       <div class="form-group"><label class="form-label">Price ($/mo)</label><input id="pk-price" type="number" step="0.01" class="form-control" value="${p.price||0}"></div>
+      ${window.pkgToolsHtml(p.tools)}
     </div>`,
     `<button class="btn btn-primary" onclick="submitPackage(${p.id||'null'})">Save</button>`);
 }
 window.submitPackage = async (id) => {
-  const body = { name:document.getElementById('pk-name')?.value, disk_mb:parseInt(document.getElementById('pk-disk')?.value), bandwidth_mb:parseInt(document.getElementById('pk-bw')?.value), max_databases:parseInt(document.getElementById('pk-db')?.value), max_email:parseInt(document.getElementById('pk-email')?.value), max_addon_domains:parseInt(document.getElementById('pk-adom')?.value), max_subdomains:parseInt(document.getElementById('pk-sub')?.value), max_ftp:parseInt(document.getElementById('pk-ftp')?.value) };
+  const body = { name:document.getElementById('pk-name')?.value, disk_mb:parseInt(document.getElementById('pk-disk')?.value), bandwidth_mb:parseInt(document.getElementById('pk-bw')?.value), max_databases:parseInt(document.getElementById('pk-db')?.value), max_email:parseInt(document.getElementById('pk-email')?.value), max_addon_domains:parseInt(document.getElementById('pk-adom')?.value), max_subdomains:parseInt(document.getElementById('pk-sub')?.value), max_ftp:parseInt(document.getElementById('pk-ftp')?.value), tools: window.pkgToolsCollect() };
   const res = id ? await Nova.api('packages','update',{method:'POST',body:{...body,id}}) : await Nova.api('packages','create',{method:'POST',body});
   if (res?.success) { Nova.toast(id ? 'Package updated' : 'Package created','success'); document.querySelector('.modal-overlay')?.remove(); rPackages(document.getElementById('page-content')); }
   else Nova.toast(res?.message,'error');

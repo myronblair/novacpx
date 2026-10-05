@@ -72,6 +72,8 @@ NovaCPX is a Linux web hosting control panel with a three-tier architecture (Adm
 - **Scheduled backups that run** — hourly/daily/weekly/monthly schedules with a retention count; customers can set their own schedule
 
 - **Sweep** — malware scanner: built-in pattern scan for web shells and backdoors (nightly and on demand), ClamAV on top when installed, quarantine with restore
+- **Firewall** — per-site request filter (SQL and script injection, path traversal, code inclusion, attack scanners, sensitive files, odd methods, XML-RPC) with exempt paths
+- **Package tool lists** — each hosting package chooses which optional tools its customers see
 - **Git Deploy** — connect a site to an https Git repository and branch; deploy on demand or on every push through a signed webhook
 - **Mail Queue** — admin view of the Postfix queue: retry, hold, release, delete, flush
 - **Pool limits** — per-package PHP limits (requests at once, memory ceiling) written into each account's PHP-FPM pool

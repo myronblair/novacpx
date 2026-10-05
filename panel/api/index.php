@@ -104,4 +104,12 @@ function assert_account_access(int $accountId): array {
     return $acct;
 }
 
+// Optional tools can be left out of a customer's package
+if (isset($currentUser) && $currentUser['role'] === 'user') {
+    require_once NOVACPX_LIB . '/PackageTools.php';
+    $_tool = PackageTools::toolForEndpoint($endpoint);
+    $_allowed = $_tool ? PackageTools::forUser((int)$currentUser['uid']) : null;
+    if ($_tool && $_allowed !== null && !in_array($_tool, $_allowed, true)) Response::error('This tool is not included in your hosting package', 403);
+}
+
 require $endpointFile;
