@@ -251,3 +251,13 @@ Authenticate with the `X-WHMCS-Key: <api_key>` header.
 ### Package tools
 
 In **Packages**, the *Tools included* tick-boxes choose which optional tools (Site Shield and firewall, Traffic, Uptime, Sweep, Git Deploy, Docker, WordPress, Cron, Backups) customers on that package can use. A package with every box ticked has no restriction, and existing packages keep everything until you change them. Customers cannot reach a tool that is not included, even through the API. Admins and resellers are never restricted. Resellers can change only their own packages.
+
+### Account Transfer
+
+**Account Transfer** moves a hosting account between two NovaCPX servers.
+
+1. On the old server choose the account and press **Create transfer link**. The panel packs the website files and MySQL databases in the background and shows a link that works once, for 2 hours.
+2. On the new server paste the link under **Receive an account** and press **Import account**. The new server downloads the bundle (it must be able to reach the old server's panel over the internet; private addresses are refused), creates the account with the same user name, domain, e-mail, login and PHP version, and loads the files and databases. The package is matched by name.
+3. Add the customer's mailboxes, addon domains, cron jobs, FTP users and SSL certificate on the new server, then point DNS at it. These are listed after the import because they are not carried over; mail is not moved.
+
+If anything fails the half-built account is removed again, so the import can simply be repeated. The bundle contains the customer's database passwords, which is why the link is single-use and the bundle is deleted after the download or when the link expires. Very large sites (many gigabytes) are capped at 10 GB per transfer.
