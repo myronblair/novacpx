@@ -62,11 +62,17 @@ match ($action) {
             $db->execute("UPDATE packages SET php_max_children = COALESCE(?, php_max_children), php_memory_mb = COALESCE(?, php_memory_mb) WHERE id = ?",
                 [isset($body['php_max_children']) ? max(1, min(100, (int)$body['php_max_children'])) : null,
                  isset($body['php_memory_mb']) ? max(32, min(8192, (int)$body['php_memory_mb'])) : null, $id]);
-            // apply to every account on the package right away
-            require_once NOVACPX_LIB . '/PHPManager.php';
-            foreach ($db->fetchAll("SELECT id, username, php_version FROM accounts WHERE package_id = ? AND status = 'active'", [$id]) as $a) {
-                try { PHPManager::createPool($a['username'], $a['php_version'], PHPManager::currentSettings((int)$a['id'])); } catch (Throwable $e) { error_log('[packages] pool ' . $a['username'] . ': ' . $e->getMessage()); }
-            }
+            // Apply to every account on the package right away - but only after the answer has been sent: rewriting a pool reloads
+            // PHP-FPM, which serves this very request, and the browser would otherwise see a 502.
+            $accts = $db->fetchAll("SELECT id, username, php_version FROM accounts WHERE package_id = ? AND status = 'active'", [$id]);
+            register_shutdown_function(function () use ($accts) {
+                if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+                require_once NOVACPX_LIB . '/PHPManager.php';
+                foreach ($accts as $a) {
+                    try { PHPManager::createPool($a['username'], $a['php_version'], PHPManager::currentSettings((int)$a['id'])); }
+                    catch (Throwable $e) { error_log('[packages] pool ' . $a['username'] . ': ' . $e->getMessage()); }
+                }
+            });
         }
         audit('package.update', "package:$id");
         Response::success(null, 'Package updated');
