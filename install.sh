@@ -186,6 +186,7 @@ if [[ "$WEB_SERVER" == "nginx" ]]; then
 # ── User Panel (8880) ─────────────────────────────────────────────────────────
 server {
     listen ${PORT_USER} ssl http2;
+    error_page 497 =301 https://\$host:\$server_port\$request_uri;
     server_name _;
     root ${WEB_ROOT}/user;
     index index.php;
@@ -201,6 +202,7 @@ server {
 # ── Reseller Panel (8881) ─────────────────────────────────────────────────────
 server {
     listen ${PORT_RESELLER} ssl http2;
+    error_page 497 =301 https://\$host:\$server_port\$request_uri;
     server_name _;
     root ${WEB_ROOT}/reseller;
     index index.php;
@@ -216,6 +218,7 @@ server {
 # ── Admin Panel (8882) ────────────────────────────────────────────────────────
 server {
     listen ${PORT_ADMIN} ssl http2;
+    error_page 497 =301 https://\$host:\$server_port\$request_uri;
     server_name _;
     root ${WEB_ROOT}/admin;
     index index.php;
@@ -445,6 +448,7 @@ if [[ "$WEB_SERVER" == "nginx" ]]; then
 # ── Webmail (8883) ────────────────────────────────────────────────────────────
 server {
     listen ${PORT_WEBMAIL} ssl http2;
+    error_page 497 =301 https://\$host:\$server_port\$request_uri;
     server_name _;
     root ${RC_ROOT};
     index index.php;
@@ -678,17 +682,17 @@ step "Disabling Conflicting Web Servers"
 if [[ "$WEB_SERVER" == "nginx" ]]; then
   systemctl stop apache2 2>/dev/null || true
   systemctl disable apache2 2>/dev/null || true
-  # Replace nginx default site with a 444 connection-close so unmatched
-  # vhosts don't accidentally serve Apache's default HTML page
+  # Replace nginx default site so unmatched vhosts never serve Apache's default
+  # HTML page; plain http just redirects to https
   cat > /etc/nginx/sites-available/default <<'NGINXDEFAULT'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    return 444;
+    return 301 https://$host$request_uri;
 }
 NGINXDEFAULT
-  log "Apache2 disabled; nginx default site set to return 444"
+  log "Apache2 disabled; nginx default site redirects plain http to https"
 fi
 
 # ── Restart services ──────────────────────────────────────────────────────────

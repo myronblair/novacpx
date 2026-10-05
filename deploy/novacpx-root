@@ -1175,7 +1175,7 @@ function cmd_proxy_local(array $p): int {
     ncr_emit("  Apache is up on port {$port}\n");
     ncr_emit("» Configuring nginx (remove default site, add catch-all)...\n");
     @unlink('/etc/nginx/sites-enabled/default');
-    ncr_write_file('/etc/nginx/sites-available/novacpx-default.conf', "server {\n    listen 80 default_server;\n    server_name _;\n    return 444;\n}\n");
+    ncr_write_file('/etc/nginx/sites-available/novacpx-default.conf', "server {\n    listen 80 default_server;\n    server_name _;\n    return 301 https://\$host\$request_uri;\n}\n");
     if (!file_exists('/etc/nginx/sites-enabled/novacpx-default.conf')) symlink('/etc/nginx/sites-available/novacpx-default.conf', '/etc/nginx/sites-enabled/novacpx-default.conf');
     if (!file_exists('/etc/nginx/conf.d/novacpx-proxy.conf')) ncr_write_file('/etc/nginx/conf.d/novacpx-proxy.conf', "client_max_body_size 256M;\nproxy_buffers 16 16k;\nproxy_buffer_size 16k;\n");
     ncr_emit("» Starting nginx on port 80/443...\n");
@@ -1910,6 +1910,50 @@ function cmd_terminal_log_read(array $p): int {
     return ncr_json(['name' => $name, 'size' => $size, 'truncated' => $size > $max, 'text' => $raw]);
 }
 
+// ───────────────────────── HTTPS everywhere ─────────────────────────
+
+/**
+ * Plain http must never dead-end: the panel ports (8880-8883) redirect a plain-http request to https on the same port, and the
+ * port-80 catch-all server redirects to https instead of dropping the connection. Idempotent; safe to run on every deploy.
+ */
+function cmd_https_enforce(array $p): int {
+    if (ncr_webserver() !== 'nginx') return 0;
+    $files = array_merge(glob('/etc/nginx/sites-available/*') ?: [], glob('/etc/nginx/conf.d/*.conf') ?: [], ['/etc/novacpx/nginx-panel.conf']);
+    $orig = [];
+    foreach ($files as $f) {
+        if (str_contains(basename($f), '.bak') || !is_file($f)) continue;
+        $t = file_get_contents($f);
+        $n = $t;
+        if (!str_contains($n, 'error_page 497')) {
+            $n = preg_replace('/^([ \t]*)(listen\s+888[0-3]\s+ssl[^;\n]*;)[ \t]*\n/m',
+                              "$1$2\n$1error_page 497 =301 https://\$host:\$server_port\$request_uri;\n", $n);
+        }
+        if (preg_match('/listen\s+80\s+default_server;/', $n)) {
+            $n = preg_replace('/(listen\s+80\s+default_server;.*?)return\s+444;/s', '$1return 301 https://$host$request_uri;', $n, 1);
+        }
+        if ($n !== $t) { $orig[$f] = $t; ncr_write_file($f, $n, 0644); }
+    }
+    if (!$orig) return 0;
+    $bad = '';
+    [$rc, $out] = ncr_run(['nginx', '-t']);
+    if ($rc !== 0) $bad = $out;
+    if (isset($orig['/etc/novacpx/nginx-panel.conf']) || (is_file('/etc/novacpx/nginx-panel.conf') && $bad === '')) {
+        if (is_file('/etc/novacpx/nginx-panel.conf')) { [$rc2, $out2] = ncr_run(['nginx', '-t', '-c', '/etc/novacpx/nginx-panel.conf']); if ($rc2 !== 0) $bad .= $out2; }
+    }
+    if ($bad !== '') {
+        foreach ($orig as $f => $t) ncr_write_file($f, $t, 0644);
+        echo "nginx -t failed, changes reverted\n" . $bad;
+        return 1;
+    }
+    foreach (array_keys($orig) as $f) {
+        if ($f === '/etc/novacpx/nginx-panel.conf') ncr_run(['systemctl', 'reload', 'novacpx-web']);
+        else $sys = true;
+    }
+    if (!empty($sys)) ncr_run(['systemctl', 'reload', 'nginx']);
+    echo 'updated: ' . implode(', ', array_keys($orig)) . "\n";
+    return 0;
+}
+
 // ───────────────────────── dispatch ─────────────────────────
 
 const NCR_COMMANDS = [
@@ -1930,7 +1974,7 @@ const NCR_COMMANDS = [
     'docker.compose' => 'cmd_docker_compose', 'docker.compose.down_project' => 'cmd_docker_compose_down_project',
     'site.rules.write' => 'cmd_site_rules_write',
     'waf.write' => 'cmd_waf_write',
-    'ftp.sync' => 'cmd_ftp_sync', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
+    'ftp.sync' => 'cmd_ftp_sync', 'https.enforce' => 'cmd_https_enforce', 'terminal.enable' => 'cmd_terminal_enable', 'terminal.disable' => 'cmd_terminal_disable', 'terminal.status' => 'cmd_terminal_status', 'terminal.log.list' => 'cmd_terminal_log_list', 'terminal.log.read' => 'cmd_terminal_log_read', 'transfer.export' => 'cmd_transfer_export', 'transfer.fetch' => 'cmd_transfer_fetch', 'transfer.restore' => 'cmd_transfer_restore', 'transfer.cleanup' => 'cmd_transfer_cleanup',
     'mail.queue.list' => 'cmd_mail_queue_list', 'mail.queue.action' => 'cmd_mail_queue_action',
     'sweep.quarantine' => 'cmd_sweep_quarantine', 'sweep.restore' => 'cmd_sweep_restore', 'git.deploy' => 'cmd_git_deploy', 'git.forget' => 'cmd_git_forget',
 ];
