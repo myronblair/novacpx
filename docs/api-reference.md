@@ -788,3 +788,11 @@ Admin: `{enabled, fail_count}`.
 ## Package tools
 
 `POST /api/packages/create|update` accept `tools: [slug]` (`shield`, `traffic`, `pulse`, `sweep`, `gitdeploy`, `docker`, `wordpress`, `cron`, `backups`); omitting the field leaves it unchanged and sending all slugs means no restriction. `GET /api/auth/me` returns `tools` for customers (`null` = everything). Endpoints of an excluded tool answer 403 to that customer.
+
+## Account transfer (admin)
+
+- `POST /api/transfer/export {account_id}` starts packing; returns `{job}`
+- `POST /api/transfer/import {link}` starts an import from a transfer link; returns `{job}`
+- `GET /api/transfer/job?id=N` `{status: running|done|failed, result, error}`; an export's result holds `url`, `expires`, `size`; an import's holds `username`, `domain`, `databases`, `notes`
+- `GET /api/transfer/log` recent exports and imports
+- `GET /api/transferdl/get?token=...` public, single-use download of a bundle (the token is the credential)

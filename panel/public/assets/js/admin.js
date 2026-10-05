@@ -97,6 +97,7 @@
     'uptime': () => window.pulseAdminPage(),
     'sweep-overview': () => window.sweepAdminPage(),
     'mail-queue': () => window.mailQueueAdminPage(),
+    'transfer': () => window.transferAdminPage(),
     firewall,
     fail2ban,
     'audit-log': auditLog,
