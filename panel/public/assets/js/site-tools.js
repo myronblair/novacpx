@@ -187,6 +187,53 @@ ${warn}
   };
   window.pkgToolsCollect = () => [...document.querySelectorAll('.pkg-tool:checked')].map(c => c.value);
 
+  /* ══════════════════════════ Account Transfer (admin) ══════════════════════════ */
+  window.transferAdminPage = async () => {
+    const [accts, log] = await Promise.all([Nova.api('accounts', 'list', { params: { per_page: 100 } }), Nova.api('transfer', 'log')]);
+    const list = (accts?.data?.accounts || accts?.data || []);
+    const rows = (log?.data || []);
+    return `
+<div class="page-header"><h1 class="page-title">Account Transfer</h1></div>
+<div class="panel" style="margin-bottom:1rem"><div class="panel-header"><h3 class="panel-title">Send an account to another NovaCPX server</h3></div>
+  <div style="padding:1rem">
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:end">
+      <div class="form-group" style="margin:0;min-width:260px"><label class="form-label">Account</label>
+        <select id="tr-acct" class="form-control">${list.map(a => `<option value="${a.id}">${esc(a.username)} - ${esc(a.domain)}</option>`).join('')}</select></div>
+      <button class="btn btn-primary" onclick="trExport()">Create transfer link</button>
+    </div>
+    <div id="tr-out" style="margin-top:.8rem"></div>
+    <div class="form-hint" style="margin-top:.6rem">The link works once and for 2 hours. Paste it into <strong>Account Transfer</strong> on the other server. The other server must be able to reach this one over the internet.</div>
+  </div></div>
+<div class="panel" style="margin-bottom:1rem"><div class="panel-header"><h3 class="panel-title">Receive an account from another NovaCPX server</h3></div>
+  <div style="padding:1rem">
+    <input id="tr-link" class="form-control" placeholder="https://other-server:8882/api/transferdl/get?token=...">
+    <div style="margin-top:.6rem"><button class="btn btn-primary" onclick="trImport()">Import account</button></div>
+    <div id="tr-in" style="margin-top:.8rem"></div>
+    <div class="form-hint" style="margin-top:.6rem">Carried over: website files, MySQL databases (with their passwords), the customer login, PHP version and package (matched by name). Not carried over: mailboxes, DNS records, SSL certificates, cron jobs, FTP users. If anything fails the new account is removed again.</div>
+  </div></div>
+<div class="panel"><div class="panel-header"><h3 class="panel-title">Recent transfers</h3></div>
+  ${rows.length ? `<div style="overflow-x:auto"><table class="table"><thead><tr><th>When</th><th>Direction</th><th>Account</th><th>Status</th><th>Detail</th></tr></thead><tbody>
+  ${rows.map(r => `<tr><td>${esc(r.created_at)}</td><td>${esc(r.direction)}</td><td>${esc(r.username)}</td><td>${Nova.badge(r.status, r.status === 'failed' ? 'red' : 'green')}</td><td><small>${esc(r.detail || '')}</small></td></tr>`).join('')}
+  </tbody></table></div>` : '<div style="padding:1.5rem;color:var(--text-muted)">No transfers yet.</div>'}</div>`;
+  };
+  window.trExport = async () => {
+    const out = document.getElementById('tr-out');
+    out.innerHTML = '<div class="loading">Packing the account - this can take a few minutes...</div>';
+    const res = await Nova.api('transfer', 'export', { method: 'POST', body: { account_id: +document.getElementById('tr-acct').value } });
+    if (!res?.success) { out.innerHTML = `<div class="alert alert-danger">${esc(res?.message || 'Failed')}</div>`; return; }
+    out.innerHTML = `<div class="alert alert-success">Ready (${fmtMb(res.data.size / 1048576)}), valid until ${esc(res.data.expires)}.</div>
+      <input class="form-control" readonly onclick="this.select()" value="${esc(res.data.url)}">`;
+  };
+  window.trImport = async () => {
+    const out = document.getElementById('tr-in');
+    out.innerHTML = '<div class="loading">Downloading and building the account - this can take a few minutes...</div>';
+    const res = await Nova.api('transfer', 'import', { method: 'POST', body: { link: document.getElementById('tr-link').value.trim() } });
+    if (!res?.success) { out.innerHTML = `<div class="alert alert-danger">${esc(res?.message || 'Failed')}</div>`; return; }
+    const d = res.data;
+    out.innerHTML = `<div class="alert alert-success">Imported ${esc(d.username)} (${esc(d.domain)}) with ${d.databases.length} database(s).</div>
+      <ul>${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
+  };
+
   /* ══════════════════════════ Traffic Meter ══════════════════════════ */
   function dailyBars(daily) {
     if (!daily.length) return '<div class="empty">No traffic recorded yet. The meter reads your access log every 5 minutes.</div>';
