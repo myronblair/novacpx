@@ -444,7 +444,7 @@ BASH;
     'server-options' => (function() use ($db) {
         Auth::getInstance()->require('admin');
         $keys = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname',
-                 'panel_name','default_php','default_nameserver1','default_nameserver2','update_channel'];
+                 'default_php','default_nameserver1','default_nameserver2','update_channel'];
         $opts = [];
         foreach ($db->fetchAll("SELECT `key`,`value` FROM settings WHERE `key` IN ('" . implode("','", $keys) . "')") as $r) {
             $opts[$r['key']] = $r['value'];
@@ -465,7 +465,7 @@ BASH;
         $key   = $body['key']   ?? '';
         $value = $body['value'] ?? '';
         $allowed = ['web_server','mail_server','ftp_server','dns_server','whmcs_api_key','whmcs_enabled','ns1_hostname','ns2_hostname',
-                    'panel_name','default_php','default_nameserver1','default_nameserver2','update_channel'];
+                    'default_php','default_nameserver1','default_nameserver2','update_channel'];
         if (!in_array($key, $allowed)) Response::error("Invalid setting key: $key");
         $db->execute("INSERT INTO settings (`key`,`value`,updated_at) VALUES (?,?,datetime('now')) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", [$key, $value]);
         if ($key === 'update_channel') $db->execute("DELETE FROM settings WHERE `key`='update_cache_novacpx'");   // the cached check was for the old channel
@@ -597,13 +597,13 @@ BASH;
     // ── Notification settings (#25) ───────────────────────────────────────────
     'notify-settings' => (function() use ($db) {
         Auth::getInstance()->require('admin');
-        $keys = ['gmail_sender','gmail_client_id','gmail_client_secret','gmail_refresh_token','notify_from_email','notify_from_name','notify_admin_email','notifications_enabled'];
+        $keys = ['mail_transport','gmail_sender','gmail_client_id','gmail_client_secret','gmail_refresh_token','smtp_host','smtp_port','smtp_security','smtp_user','smtp_pass','notify_from_email','notify_from_name','notify_admin_email','notifications_enabled'];
         $out  = [];
         foreach ($db->fetchAll("SELECT `key`,`value` FROM settings WHERE `key` IN ('" . implode("','", $keys) . "')") as $r) {
             $out[$r['key']] = $r['value'];
         }
         // Mask secrets for display
-        foreach (['gmail_client_secret', 'gmail_refresh_token'] as $sk) {
+        foreach (['gmail_client_secret', 'gmail_refresh_token', 'smtp_pass'] as $sk) {
             if (!empty($out[$sk])) {
                 $k = $out[$sk];
                 $out[$sk . '_masked'] = substr($k, 0, 6) . str_repeat('*', max(0, strlen($k) - 10)) . substr($k, -4);
@@ -615,12 +615,16 @@ BASH;
 
     'save-notify-settings' => (function() use ($db, $body) {
         Auth::getInstance()->require('admin');
-        $allowed = ['gmail_sender','gmail_client_id','gmail_client_secret','gmail_refresh_token','notify_from_email','notify_from_name','notify_admin_email','notifications_enabled'];
+        $allowed = ['mail_transport','gmail_sender','gmail_client_id','gmail_client_secret','gmail_refresh_token','smtp_host','smtp_port','smtp_security','smtp_user','smtp_pass','notify_from_email','notify_from_name','notify_admin_email','notifications_enabled'];
         $saved   = [];
         foreach ($allowed as $key) {
             if (!array_key_exists($key, $body)) continue;
             $value = trim($body[$key]);
-            if (in_array($key, ['gmail_client_secret', 'gmail_refresh_token'], true) && ($value === '' || str_contains($value, '***'))) continue; // keep the stored secret
+            if ($key === 'mail_transport' && !in_array($value, ['gmail', 'smtp'], true)) Response::error('Delivery method must be gmail or smtp');
+            if ($key === 'smtp_security' && !in_array($value, ['none', 'starttls', 'ssl'], true)) Response::error('Connection security must be none, starttls or ssl');
+            if ($key === 'smtp_port' && $value !== '' && (!ctype_digit($value) || (int)$value < 1 || (int)$value > 65535)) Response::error('SMTP port must be 1-65535');
+            if ($key === 'smtp_host' && $value !== '' && !preg_match('/^[A-Za-z0-9.-]{1,253}$/', $value)) Response::error('Enter the SMTP server as a host name, for example smtp.example.com');
+            if (in_array($key, ['gmail_client_secret', 'gmail_refresh_token', 'smtp_pass'], true) && ($value === '' || str_contains($value, '***'))) continue; // keep the stored secret
             $db->execute(
                 "INSERT INTO settings (`key`,`value`) VALUES (?,?) ON CONFLICT(`key`) DO UPDATE SET value=excluded.value",
                 [$key, $value]
@@ -634,11 +638,11 @@ BASH;
     'test-notify' => (function() use ($db, $body) {
         Auth::getInstance()->require('admin');
         require_once NOVACPX_LIB . '/Notifier.php';
-        require_once NOVACPX_LIB . '/GmailMailer.php';
+        require_once NOVACPX_LIB . '/Mailer.php';
         $to = trim($body['to'] ?? '');
         if (!$to || !filter_var($to, FILTER_VALIDATE_EMAIL)) Response::error("Valid email address required");
-        // Send a test email directly through the Gmail API
-        $r = GmailMailer::send($to, 'NovaCPX — test notification',
+        // Send a test email through the configured transport (Gmail API or SMTP)
+        $r = Mailer::send($to, 'NovaCPX — test notification',
             '<h2>Test Notification</h2><p>Email notifications are working correctly from your NovaCPX panel.</p>',
             'Test Notification: Email notifications are working correctly from your NovaCPX panel.');
         if ($r['ok']) Response::success(null, "Test email sent to {$to}");
@@ -701,7 +705,7 @@ BASH;
         $tmpl = $id ? $db->fetchOne("SELECT * FROM email_templates WHERE id = ?", [$id]) : null;
         if (!$tmpl && $id) Response::error("Template not found", 404);
 
-        require_once NOVACPX_LIB . '/GmailMailer.php';
+        require_once NOVACPX_LIB . '/Mailer.php';
         $fromEmail = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'notify_from_email'")['value'] ?: 'noreply@novacpx.local';
 
         // Replace placeholders with sample values for test
@@ -718,7 +722,7 @@ BASH;
         $html    = $tmpl ? strtr($tmpl['body_html'], $samples) : '<p>Test</p>';
         $text    = $tmpl ? strtr($tmpl['body_text'] ?? '', $samples) : 'Test';
 
-        $r = GmailMailer::send($to, '[TEST] ' . $subject, $html, $text);
+        $r = Mailer::send($to, '[TEST] ' . $subject, $html, $text);
         if ($r['ok']) Response::success(null, "Test email sent to {$to}");
         else Response::error($r['error']);
     })(),

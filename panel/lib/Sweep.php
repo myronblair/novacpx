@@ -41,6 +41,35 @@ class Sweep {
         return is_executable('/usr/bin/clamscan') || is_executable('/usr/local/bin/clamscan');
     }
 
+    /** True when the ClamAV background daemon is up (much faster than starting clamscan for every scan). */
+    public static function clamdActive(): bool {
+        return is_executable('/usr/bin/clamdscan') && (is_socket('/run/clamav/clamd.ctl') || is_socket('/var/run/clamav/clamd.ctl'));
+    }
+
+    /** May this panel user use Sweep? Their own switch, and their reseller's switch when they have one. */
+    public static function allowedFor(int $userId): bool {
+        $u = DB::getInstance()->fetchOne("SELECT u.sweep_enabled AS own, r.sweep_enabled AS res FROM users u LEFT JOIN users r ON r.id = u.reseller_id WHERE u.id = ?", [$userId]);
+        if (!$u) return false;
+        return (int)$u['own'] === 1 && ($u['res'] === null || (int)$u['res'] === 1);
+    }
+
+    public static function accountAllowed(int $accountId): bool {
+        $uid = (int)(DB::getInstance()->fetchOne("SELECT user_id FROM accounts WHERE id = ?", [$accountId])['user_id'] ?? 0);
+        return $uid > 0 && self::allowedFor($uid);
+    }
+
+    /** Switches for the people the caller manages: admin sees resellers and all end users, a reseller sees their own end users. */
+    public static function access(?int $resellerId = null): array {
+        $db = DB::getInstance();
+        if ($resellerId) {
+            return ['resellers' => [], 'users' => $db->fetchAll("SELECT id, username, email, sweep_enabled AS enabled FROM users WHERE role = 'user' AND reseller_id = ? ORDER BY username", [$resellerId])];
+        }
+        return [
+            'resellers' => $db->fetchAll("SELECT id, username, email, sweep_enabled AS enabled FROM users WHERE role = 'reseller' ORDER BY username"),
+            'users'     => $db->fetchAll("SELECT u.id, u.username, u.email, u.reseller_id, u.sweep_enabled AS enabled, r.sweep_enabled AS reseller_enabled FROM users u LEFT JOIN users r ON r.id = u.reseller_id WHERE u.role = 'user' ORDER BY u.username"),
+        ];
+    }
+
     private static function clamEnabled(): bool {
         $v = DB::getInstance()->fetchOne("SELECT value FROM settings WHERE key = 'sweep_clamav'")['value'] ?? '0';
         return $v === '1' && self::clamAvailable();
@@ -51,6 +80,7 @@ class Sweep {
         $db   = DB::getInstance();
         $acct = $db->fetchOne("SELECT id, username, home_dir FROM accounts WHERE id = ?", [$accountId]);
         if (!$acct) throw new RuntimeException('Account not found');
+        if (!self::accountAllowed($accountId)) throw new RuntimeException('Malware scanning is switched off for this account');
         $root = '/home/' . $acct['username'] . '/public_html';
 
         $engine = self::clamEnabled() ? 'patterns+clamav' : 'patterns';
@@ -101,8 +131,10 @@ class Sweep {
             }
 
             if ($engine === 'patterns+clamav') {
-                $cmd = 'timeout 900 ' . (is_executable('/usr/bin/clamscan') ? '/usr/bin/clamscan' : '/usr/local/bin/clamscan')
-                     . ' -r --infected --no-summary --max-filesize=20M ' . escapeshellarg($root) . ' 2>&1';
+                $cmd = self::clamdActive()
+                    ? 'timeout 900 /usr/bin/clamdscan --fdpass --infected --no-summary ' . escapeshellarg($root) . ' 2>&1'
+                    : 'timeout 900 ' . (is_executable('/usr/bin/clamscan') ? '/usr/bin/clamscan' : '/usr/local/bin/clamscan')
+                      . ' -r --infected --no-summary --max-filesize=20M ' . escapeshellarg($root) . ' 2>&1';
                 foreach (explode("\n", (string)shell_exec($cmd)) as $line) {
                     if (preg_match('/^(.+): (.+) FOUND$/', trim($line), $mm)) $add($mm[1], 'clamav:' . $mm[2], 'high', 'ClamAV signature ' . $mm[2]);
                 }
@@ -127,13 +159,13 @@ class Sweep {
         $findings = $db->fetchAll("SELECT id, path, rule, severity, snippet, status, created_at FROM sweep_findings
                                    WHERE account_id = ? AND status IN ('open','quarantined')
                                    ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id LIMIT 300", [$accountId]);
-        return ['run' => $run ?: null, 'findings' => $findings, 'clamav' => self::clamAvailable()];
+        return ['run' => $run ?: null, 'findings' => $findings, 'clamav' => self::clamAvailable(), 'enabled' => self::accountAllowed($accountId)];
     }
 
     /** Last scan and open-finding counts per account the caller may see. */
     public static function overview(?int $resellerId = null): array {
         $db = DB::getInstance();
-        $sql = "SELECT a.id, a.username, a.domain,
+        $sql = "SELECT a.id, a.username, a.domain, u.id AS user_id, u.sweep_enabled AS enabled,
                        (SELECT MAX(started_at) FROM sweep_runs r WHERE r.account_id = a.id AND r.status = 'done') AS last_scan,
                        (SELECT COUNT(*) FROM sweep_findings f WHERE f.account_id = a.id AND f.status = 'open') AS open_findings,
                        (SELECT COUNT(*) FROM sweep_findings f WHERE f.account_id = a.id AND f.status = 'open' AND f.severity = 'high') AS high_findings
