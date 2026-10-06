@@ -622,7 +622,8 @@ ${g ? `
     let action = '';
     if (!d.enabled) {
       action = !nginxOk ? `<div class="alert alert-warning">The web terminal needs the nginx web server. This server uses <strong>${esc(sv.webserver)}</strong>.</div>`
-        : !d.twofa ? `<div class="alert alert-warning">Turn on two-factor authentication for your admin login first (Security &gt; 2FA). The terminal will not run without it.</div>`
+        : !d.twofa ? `<div class="alert alert-warning">Turn on two-factor authentication for your admin login first. The terminal will not run without it.</div>
+           <button class="btn btn-primary" onclick="adminPage('twofa')">Set up 2FA now</button>`
         : `<button class="btn btn-primary" onclick="termEnable()">Enable web terminal</button>
            <div class="form-hint" style="margin-top:.6rem">Installs the ttyd program, starts it, and adds it to the admin panel at <code>/terminal/</code>. Nothing is reachable until you enter an authenticator code.</div>`;
     } else {
